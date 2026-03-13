@@ -8,6 +8,7 @@ from .result_views import (
     build_session_comparison_rows,
     resolve_selected_candidate_key_for_scenario,
 )
+from .risk_views import prepare_risk_views
 from .scenario_runner import run_scan, run_scenario
 from .scenario_session import (
     add_scenario,
@@ -22,8 +23,16 @@ from .scenario_session import (
     update_scenario_bundle,
     update_selected_candidate,
 )
+from .stochastic_runner import MONTE_CARLO_WARNING_THRESHOLD, run_monte_carlo, summarize_monte_carlo
 from .types import (
     LoadedConfigBundle,
+    MetricDistributionSummary,
+    MonteCarloRunRequest,
+    MonteCarloRunResult,
+    MonteCarloSummary,
+    PercentileSummary,
+    RiskMetricSummary,
+    RiskViewBundle,
     ScanRunResult,
     ScenarioRecord,
     ScenarioRunResult,
@@ -39,6 +48,14 @@ from .validation import (
 
 __all__ = [
     "LoadedConfigBundle",
+    "MetricDistributionSummary",
+    "MONTE_CARLO_WARNING_THRESHOLD",
+    "MonteCarloRunRequest",
+    "MonteCarloRunResult",
+    "MonteCarloSummary",
+    "PercentileSummary",
+    "RiskMetricSummary",
+    "RiskViewBundle",
     "ScanRunResult",
     "ScenarioRecord",
     "ScenarioRunResult",
@@ -59,14 +76,17 @@ __all__ = [
     "load_example_config",
     "normalize_battery_catalog_rows",
     "normalize_inverter_catalog_rows",
+    "prepare_risk_views",
     "refresh_bundle_issues",
     "rename_scenario",
     "resolve_selected_candidate_key_for_scenario",
+    "run_monte_carlo",
     "run_scan",
     "run_scenario",
     "run_scenario_scan",
     "set_active_scenario",
     "set_comparison_scenarios",
+    "summarize_monte_carlo",
     "update_scenario_bundle",
     "update_selected_candidate",
     "validate_config",

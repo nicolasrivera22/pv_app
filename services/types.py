@@ -230,3 +230,106 @@ class ScenarioSessionState:
                 return scenario
         return None
 
+
+@dataclass(frozen=True)
+class MonteCarloRunRequest:
+    mode: str = "fixed_candidate"
+    selected_candidate_key: str | None = None
+    seed: int = 0
+    n_simulations: int | None = None
+    return_samples: bool = False
+
+
+@dataclass(frozen=True)
+class PercentileSummary:
+    p5: float | None = None
+    p10: float | None = None
+    p25: float | None = None
+    p50: float | None = None
+    p75: float | None = None
+    p90: float | None = None
+    p95: float | None = None
+
+
+@dataclass(frozen=True)
+class MetricDistributionSummary:
+    n_total: int
+    n_finite: int
+    n_missing: int
+    mean: float | None
+    std: float | None
+    min: float | None
+    max: float | None
+    percentiles: PercentileSummary
+    percentiles_over_finite_values: bool = True
+
+    @property
+    def p5(self) -> float | None:
+        return self.percentiles.p5
+
+    @property
+    def p10(self) -> float | None:
+        return self.percentiles.p10
+
+    @property
+    def p25(self) -> float | None:
+        return self.percentiles.p25
+
+    @property
+    def p50(self) -> float | None:
+        return self.percentiles.p50
+
+    @property
+    def p75(self) -> float | None:
+        return self.percentiles.p75
+
+    @property
+    def p90(self) -> float | None:
+        return self.percentiles.p90
+
+    @property
+    def p95(self) -> float | None:
+        return self.percentiles.p95
+
+
+@dataclass(frozen=True)
+class RiskMetricSummary:
+    probability_negative_npv: float
+    probability_payback_within_horizon: float
+
+
+@dataclass(frozen=True)
+class MonteCarloSummary:
+    npv: MetricDistributionSummary
+    payback_years: MetricDistributionSummary
+    self_consumption_ratio: MetricDistributionSummary
+    self_sufficiency_ratio: MetricDistributionSummary
+    annual_import_kwh: MetricDistributionSummary
+    annual_export_kwh: MetricDistributionSummary
+
+
+@dataclass(frozen=True)
+class RiskViewBundle:
+    histogram_bins: int
+    ecdf_points: int
+    histograms: dict[str, pd.DataFrame]
+    ecdfs: dict[str, pd.DataFrame]
+    percentile_table: pd.DataFrame
+    labels: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MonteCarloRunResult:
+    request: MonteCarloRunRequest
+    seed: int
+    n_simulations: int
+    selected_candidate_key: str
+    baseline_best_candidate_key: str
+    selected_kWp: float
+    selected_battery: str
+    active_uncertainty: dict[str, float]
+    warnings: tuple[str, ...]
+    summary: MonteCarloSummary
+    risk_metrics: RiskMetricSummary
+    views: RiskViewBundle
+    samples: pd.DataFrame | None = None
