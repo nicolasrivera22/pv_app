@@ -175,108 +175,29 @@ DEFAULT_CONFIG = {
 
 
 def ensure_template(path: str):
-    """Crea un Excel de entrada de ejemplo con config, perfiles y catálogos."""
-    with pd.ExcelWriter(path, engine="openpyxl") as w:
-        cfg_df = pd.DataFrame({"key": list(DEFAULT_CONFIG.keys()), "value": list(DEFAULT_CONFIG.values())})
-        cfg_df.to_excel(w, index=False, sheet_name="Config")
+    """Crea un Excel de entrada coherente con el contrato actual del loader."""
+    from services.io_excel import ensure_template as ensure_template_service
 
-        rows = []
-        for dow in range(1, 8):
-            for hour in range(24):
-                res = 0.8 + (0.3 if hour in [7, 8] else 0.0) + (0.7 if hour in [18, 19, 20] else 0.0)
-                ind = 1.0 if (dow <= 5 and (8 <= hour < 18)) else 0.1
-                rows.append({"DOW": dow, "HOUR": hour, "RES": res, "IND": ind, "TOTAL": res + ind})
-        lp = pd.DataFrame(rows)
-        hsp_month = pd.DataFrame({"MONTH": list(range(1, 13)), "HSP_month": [DEFAULT_CONFIG["HSP"] for _ in range(1, 13)]})
-        lp.to_excel(w, index=False, sheet_name="Profiles", startrow=0)
-        hsp_month.to_excel(w, index=False, sheet_name="Profiles", startrow=len(lp) + 3)
-
-        inv = pd.DataFrame(
-            [
-                {"name": "INV-5k", "AC_kW": 5.0, "Vmppt_min": 200, "Vmppt_max": 800, "Vdc_max": 1000, "Imax_mppt": 13, "n_mppt": 2, "price_COP": 5_500_000},
-                {"name": "INV-8k", "AC_kW": 8.0, "Vmppt_min": 250, "Vmppt_max": 850, "Vdc_max": 1000, "Imax_mppt": 18, "n_mppt": 2, "price_COP": 7_800_000},
-                {"name": "INV-10k", "AC_kW": 10.0, "Vmppt_min": 250, "Vmppt_max": 850, "Vdc_max": 1100, "Imax_mppt": 18, "n_mppt": 2, "price_COP": 9_300_000},
-                {"name": "INV-12k", "AC_kW": 12.0, "Vmppt_min": 300, "Vmppt_max": 900, "Vdc_max": 1100, "Imax_mppt": 22, "n_mppt": 2, "price_COP": 10_700_000},
-                {"name": "INV-15k", "AC_kW": 15.0, "Vmppt_min": 350, "Vmppt_max": 1000, "Vdc_max": 1100, "Imax_mppt": 26, "n_mppt": 2, "price_COP": 13_500_000},
-            ]
-        )
-        bat = pd.DataFrame(
-            [
-                {"name": "BAT-0", "nom_kWh": 0.0, "max_kW": 0.0, "price_COP": 0},
-                {"name": "BAT-5", "nom_kWh": 5.0, "max_kW": 3.0, "price_COP": 7_000_000},
-                {"name": "BAT-10", "nom_kWh": 10.0, "max_kW": 5.0, "price_COP": 12_500_000},
-                {"name": "BAT-15", "nom_kWh": 15.0, "max_kW": 7.5, "price_COP": 17_500_000},
-                {"name": "BAT-20", "nom_kWh": 20.0, "max_kW": 10.0, "price_COP": 21_500_000},
-            ]
-        )
-        inv.to_excel(w, index=False, sheet_name="Catalogs", startrow=0)
-        bat.to_excel(w, index=False, sheet_name="Catalogs", startrow=len(inv) + 2)
+    ensure_template_service(path)
 
 
 def load_config_from_excel(path: str):
     """Carga configuración, perfiles y catálogos desde un Excel de entrada."""
-    config_table = read_table_from_excel(path=path, sheet_name="Config", table_name="Config")
-    month_weights_table = read_table_from_excel(path=path, sheet_name="Perfiles", table_name="Month_Demand_Profile")
-    demand_table_dow = read_table_from_excel(path=path, sheet_name="Perfiles", table_name="Demand_Profile")
-    demand_generic_table_perc = read_table_from_excel(path=path, sheet_name="Perfiles", table_name="Demand_Profile_Weights")
-    demand_all_week_table_total = read_table_from_excel(path=path, sheet_name="Perfiles", table_name="Demand_Profile_General")
-    cop_kwp_table = read_table_from_excel(path=path, sheet_name="Perfiles", table_name="Precios_kWp_relativos")
-    cop_kwp_table_others = read_table_from_excel(path=path, sheet_name="Perfiles", table_name="Precios_kWp_relativos_Otros")
-    battery_catalog_table = read_table_from_excel(path=path, sheet_name="Catalogos", table_name="Battery_Catalog")
-    inversor_catalog_table = read_table_from_excel(path=path, sheet_name="Catalogos", table_name="Inversor_Catalog")
+    from services.io_excel import load_config_from_excel as load_config_service
 
-    cfg = DEFAULT_CONFIG.copy()
-    for _, r in config_table.iterrows():
-        k = str(r["Item"]).strip()
-        v = r["Valor"]
-        if k in cfg.keys():
-            if isinstance(v, str):
-                vv = v.strip().lower()
-                if vv in ("true", "si", "sí", "yes", "1", 1):
-                    v = True
-                elif vv in ("false", "no", "0", 0):
-                    v = False
-            cfg[k] = v
-
-    season_df = month_weights_table
-    inv_df, bat_df = inversor_catalog_table, battery_catalog_table
-
-    if cfg["use_excel_profile"].lower() == "perfil hora dia de semana":
-        demand_table_dow.rename(columns={"TOTAL_kWh": "TOTAL"}, inplace=True)
-        dow24, day_w = build_7x24_from_excel(demand_table_dow)
-    elif cfg["use_excel_profile"].lower() == "perfil horario relativo":
-        demand_generic_table_perc.rename(columns={"TOTAL_kWh": "TOTAL"}, inplace=True)
-        dow = pd.DataFrame({"DOW": range(1, 8)})
-        demand_generic_table_perc = (
-            demand_generic_table_perc.merge(dow, how="cross").sort_values(by=["DOW", "HOUR"]).reset_index(drop=True)
-        )
-        dow24, day_w = build_7x24_from_excel(demand_generic_table_perc[["DOW", "HOUR", "TOTAL"]], total=True)
-    else:
-        demand_all_week_table_total.rename(columns={"TOTAL_kWh": "TOTAL"}, inplace=True)
-        dow = pd.DataFrame({"DOW": range(1, 8)})
-        demand_all_week_table_total = (
-            demand_all_week_table_total.merge(dow, how="cross").sort_values(by=["DOW", "HOUR"]).reset_index(drop=True)
-        )
-        dow24, day_w = build_7x24_from_excel(demand_all_week_table_total[["DOW", "HOUR", "TOTAL"]], total=True)
-
-    s24 = solar_profile_24(shift=0, exponent=1.0)
-    hsp_month = np.ones(12, dtype=float) * DEFAULT_CONFIG["HSP"]
-    demand_month_factor = np.ones(12, dtype=float)
-    if not {"MONTH", "HSP_month", "Demand_month"}.issubset(set(season_df.columns)):
-        raise ValueError("Seasonality table must have columns MONTH, HSP_month and Demand_month")
-    for _, r in season_df.iterrows():
-        m = int(r["MONTH"])
-        if 1 <= m <= 12:
-            hsp_month[m - 1] = float(r["HSP_month"])
-            demand_month_factor[m - 1] = float(r["Demand_month"])
-    cfg["HSP"] = hsp_month.mean()
-
-    engine_cfg = {k: (float(v) if isinstance(DEFAULT_CONFIG[k], float) else v) for k, v in cfg.items()}
-    engine_cfg["years"] = int(cfg["years"])
-    engine_cfg["modules_span_each_side"] = int(cfg["modules_span_each_side"])
-    engine_cfg["limit_peak_year"] = int(cfg["limit_peak_year"])
-    engine_cfg["limit_peak_month_fixed"] = int(cfg["limit_peak_month_fixed"])
-    return engine_cfg, s24, hsp_month, inv_df, bat_df, dow24, day_w, demand_month_factor, cop_kwp_table, cop_kwp_table_others
+    bundle = load_config_service(path)
+    return (
+        bundle.config,
+        bundle.solar_profile,
+        bundle.hsp_month,
+        bundle.inverter_catalog,
+        bundle.battery_catalog,
+        bundle.demand_profile_7x24,
+        bundle.day_weights,
+        bundle.demand_month_factor,
+        bundle.cop_kwp_table,
+        bundle.cop_kwp_table_others,
+    )
 
 
 def _make_battery_obj(battery_dict):
@@ -467,6 +388,15 @@ def simulate_monthly_series_dow(
         years=years,
         price_per_kwp_cop=price_per_kwp_cop,
         rng=rng,
+        stochastic=any(
+            float(value or 0) > 0
+            for value in (
+                PR_month_std,
+                buy_month_offset_std,
+                sell_month_offset_std,
+                demand_month_offset_std,
+            )
+        ),
     )
     return sim_res.monthly, sim_res.summary
 

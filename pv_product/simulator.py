@@ -90,9 +90,10 @@ class Simulator:
         years: int,
         price_per_kwp_cop: float,
         rng: Optional[random.Random] = None,
+        stochastic: bool = False,
     ) -> SimResult:
         """Simula mes a mes durante `years` usando 7x24 + estacionalidad."""
-        if rng is None:
+        if rng is None and stochastic:
             rng = random.Random(42)
 
         island_mode = not dispatch_cfg.allow_import
@@ -140,19 +141,19 @@ class Simulator:
                     buy_mnth *= (1 + g_buy_m)
                     sell_mnth *= (1 + g_sell_m)
 
-                if cfg.get("mc_buy_std", 0) > 0:
+                if stochastic and cfg.get("mc_buy_std", 0) > 0:
                     buy_mnth *= 1 + rng.normalvariate(0, cfg.get("mc_buy_std", 0))
-                if cfg.get("mc_sell_std", 0) > 0:
+                if stochastic and cfg.get("mc_sell_std", 0) > 0:
                     sell_mnth *= 1 + rng.normalvariate(0, cfg.get("mc_sell_std", 0))
 
-                pr_noise = cfg.get("mc_PR_std", 0.0)
+                pr_noise = cfg.get("mc_PR_std", 0.0) if stochastic else 0.0
                 PR_mon = (
                     system.pr
                     * pr_deg_y
                     * (1 + (rng.normalvariate(0, pr_noise) if pr_noise > 0 else 0))
                 )
                 E_month = float(self.demand_month_factor[mi]) * float(cfg["E_month_kWh"])
-                if cfg.get("mc_demand_std", 0) > 0:
+                if stochastic and cfg.get("mc_demand_std", 0) > 0:
                     E_month *= 1 + rng.normalvariate(0, cfg.get("mc_demand_std", 0))
                 E_week = E_month / self.weeks_per_month
 

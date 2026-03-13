@@ -162,6 +162,7 @@ class Optimizer:
                     battery=battery,
                     years=cfg["years"],
                     price_per_kwp_cop=price_per_kwp_cop,
+                    stochastic=False,
                 )
 
                 npv = sim_res.summary["cum_disc_final"]
