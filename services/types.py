@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -105,6 +105,7 @@ class ScanRunResult:
                 "scan_order": detail["scan_order"],
                 "candidate_key": detail["candidate_key"],
                 "self_consumption_ratio": detail.get("self_consumption_ratio", 0.0),
+                "self_sufficiency_ratio": detail.get("self_sufficiency_ratio", 0.0),
                 "monthly": _frame_to_payload(detail["monthly"]),
             }
         return {
@@ -131,6 +132,7 @@ class ScanRunResult:
                 "scan_order": detail["scan_order"],
                 "candidate_key": detail["candidate_key"],
                 "self_consumption_ratio": detail.get("self_consumption_ratio", 0.0),
+                "self_sufficiency_ratio": detail.get("self_sufficiency_ratio", 0.0),
                 "monthly": _frame_from_payload(detail["monthly"]),
             }
         return cls(
@@ -152,3 +154,79 @@ class ScenarioRunResult:
     monthly_balance: pd.DataFrame
     npv_curve: pd.DataFrame
     issues: tuple[ValidationIssue, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class ScenarioRecord:
+    scenario_id: str
+    name: str
+    source_name: str
+    config_bundle: LoadedConfigBundle
+    scan_result: ScanRunResult | None = None
+    selected_candidate_key: str | None = None
+    dirty: bool = True
+    last_run_at: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "scenario_id": self.scenario_id,
+            "name": self.name,
+            "source_name": self.source_name,
+            "config_bundle": self.config_bundle.to_payload(),
+            "scan_result": None if self.scan_result is None else self.scan_result.to_payload(),
+            "selected_candidate_key": self.selected_candidate_key,
+            "dirty": self.dirty,
+            "last_run_at": self.last_run_at,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "ScenarioRecord":
+        scan_payload = payload.get("scan_result")
+        return cls(
+            scenario_id=payload["scenario_id"],
+            name=payload["name"],
+            source_name=payload.get("source_name", "config.xlsx"),
+            config_bundle=LoadedConfigBundle.from_payload(payload["config_bundle"]),
+            scan_result=None if scan_payload is None else ScanRunResult.from_payload(scan_payload),
+            selected_candidate_key=payload.get("selected_candidate_key"),
+            dirty=bool(payload.get("dirty", True)),
+            last_run_at=payload.get("last_run_at"),
+        )
+
+
+@dataclass(frozen=True)
+class ScenarioSessionState:
+    scenarios: tuple[ScenarioRecord, ...] = ()
+    active_scenario_id: str | None = None
+    comparison_scenario_ids: tuple[str, ...] = ()
+
+    @classmethod
+    def empty(cls) -> "ScenarioSessionState":
+        return cls()
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "scenarios": [scenario.to_payload() for scenario in self.scenarios],
+            "active_scenario_id": self.active_scenario_id,
+            "comparison_scenario_ids": list(self.comparison_scenario_ids),
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any] | None) -> "ScenarioSessionState":
+        if not payload:
+            return cls.empty()
+        return cls(
+            scenarios=tuple(ScenarioRecord.from_payload(item) for item in payload.get("scenarios", [])),
+            active_scenario_id=payload.get("active_scenario_id"),
+            comparison_scenario_ids=tuple(payload.get("comparison_scenario_ids", [])),
+        )
+
+    def get_scenario(self, scenario_id: str | None = None) -> ScenarioRecord | None:
+        target_id = scenario_id or self.active_scenario_id
+        if target_id is None:
+            return None
+        for scenario in self.scenarios:
+            if scenario.scenario_id == target_id:
+                return scenario
+        return None
+

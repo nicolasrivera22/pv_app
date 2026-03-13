@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
+import pandas as pd
 
 from pv_product.hardware import generate_kwp_candidates
 
@@ -13,10 +16,91 @@ VALID_PEAK_MONTH_MODES = {"max", "fixed"}
 VALID_PEAK_BASES = {"weighted_mean", "max", "weekday", "p95"}
 VALID_PROFILE_MODES = {"perfil horario relativo", "perfil hora dia de semana", "perfil general"}
 
+INVERTER_REQUIRED_COLUMNS = ["name", "AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max", "Imax_mppt", "n_mppt", "price_COP"]
+BATTERY_REQUIRED_COLUMNS = ["name", "nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"]
+INVERTER_NUMERIC_COLUMNS = ["AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max", "Imax_mppt", "n_mppt", "price_COP"]
+BATTERY_NUMERIC_COLUMNS = ["nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"]
 
-def _price_table_covers_candidate(table, k_wp: float) -> bool:
+
+def _price_table_covers_candidate(table: pd.DataFrame, k_wp: float) -> bool:
     mask = (table["MIN"] < k_wp) & (table["MAX"] >= k_wp)
     return bool(mask.any())
+
+
+def normalize_catalog_rows(
+    rows: list[dict] | None,
+    required_columns: list[str],
+    numeric_columns: list[str],
+    field_prefix: str,
+) -> tuple[pd.DataFrame, list[ValidationIssue]]:
+    frame = pd.DataFrame(rows or [])
+    issues: list[ValidationIssue] = []
+
+    for column in required_columns:
+        if column not in frame.columns:
+            frame[column] = np.nan
+
+    frame = frame[required_columns].copy()
+    frame = frame.replace(r"^\s*$", np.nan, regex=True)
+    frame = frame.dropna(how="all").reset_index(drop=True)
+
+    if frame.empty:
+        return frame, issues
+
+    for index, value in frame.get("name", pd.Series(dtype=object)).items():
+        if pd.isna(value) or not str(value).strip():
+            issues.append(
+                ValidationIssue("error", field_prefix, f"Fila {index + 1}: el campo 'name' es obligatorio.")
+            )
+        else:
+            frame.at[index, "name"] = str(value).strip()
+
+    duplicated = frame["name"].dropna().astype(str).duplicated(keep=False)
+    if duplicated.any():
+        duplicate_names = sorted(frame.loc[duplicated, "name"].astype(str).unique().tolist())
+        issues.append(
+            ValidationIssue(
+                "error",
+                field_prefix,
+                f"Los nombres deben ser únicos. Duplicados: {', '.join(duplicate_names)}.",
+            )
+        )
+
+    for column in numeric_columns:
+        series = pd.to_numeric(frame[column], errors="coerce")
+        invalid = frame[column].notna() & series.isna()
+        for index in frame.index[invalid]:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    field_prefix,
+                    f"Fila {index + 1}: '{column}' debe ser numérico.",
+                )
+            )
+        frame[column] = series
+
+    return frame, issues
+
+
+def normalize_inverter_catalog_rows(rows: list[dict] | None) -> tuple[pd.DataFrame, list[ValidationIssue]]:
+    return normalize_catalog_rows(rows, INVERTER_REQUIRED_COLUMNS, INVERTER_NUMERIC_COLUMNS, "Inversor_Catalog")
+
+
+def normalize_battery_catalog_rows(rows: list[dict] | None) -> tuple[pd.DataFrame, list[ValidationIssue]]:
+    return normalize_catalog_rows(rows, BATTERY_REQUIRED_COLUMNS, BATTERY_NUMERIC_COLUMNS, "Battery_Catalog")
+
+
+def refresh_bundle_issues(
+    bundle: LoadedConfigBundle,
+    extra_issues: list[ValidationIssue] | tuple[ValidationIssue, ...] = (),
+) -> LoadedConfigBundle:
+    issue_map: dict[tuple[str, str, str], ValidationIssue] = {}
+    for issue in [*bundle.issues, *extra_issues]:
+        issue_map[(issue.level, issue.field, issue.message)] = issue
+    base_bundle = replace(bundle, issues=())
+    for issue in validate_config(base_bundle):
+        issue_map[(issue.level, issue.field, issue.message)] = issue
+    return replace(base_bundle, issues=tuple(issue_map.values()))
 
 
 def validate_config(config_bundle: LoadedConfigBundle) -> list[ValidationIssue]:
@@ -65,7 +149,7 @@ def validate_config(config_bundle: LoadedConfigBundle) -> list[ValidationIssue]:
         issues.append(ValidationIssue("error", "Battery_Catalog", "Se solicitó batería, pero el catálogo está vacío."))
 
     if cfg.get("include_battery") and (not cfg.get("optimize_battery")) and str(cfg.get("battery_name", "")).strip():
-        names = set(config_bundle.battery_catalog.get("name", []).astype(str).tolist())
+        names = set(config_bundle.battery_catalog.get("name", pd.Series(dtype=object)).astype(str).tolist())
         if str(cfg["battery_name"]) not in names:
             issues.append(ValidationIssue("error", "battery_name", "battery_name no existe en el catálogo de baterías."))
 

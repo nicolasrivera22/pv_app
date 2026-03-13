@@ -1,30 +1,29 @@
-# PV Sizing Dash MVP
+# PV Deterministic Workbench
 
-This repository now has a first migration step from the original batch-style PV sizing workflow to a deterministic Dash application, plus a phase 1.1 hardening pass focused on trust, validation, and regression coverage.
+This repository now provides a deterministic Dash workbench for PV sizing and financial analysis. Phase 1 established the service layer and single-scenario MVP, phase 1.1 hardened validation and regression behavior, and phase 2A turns the app into a multi-scenario deterministic analysis tool.
 
-## What is included in this step
+## What phase 2A adds
 
-- A deterministic service layer for:
-  - loading the existing Excel workbook
-  - validating normalized configuration
-  - running the deterministic scan without Monte Carlo perturbation
-  - shaping results for UI consumption
-- A phase 1.1 hardening pass that:
-  - removed arbitrary prime-module candidate exclusion
-  - hardened workbook contract validation with friendlier structural errors
-  - made CapEx inclusion semantics explicit and test-backed
-  - added deterministic repeatability and legacy-regression tests
-  - tightened candidate-table/detail selection consistency
-- A single-page Dash app with:
-  - Excel upload
-  - bundled example loading
-  - validation feedback
-  - KPI summary cards
-  - Plotly NPV vs kWp chart
-  - Plotly monthly energy balance chart
-  - Plotly cumulative cash flow chart
-  - candidate results table with row selection
-- A simplified legacy `main.py` entrypoint that still runs the deterministic scan from `PV_inputs.xlsx`
+- Session-scoped scenario management:
+  - load scenarios from Excel uploads
+  - load the bundled example
+  - duplicate, rename, delete, and switch active scenarios
+  - keep multiple deterministic scenarios available in one browser session
+- In-app deterministic editing:
+  - editable assumptions panel for key design and pricing controls
+  - editable inverter and battery catalogs with row add/delete support
+  - friendly validation messages carried through the service layer
+- Better deterministic exploration:
+  - selectable feasible-candidate table with filtering and sorting
+  - richer Plotly NPV hover data and linked candidate selection
+  - KPI cards, monthly energy balance, and cumulative cash flow for the selected candidate
+- Scenario comparison:
+  - compare completed deterministic scenarios side by side
+  - grouped KPI chart across scenarios
+  - overlaid NPV-vs-kWp curves
+- Explicit deterministic export:
+  - scenario workbook export from the workbench
+  - comparison workbook export from the comparison page
 
 ## Run the app
 
@@ -35,7 +34,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Then open the local Dash URL printed in the terminal.
+Open the local Dash URL shown in the terminal.
 
 ## Run the legacy CLI path
 
@@ -43,7 +42,7 @@ Then open the local Dash URL printed in the terminal.
 python main.py
 ```
 
-This now loads `PV_inputs.xlsx`, validates it, runs the deterministic scan, and prints a concise summary.
+This still loads `PV_inputs.xlsx`, validates it, runs the deterministic scan, and prints a concise summary.
 
 ## Tests
 
@@ -51,19 +50,27 @@ This now loads `PV_inputs.xlsx`, validates it, runs the deterministic scan, and 
 pytest
 ```
 
+## App structure
+
+- `app.py`: Dash shell, navigation, shared stores
+- `pages/workbench.py`: deterministic scenario load/edit/run/explore/export flow
+- `pages/compare.py`: deterministic scenario comparison flow
+- `components/`: reusable layout blocks for scenarios, assumptions, catalogs, validation, KPIs, and candidate exploration
+- `services/`: Excel I/O, validation, deterministic runner, scenario-session state, exports, and result shaping
+
 ## Notes on the Excel contract
 
-- The bundled `PV_inputs.xlsx` is treated as the source of truth for this migration step.
+- The bundled `PV_inputs.xlsx` remains the authoritative workbook contract for the deterministic app.
 - The loader supports the current Spanish workbook names and table names:
   - `Config`
   - `Perfiles`
   - `Catalogos`
-- The loader also normalizes known config mismatches such as:
+- The loader normalizes known mismatches such as:
   - `coupling` -> `bat_coupling`
   - `Sí` / `No` boolean values
   - profile mode strings like `Perfil Horario Relativo`
-- Missing sheets, tables, or required columns now raise workbook-contract errors with actionable messages.
-- Invalid booleans and enum-like config values are now surfaced as validation errors instead of silently defaulting.
+- Missing sheets, tables, or required columns raise workbook-contract errors with actionable messages.
+- Invalid booleans and enum-like config values surface as validation errors instead of silently defaulting.
 
 ## Costing semantics
 
@@ -74,22 +81,16 @@ pytest
 - `include_hw_in_price=True` adds inverter and selected battery prices on top of the base project price.
 - `include_hw_in_price=False` assumes those hardware costs are already embedded in the base project price.
 
-## Phase 1.1 notes
+## What remains deferred
 
-- Deterministic repeatability is now tested directly against the shipped workbook.
-- Candidate ordering and selected-candidate resolution are now deterministic and aligned between the service layer and the Dash table.
-- A legacy regression check now compares the current deterministic service path against the preserved batch artifacts in `Resultados`.
-- Because prime module counts are no longer excluded, the current deterministic optimum can legitimately move relative to the preserved phase-1 batch artifacts even when the underlying candidate economics remain close.
+- Monte Carlo UI and stochastic scenario workflows
+- background jobs and multi-user persistence
+- scenario rejection-reason tracing for infeasible candidates
+- broader economics-model redesign
+- full removal of old matplotlib cross-check helpers
 
 ## Known technical debt
 
-- Peak-ratio logic remains intentionally legacy-compatible in phase 1.1. In particular, representative-week aggregation and the current demand-seasonality interaction are still simplified and were not redesigned in this pass because changing them risks altering feasibility and the preserved phase-1 regression baseline.
-- The preserved `Resultados` artifacts were generated before deterministic and stochastic behavior were fully separated, so regression tolerances on NPV and payback remain wider than a pure deterministic baseline should require.
-- Old matplotlib export helpers still exist for cross-checking and historical continuity, but the Dash UI does not depend on them.
-
-## What remains for later
-
-- Monte Carlo UI and stochastic scenario workflows
-- report/export generation
-- scenario comparison workflows
-- cleanup/removal of old matplotlib export helpers once the new app fully replaces them
+- Peak-ratio logic is still intentionally legacy-compatible. Representative-week aggregation and the current demand-seasonality interaction were not redesigned in this pass because changing them would alter the deterministic regression baseline.
+- The browser session store now holds full deterministic scenario bundles and scan results. That is acceptable for phase 2A, but phase 2B may need more deliberate client-state sizing if scenario counts grow.
+- The preserved `Resultados` artifacts still serve as the legacy regression oracle for the shipped workbook.

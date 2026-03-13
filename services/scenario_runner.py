@@ -12,6 +12,7 @@ from .result_views import (
     build_monthly_balance,
     build_npv_curve,
     calculate_self_consumption_ratio,
+    calculate_self_sufficiency_ratio,
     candidate_key_for,
 )
 from .types import LoadedConfigBundle, ScanRunResult, ScenarioRunResult
@@ -70,6 +71,7 @@ def run_scan(config_bundle: LoadedConfigBundle) -> ScanRunResult:
             "best_battery": False,
             "monthly": monthly,
             "self_consumption_ratio": calculate_self_consumption_ratio(monthly),
+            "self_sufficiency_ratio": calculate_self_sufficiency_ratio(monthly),
         }
 
     candidate_table = build_candidate_table(detail_map)
