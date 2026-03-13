@@ -15,6 +15,7 @@ from .result_views import (
     candidate_key_for,
 )
 from .types import LoadedConfigBundle, ScanRunResult, ScenarioRunResult
+from .validation import validate_config
 
 
 def _deterministic_config(config: dict) -> dict:
@@ -27,6 +28,15 @@ def _deterministic_config(config: dict) -> dict:
 
 
 def run_scan(config_bundle: LoadedConfigBundle) -> ScanRunResult:
+    combined_issues = {}
+    for issue in [*config_bundle.issues, *validate_config(config_bundle)]:
+        combined_issues[(issue.level, issue.field, issue.message)] = issue
+    issues = tuple(combined_issues.values())
+    error_issues = [issue for issue in issues if issue.level == "error"]
+    if error_issues:
+        joined = "; ".join(f"{issue.field}: {issue.message}" for issue in error_issues)
+        raise ValueError(f"La configuración no es ejecutable: {joined}")
+
     cfg = _deterministic_config(config_bundle.config)
     optimizer = Optimizer(
         cfg=cfg,
@@ -41,13 +51,14 @@ def run_scan(config_bundle: LoadedConfigBundle) -> ScanRunResult:
         cop_kwp_table=config_bundle.cop_kwp_table,
         cop_kwp_table_others=config_bundle.cop_kwp_table_others,
     )
-    best, _, seed_kwp, detail_rows = optimizer.run()
+    _, _, seed_kwp, detail_rows = optimizer.run()
     detail_map: dict[str, dict] = {}
-    for detail in detail_rows:
+    for scan_order, detail in enumerate(detail_rows):
         battery_name = battery_name_from_candidate(detail["battery"])
         candidate_key = candidate_key_for(detail["kWp"], battery_name)
         monthly = detail["df"].copy()
         detail_map[candidate_key] = {
+            "scan_order": scan_order,
             "candidate_key": candidate_key,
             "kWp": float(detail["kWp"]),
             "battery_name": battery_name,
@@ -56,22 +67,30 @@ def run_scan(config_bundle: LoadedConfigBundle) -> ScanRunResult:
             "summary": deepcopy(detail["summary"]),
             "value": float(detail["value"]),
             "peak_ratio": float(detail["peak_ratio"]),
-            "best_battery": bool(detail["best_battery"]),
+            "best_battery": False,
             "monthly": monthly,
             "self_consumption_ratio": calculate_self_consumption_ratio(monthly),
         }
 
     candidate_table = build_candidate_table(detail_map)
-    if candidate_table.empty or best is None:
+    if candidate_table.empty:
         raise ValueError("No se encontraron candidatos viables para el escenario determinístico.")
 
-    best_candidate_key = candidate_key_for(best["kWp"], battery_name_from_candidate(best["battery"]))
+    best_for_kwp = set(candidate_table.loc[candidate_table["best_battery_for_kwp"], "candidate_key"])
+    for candidate_key, detail in detail_map.items():
+        detail["best_battery"] = candidate_key in best_for_kwp
+
+    best_candidate_key = candidate_table.sort_values(
+        by=["NPV_COP", "scan_order"],
+        ascending=[False, True],
+        kind="mergesort",
+    ).iloc[0]["candidate_key"]
     return ScanRunResult(
         candidates=candidate_table,
         best_candidate_key=best_candidate_key,
         candidate_details=detail_map,
         seed_kwp=seed_kwp,
-        issues=config_bundle.issues,
+        issues=issues,
     )
 
 

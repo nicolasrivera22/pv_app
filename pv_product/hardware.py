@@ -3,7 +3,6 @@ from math import ceil, floor
 from typing import Dict, List, Tuple
 
 import numpy as np
-from sympy import isprime
 
 
 def safe_div(a, b, default=0.0):
@@ -83,7 +82,7 @@ def compute_kwp_seed(cfg) -> float:
 
 
 def generate_kwp_candidates(cfg) -> Tuple[List[float], float]:
-    """Genera lista de candidatos kWp (en pasos de módulo) alrededor de la semilla."""
+    """Genera lista de candidatos kWp en pasos de módulo alrededor de la semilla."""
     P_mod_W = cfg["P_mod_W"]
     seed = compute_kwp_seed(cfg)
     n_seed = max(1, int(round(seed * 1000.0 / P_mod_W)))
@@ -96,9 +95,7 @@ def generate_kwp_candidates(cfg) -> Tuple[List[float], float]:
         n_min = max(n_min, int(math.ceil(cfg["kWp_min"] * 1000.0 / P_mod_W)))
         n_max = min(n_max, int(math.floor(cfg["kWp_max"] * 1000.0 / P_mod_W)))
 
-    candidates = [
-        n * P_mod_W / 1000.0 for n in range(n_min, n_max + 1) if not (isprime(n))
-    ]
+    candidates = [n * P_mod_W / 1000.0 for n in range(n_min, n_max + 1)]
     return candidates, seed
 
 

@@ -16,6 +16,38 @@ def _ann_to_month_rate(r_annual: float) -> float:
     return (1.0 + r_annual) ** (1.0 / 12.0) - 1.0
 
 
+def calculate_capex_client(
+    cfg: dict,
+    kwp: float,
+    inv_sel: dict,
+    battery_sel: Optional[dict],
+    price_per_kwp_cop: Optional[float],
+) -> float:
+    """
+    Calcula el CapEx del cliente.
+
+    Semántica actual:
+      - `pricing_mode="variable"` usa el precio por kWp de las tablas.
+      - `pricing_mode="total"` usa `price_total_COP`.
+      - `include_var_others=True` debe venir reflejado en `price_per_kwp_cop`.
+      - `price_others_total` siempre se suma.
+      - `include_hw_in_price=True` agrega inversor y batería encima del precio base.
+      - `include_hw_in_price=False` asume que el precio base ya incluye esos HW.
+    """
+    if (str(cfg["pricing_mode"]).lower() == "variable") and (price_per_kwp_cop is not None):
+        capex_client = float(price_per_kwp_cop) * float(kwp)
+    else:
+        capex_client = float(cfg["price_total_COP"])
+
+    if cfg["include_hw_in_price"]:
+        capex_client += float(inv_sel["inverter"].get("price_COP", 0.0))
+        if (battery_sel is not None) and (float(battery_sel.get("nom_kWh", 0) or 0) > 0):
+            capex_client += float(battery_sel.get("price_COP", 0.0))
+
+    capex_client += float(cfg["price_others_total"])
+    return capex_client
+
+
 class Simulator:
     """
     Orquestador liviano: itera días/semanas/meses usando el motor de despacho puro.
@@ -104,21 +136,13 @@ class Simulator:
         r_m = _ann_to_month_rate(cfg["discount_rate"])
         deg_rate = cfg.get("deg_rate", 0.0)
 
-        # CapEx: siempre suma los HW elegidos
-        if (str(cfg["pricing_mode"]).lower() == "variable") and (
-            price_per_kwp_cop is not None
-        ):
-            capex_client = float(price_per_kwp_cop) * float(system.kwp)
-        else:
-            capex_client = float(cfg["price_total_COP"])
-
-        if cfg["include_hw_in_price"]:
-            capex_client += float(inv_sel["inverter"].get("price_COP", 0.0))
-            if (battery_sel is not None) and (
-                float(battery_sel.get("nom_kWh", 0) or 0) > 0
-            ):
-                capex_client += float(battery_sel.get("price_COP", 0.0))
-        capex_client += float(cfg["price_others_total"])
+        capex_client = calculate_capex_client(
+            cfg=cfg,
+            kwp=system.kwp,
+            inv_sel=inv_sel,
+            battery_sel=battery_sel,
+            price_per_kwp_cop=price_per_kwp_cop,
+        )
 
         cum_disc = -capex_client
         payback_month = None

@@ -2,7 +2,21 @@ from __future__ import annotations
 
 import numpy as np
 
+from pv_product.hardware import generate_kwp_candidates
+
 from .types import LoadedConfigBundle, ValidationIssue
+
+VALID_PRICING_MODES = {"variable", "total"}
+VALID_SEED_MODES = {"auto", "manual"}
+VALID_COUPLINGS = {"ac", "dc"}
+VALID_PEAK_MONTH_MODES = {"max", "fixed"}
+VALID_PEAK_BASES = {"weighted_mean", "max", "weekday", "p95"}
+VALID_PROFILE_MODES = {"perfil horario relativo", "perfil hora dia de semana", "perfil general"}
+
+
+def _price_table_covers_candidate(table, k_wp: float) -> bool:
+    mask = (table["MIN"] < k_wp) & (table["MAX"] >= k_wp)
+    return bool(mask.any())
 
 
 def validate_config(config_bundle: LoadedConfigBundle) -> list[ValidationIssue]:
@@ -14,8 +28,17 @@ def validate_config(config_bundle: LoadedConfigBundle) -> list[ValidationIssue]:
         if float(cfg.get(field, 0) or 0) <= 0:
             issues.append(ValidationIssue("error", field, f"El valor de '{field}' debe ser mayor que cero."))
 
+    if int(cfg.get("modules_span_each_side", 0) or 0) < 0:
+        issues.append(ValidationIssue("error", "modules_span_each_side", "modules_span_each_side no puede ser negativo."))
+
+    if not (1 <= int(cfg.get("limit_peak_month_fixed", 1) or 1) <= 12):
+        issues.append(ValidationIssue("error", "limit_peak_month_fixed", "limit_peak_month_fixed debe estar entre 1 y 12."))
+
     if float(cfg.get("ILR_min", 0)) > float(cfg.get("ILR_max", 0)):
         issues.append(ValidationIssue("error", "ILR_min", "ILR_min no puede ser mayor que ILR_max."))
+
+    if float(cfg.get("kWp_min", 0)) > float(cfg.get("kWp_max", 0)):
+        issues.append(ValidationIssue("error", "kWp_min", "kWp_min no puede ser mayor que kWp_max."))
 
     if float(cfg.get("bat_eta_rt", 0)) <= 0 or float(cfg.get("bat_eta_rt", 0)) > 1.0:
         issues.append(ValidationIssue("error", "bat_eta_rt", "La eficiencia de batería debe estar entre 0 y 1."))
@@ -23,10 +46,28 @@ def validate_config(config_bundle: LoadedConfigBundle) -> list[ValidationIssue]:
     if float(cfg.get("bat_DoD", 0)) <= 0 or float(cfg.get("bat_DoD", 0)) > 1.0:
         issues.append(ValidationIssue("error", "bat_DoD", "La profundidad de descarga debe estar entre 0 y 1."))
 
+    if cfg.get("pricing_mode") not in VALID_PRICING_MODES:
+        issues.append(ValidationIssue("error", "pricing_mode", "pricing_mode debe ser 'variable' o 'total'."))
+    if cfg.get("kWp_seed_mode") not in VALID_SEED_MODES:
+        issues.append(ValidationIssue("error", "kWp_seed_mode", "kWp_seed_mode debe ser 'auto' o 'manual'."))
+    if cfg.get("bat_coupling") not in VALID_COUPLINGS:
+        issues.append(ValidationIssue("error", "bat_coupling", "bat_coupling debe ser 'ac' o 'dc'."))
+    if cfg.get("limit_peak_month_mode") not in VALID_PEAK_MONTH_MODES:
+        issues.append(ValidationIssue("error", "limit_peak_month_mode", "limit_peak_month_mode debe ser 'max' o 'fixed'."))
+    if cfg.get("limit_peak_basis") not in VALID_PEAK_BASES:
+        issues.append(ValidationIssue("error", "limit_peak_basis", "limit_peak_basis debe ser weighted_mean, max, weekday o p95."))
+    if cfg.get("use_excel_profile") not in VALID_PROFILE_MODES:
+        issues.append(ValidationIssue("error", "use_excel_profile", "use_excel_profile debe ser un modo de perfil soportado."))
+
     if config_bundle.inverter_catalog.empty:
         issues.append(ValidationIssue("error", "Inversor_Catalog", "El catálogo de inversores está vacío."))
     if cfg.get("include_battery") and config_bundle.battery_catalog.empty:
-        issues.append(ValidationIssue("warning", "Battery_Catalog", "Se solicitó batería, pero el catálogo está vacío."))
+        issues.append(ValidationIssue("error", "Battery_Catalog", "Se solicitó batería, pero el catálogo está vacío."))
+
+    if cfg.get("include_battery") and (not cfg.get("optimize_battery")) and str(cfg.get("battery_name", "")).strip():
+        names = set(config_bundle.battery_catalog.get("name", []).astype(str).tolist())
+        if str(cfg["battery_name"]) not in names:
+            issues.append(ValidationIssue("error", "battery_name", "battery_name no existe en el catálogo de baterías."))
 
     if config_bundle.demand_profile_7x24.shape != (7, 24):
         issues.append(ValidationIssue("error", "Demand_Profile", "El perfil 7x24 debe tener forma (7, 24)."))
@@ -50,7 +91,34 @@ def validate_config(config_bundle: LoadedConfigBundle) -> list[ValidationIssue]:
                 )
             )
 
-    if cfg.get("pricing_mode") not in {"variable", "total"}:
-        issues.append(ValidationIssue("error", "pricing_mode", "pricing_mode debe ser 'variable' o 'total'."))
+    fatal_fields = {issue.field for issue in issues if issue.level == "error"}
+    if fatal_fields.isdisjoint({"kWp_min", "kWp_max", "modules_span_each_side", "P_mod_W", "E_month_kWh", "PR", "HSP"}):
+        try:
+            candidates, _ = generate_kwp_candidates(cfg)
+        except Exception as exc:
+            issues.append(ValidationIssue("error", "scan_range", f"No se pudo generar el barrido de candidatos: {exc}"))
+        else:
+            if not candidates:
+                issues.append(ValidationIssue("error", "scan_range", "La configuración actual no genera ningún candidato de kWp."))
+            else:
+                for k_wp in candidates:
+                    if not _price_table_covers_candidate(config_bundle.cop_kwp_table, k_wp):
+                        issues.append(
+                            ValidationIssue(
+                                "error",
+                                "Precios_kWp_relativos",
+                                f"No hay banda de precio base para {k_wp:.3f} kWp.",
+                            )
+                        )
+                        break
+                    if cfg.get("include_var_others") and not _price_table_covers_candidate(config_bundle.cop_kwp_table_others, k_wp):
+                        issues.append(
+                            ValidationIssue(
+                                "error",
+                                "Precios_kWp_relativos_Otros",
+                                f"No hay banda de precio variable adicional para {k_wp:.3f} kWp.",
+                            )
+                        )
+                        break
 
     return issues

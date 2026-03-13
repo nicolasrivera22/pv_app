@@ -71,6 +71,14 @@ class Optimizer:
             price_cop=float(batt.get("price_COP", 0.0)),
         )
 
+    @staticmethod
+    def _lookup_price_per_kwp(table: pd.DataFrame, k_wp: float, table_name: str) -> float:
+        mask = (table["MIN"] < k_wp) & (table["MAX"] >= k_wp)
+        matches = table.loc[mask, "PRECIO_POR_KWP"].values
+        if len(matches) == 0:
+            raise ValueError(f"No hay banda de precio en '{table_name}' para {k_wp:.3f} kWp.")
+        return float(matches[0])
+
     def run(self) -> Tuple[dict, pd.DataFrame, float, List[dict]]:
         """Ejecuta el barrido de kWp y baterías, devolviendo óptimo y detalle."""
         cfg = self.cfg
@@ -121,16 +129,17 @@ class Optimizer:
                 )
                 continue
 
-            price_per_kwp_cop = self.cop_kwp_table.loc[
-                (self.cop_kwp_table["MIN"] < kWp) & (self.cop_kwp_table["MAX"] >= kWp),
-                "PRECIO_POR_KWP",
-            ].values[0]
+            price_per_kwp_cop = self._lookup_price_per_kwp(
+                self.cop_kwp_table,
+                kWp,
+                "Precios_kWp_relativos",
+            )
             if cfg["include_var_others"]:
-                price_per_kwp_cop_others = self.cop_kwp_table_others.loc[
-                    (self.cop_kwp_table_others["MIN"] < kWp)
-                    & (self.cop_kwp_table_others["MAX"] >= kWp),
-                    "PRECIO_POR_KWP",
-                ].values[0]
+                price_per_kwp_cop_others = self._lookup_price_per_kwp(
+                    self.cop_kwp_table_others,
+                    kWp,
+                    "Precios_kWp_relativos_Otros",
+                )
             else:
                 price_per_kwp_cop_others = 0
             price_per_kwp_cop += price_per_kwp_cop_others

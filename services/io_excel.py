@@ -16,6 +16,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from pv_product.utils import DEFAULT_CONFIG, build_7x24_from_excel, solar_profile_24
 
 from .types import LoadedConfigBundle
+from .types import ValidationIssue
 from .validation import validate_config
 
 SHEET_ALIASES = {
@@ -39,6 +40,31 @@ TABLE_COLUMNS = {
 CONFIG_KEY_ALIASES = {
     "coupling": "bat_coupling",
 }
+
+CONFIG_BOOL_FIELDS = {key for key, value in DEFAULT_CONFIG.items() if isinstance(value, bool)}
+CONFIG_CHOICE_MAPS = {
+    "pricing_mode": {"variable": "variable", "total": "total"},
+    "kWp_seed_mode": {"auto": "auto", "manual": "manual"},
+    "limit_peak_month_mode": {"max": "max", "maximo": "max", "fixed": "fixed", "fijo": "fixed"},
+    "limit_peak_basis": {
+        "weighted mean": "weighted_mean",
+        "weighted_mean": "weighted_mean",
+        "max": "max",
+        "dia semana": "weekday",
+        "weekday": "weekday",
+        "p95": "p95",
+    },
+    "bat_coupling": {"ac": "ac", "dc": "dc"},
+}
+PROFILE_MODE_MAP = {
+    "perfil horario relativo": "perfil horario relativo",
+    "perfil hora dia de semana": "perfil hora dia de semana",
+    "perfil general": "perfil general",
+}
+
+
+class WorkbookContractError(ValueError):
+    """Raised when the uploaded workbook does not satisfy the expected contract."""
 
 
 def _slug(value: Any) -> str:
@@ -83,40 +109,34 @@ def _normalize_choice(value: Any, mapping: dict[str, str], default: str) -> str:
 
 
 def _normalize_config_value(key: str, value: Any) -> Any:
-    if key == "use_excel_profile":
-        return _normalize_mode(value)
-    if key == "bat_coupling":
-        return _normalize_coupling(value)
-    if key == "pricing_mode":
-        return _normalize_choice(value, {"variable": "variable", "total": "total"}, "variable")
-    if key == "kWp_seed_mode":
-        return _normalize_choice(value, {"auto": "auto", "manual": "manual"}, "auto")
-    if key == "limit_peak_month_mode":
-        return _normalize_choice(value, {"max": "max", "maximo": "max", "fixed": "fixed", "fijo": "fixed"}, "max")
-    if key == "limit_peak_basis":
-        return _normalize_choice(
-            value,
-            {
-                "weighted mean": "weighted_mean",
-                "weighted_mean": "weighted_mean",
-                "max": "max",
-                "dia semana": "weekday",
-                "weekday": "weekday",
-                "p95": "p95",
-            },
-            "weighted_mean",
-        )
-
-    bool_value = _coerce_bool(value)
-    if bool_value is not None:
-        return bool_value
-
     default_value = DEFAULT_CONFIG.get(key)
+    if key == "use_excel_profile":
+        if isinstance(value, bool):
+            return _normalize_mode(value), None
+        normalized = _normalize_mode(value)
+        if normalized not in PROFILE_MODE_MAP.values():
+            normalized = "perfil general"
+        if _slug(value) in {"", "perfil horario relativo", "perfil hora dia de semana", "perfil general"} or normalized != "perfil general" or _slug(value) == "perfil general":
+            return normalized, None
+        return normalized, f"Valor inválido para '{key}': {value!r}."
+
+    if key in CONFIG_CHOICE_MAPS:
+        slug = _slug(value)
+        if slug in CONFIG_CHOICE_MAPS[key]:
+            return CONFIG_CHOICE_MAPS[key][slug], None
+        return default_value, f"Valor inválido para '{key}': {value!r}."
+
+    if key in CONFIG_BOOL_FIELDS:
+        bool_value = _coerce_bool(value)
+        if bool_value is not None:
+            return bool_value, None
+        return default_value, f"Valor booleano inválido para '{key}': {value!r}."
+
     if isinstance(default_value, int) and not isinstance(default_value, bool):
-        return int(float(value))
+        return int(float(value)), None
     if isinstance(default_value, float):
-        return float(value)
-    return value
+        return float(value), None
+    return value, None
 
 
 def _open_sources(path_or_bytes: str | bytes | Path | BytesIO) -> tuple[Any, Any, str]:
@@ -134,7 +154,9 @@ def _resolve_sheet_name(workbook, canonical_name: str) -> str:
     for sheet_name in workbook.sheetnames:
         if sheet_name in aliases:
             return sheet_name
-    raise ValueError(f"No se encontró la hoja '{canonical_name}' en el archivo Excel.")
+    raise WorkbookContractError(
+        f"Falta la hoja '{canonical_name}'. Hojas aceptadas para este bloque: {', '.join(aliases)}."
+    )
 
 
 def read_table_from_excel(path_or_bytes: str | bytes | Path | BytesIO, sheet_name: str, table_name: str) -> pd.DataFrame:
@@ -144,7 +166,9 @@ def read_table_from_excel(path_or_bytes: str | bytes | Path | BytesIO, sheet_nam
     resolved_sheet_name = _resolve_sheet_name(workbook, sheet_name)
     ws = workbook[resolved_sheet_name]
     if table_name not in ws.tables:
-        raise ValueError(f"No se encontró la tabla '{table_name}' en la hoja '{resolved_sheet_name}'.")
+        raise WorkbookContractError(
+            f"Falta la tabla '{table_name}' en la hoja '{resolved_sheet_name}'."
+        )
     table_obj = ws.tables[table_name]
     min_col, min_row, max_col, max_row = range_boundaries(table_obj.ref)
     usecols = f"{get_column_letter(min_col)}:{get_column_letter(max_col)}"
@@ -162,7 +186,32 @@ def read_table_from_excel(path_or_bytes: str | bytes | Path | BytesIO, sheet_nam
     }
     frame = frame.rename(columns=renamed)
     frame = frame.replace(r"^\s*$", np.nan, regex=True).dropna(how="all").reset_index(drop=True)
+    required_columns = TABLE_COLUMNS.get(table_name, [])
+    missing_columns = [column for column in required_columns if column not in frame.columns]
+    if missing_columns:
+        raise WorkbookContractError(
+            f"La tabla '{table_name}' en la hoja '{resolved_sheet_name}' no tiene las columnas requeridas: {', '.join(missing_columns)}."
+        )
+    if required_columns:
+        frame = frame.dropna(subset=[required_columns[0]]).reset_index(drop=True)
     return frame
+
+
+def _normalize_config(config: dict[str, Any]) -> tuple[dict[str, Any], list[ValidationIssue]]:
+    cfg = dict(DEFAULT_CONFIG)
+    issues: list[ValidationIssue] = []
+    for key, value in config.items():
+        internal_key = CONFIG_KEY_ALIASES.get(key, key)
+        if internal_key not in cfg:
+            continue
+        normalized_value, error = _normalize_config_value(internal_key, value)
+        cfg[internal_key] = normalized_value
+        if error is not None:
+            issues.append(ValidationIssue("error", internal_key, error))
+
+    if "bat_coupling" not in cfg and "coupling" in config:
+        cfg["bat_coupling"] = _normalize_coupling(config["coupling"])
+    return cfg, issues
 
 
 def _default_catalogs() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -258,13 +307,7 @@ def _bundle_from_frames(
     cop_kwp_table_others: pd.DataFrame,
     source_name: str,
 ) -> LoadedConfigBundle:
-    cfg = dict(DEFAULT_CONFIG)
-    for key, value in config.items():
-        internal_key = CONFIG_KEY_ALIASES.get(key, key)
-        cfg[internal_key] = _normalize_config_value(internal_key, value)
-
-    if "bat_coupling" not in cfg and "coupling" in config:
-        cfg["bat_coupling"] = _normalize_coupling(config["coupling"])
+    cfg, normalization_issues = _normalize_config(config)
 
     if sun_profile is not None and {"HOUR", "SOL"}.issubset(sun_profile.columns):
         ordered_sun = sun_profile.sort_values("HOUR")
@@ -314,7 +357,7 @@ def _bundle_from_frames(
         cop_kwp_table_others=cop_kwp_table_others.copy(),
         source_name=source_name,
     )
-    issues = validate_config(bundle)
+    issues = [*normalization_issues, *validate_config(bundle)]
     return LoadedConfigBundle(**{**bundle.__dict__, "issues": tuple(issues)})
 
 

@@ -9,7 +9,13 @@ from dash import Dash, Input, Output, State, callback, ctx, dash_table, dcc, htm
 from dash.exceptions import PreventUpdate
 
 from services import LoadedConfigBundle, ScanRunResult, load_config_from_excel, load_example_config, run_scan
-from services.result_views import build_cash_flow, build_kpis, build_monthly_balance, build_npv_curve
+from services.result_views import (
+    build_cash_flow,
+    build_kpis,
+    build_monthly_balance,
+    build_npv_curve,
+    resolve_selected_candidate_key,
+)
 
 
 def _issue_list(issues) -> html.Div:
@@ -147,7 +153,7 @@ def create_app() -> Dash:
                 columns=[],
                 row_selectable="single",
                 selected_rows=[],
-                hidden_columns=["candidate_key"],
+                hidden_columns=["candidate_key", "scan_order"],
                 sort_action="native",
                 page_size=12,
                 style_table={"overflowX": "auto"},
@@ -243,10 +249,7 @@ def create_app() -> Dash:
             return [], empty, empty, empty
 
         scan_result = ScanRunResult.from_payload(scan_payload)
-        selected_key = scan_result.best_candidate_key
-        if selected_rows and table_rows:
-            selected_key = table_rows[selected_rows[0]]["candidate_key"]
-
+        selected_key = resolve_selected_candidate_key(scan_result, selected_rows, table_rows)
         detail = scan_result.candidate_details[selected_key]
         kpis = build_kpis(detail)
         monthly_balance = build_monthly_balance(detail["monthly"])
