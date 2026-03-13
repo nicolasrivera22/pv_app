@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 
 from .i18n import tr
 from .types import ScenarioRecord, ScenarioSessionState
-from .ui_schema import metric_label
+from .ui_schema import format_metric, metric_label
 
 
 def candidate_key_for(k_wp: float, battery_name: str) -> str:
@@ -143,6 +143,8 @@ def build_npv_figure(
     title: str | None = None,
 ) -> go.Figure:
     curve = build_npv_curve(candidate_table)
+    curve = curve.copy()
+    curve["battery_display"] = curve["battery"].map(lambda value: format_metric("selected_battery", value, lang))
     figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
     figure = px.line(
         curve,
@@ -153,7 +155,7 @@ def build_npv_figure(
         title=figure_title,
         hover_data={
             "candidate_key": True,
-            "battery": True,
+            "battery_display": True,
             "NPV_COP": ":,.0f",
             "payback_years": ":.2f",
             "self_consumption_ratio": ":.2%",
@@ -174,6 +176,7 @@ def build_npv_figure(
                 hovertemplate=("Seleccionado" if lang == "es" else "Selected") + ": %{customdata[0]}<extra></extra>",
             )
     figure.update_yaxes(title=metric_label("NPV_COP", lang))
+    figure.update_yaxes(tickformat=",.0f")
     figure.update_xaxes(title="kWp instalado" if lang == "es" else "Installed kWp")
     return figure
 
@@ -196,7 +199,7 @@ def build_monthly_balance_figure(
         title=figure_title,
     )
     figure.update_xaxes(title="Mes" if lang == "es" else "Month")
-    figure.update_yaxes(title="kWh")
+    figure.update_yaxes(title="kWh", tickformat=",.0f")
     return figure
 
 
@@ -216,7 +219,10 @@ def build_cash_flow_figure(
     )
     figure.add_hline(y=0, line_dash="dash", line_color="#334155")
     figure.update_xaxes(title="Mes" if lang == "es" else "Month")
-    figure.update_yaxes(title="Flujo acumulado descontado [COP]" if lang == "es" else "Discounted cumulative cash flow (COP)")
+    figure.update_yaxes(
+        title="Flujo acumulado descontado [COP]" if lang == "es" else "Discounted cumulative cash flow (COP)",
+        tickformat=",.0f",
+    )
     return figure
 
 
@@ -342,13 +348,15 @@ def build_comparison_figures(scenarios: list[ScenarioRecord], lang: str = "es") 
     for scenario in clean_scenarios:
         assert scenario.scan_result is not None
         curve = build_npv_curve(scenario.scan_result.candidates)
+        curve = curve.copy()
+        curve["battery_display"] = curve["battery"].map(lambda value: format_metric("selected_battery", value, lang))
         npv_overlay.add_trace(
             go.Scatter(
                 x=curve["kWp"],
                 y=curve["NPV_COP"],
                 mode="lines+markers",
                 name=scenario.name,
-                customdata=curve[["candidate_key", "battery"]],
+                customdata=curve[["candidate_key", "battery_display"]],
                 hovertemplate=(
                     "%{fullData.name}<br>"
                     + f"{tr('compare.axis.kwp', lang)}=%{{x:.3f}}<br>"

@@ -1,0 +1,8 @@
+Escenario: Escenario 1
+Candidato: 24.600::BAT-20
+kWp: 24.600
+Batería: BAT-20
+Simulaciones: 200
+Semilla: 0
+Curva suave de payback: KDE gaussiana basada en paybacks finitos.
+Banda resaltada: P10-P90 sobre paybacks finitos.

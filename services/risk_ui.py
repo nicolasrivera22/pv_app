@@ -6,7 +6,7 @@ import pandas as pd
 
 from .i18n import tr
 from .types import MonteCarloRunResult, RiskViewBundle, ScenarioRecord, ScenarioSessionState
-from .ui_schema import metric_label
+from .ui_schema import format_metric, metric_label
 
 RATIO_METRICS = {"self_consumption_ratio", "self_sufficiency_ratio"}
 
@@ -45,7 +45,8 @@ def build_risk_candidate_options(scenario_record: ScenarioRecord, lang: str = "e
     options: list[dict[str, str]] = []
     for row in table.to_dict("records"):
         marker = f" · {tr('risk.best_marker', lang)}" if row["candidate_key"] == scan.best_candidate_key else ""
-        label = f"{float(row['kWp']):.3f} kWp · {row['battery']} · COP {float(row['NPV_COP']):,.0f}{marker}"
+        battery_label = format_metric("selected_battery", row["battery"], lang)
+        label = f"{format_metric('kWp', row['kWp'], lang)} · {battery_label} · {format_metric('NPV_COP', row['NPV_COP'], lang)}{marker}"
         options.append({"label": label, "value": str(row["candidate_key"])})
     return options
 
@@ -107,15 +108,15 @@ def build_risk_metadata_rows(
     lang: str = "en",
 ) -> pd.DataFrame:
     active_uncertainty = ", ".join(
-        f"{name}={value:.4f}" for name, value in result.active_uncertainty.items() if float(value or 0.0) > 0
+        f"{name}={100.0 * value:.1f}%" for name, value in result.active_uncertainty.items() if float(value or 0.0) > 0
     ) or tr("risk.metadata.none_active", lang)
     return pd.DataFrame(
         [
             {"label": tr("risk.metadata.scenario", lang), "value": scenario_record.name},
             {"label": tr("risk.metadata.candidate", lang), "value": result.selected_candidate_key},
-            {"label": tr("risk.metadata.kwp", lang), "value": f"{result.selected_kWp:.3f}"},
-            {"label": tr("risk.metadata.battery", lang), "value": result.selected_battery},
-            {"label": tr("risk.metadata.n_simulations", lang), "value": str(result.n_simulations)},
+            {"label": tr("risk.metadata.kwp", lang), "value": format_metric("kWp", result.selected_kWp, lang)},
+            {"label": tr("risk.metadata.battery", lang), "value": format_metric("selected_battery", result.selected_battery, lang)},
+            {"label": tr("risk.metadata.n_simulations", lang), "value": f"{int(result.n_simulations):,}"},
             {"label": tr("risk.metadata.seed", lang), "value": str(result.seed)},
             {"label": tr("risk.metadata.active_uncertainty", lang), "value": active_uncertainty},
         ]
@@ -147,16 +148,37 @@ def build_risk_result_store_payload(
     }
 
 
+def clear_missing_risk_result_payload(payload: dict[str, Any] | None, *, lang: str = "es") -> dict[str, Any]:
+    payload = payload or {}
+    return build_risk_result_store_payload(
+        result_id=None,
+        scenario_id=payload.get("scenario_id"),
+        candidate_key=payload.get("candidate_key"),
+        n_simulations=payload.get("n_simulations"),
+        seed=payload.get("seed"),
+        retain_samples=bool(payload.get("retain_samples")),
+        status=tr("risk.status.rerun_needed", lang),
+        errors=[tr("risk.error.result_missing", lang)],
+    )
+
+
 def prepare_percentile_table_for_display(views: RiskViewBundle, *, lang: str = "en") -> pd.DataFrame:
     frame = views.percentile_table.copy()
     if frame.empty:
         return frame
-    frame = frame.drop(columns=["percentiles_over_finite_values"], errors="ignore")
-    frame["metric"] = frame["metric"].map(lambda value: metric_label(value, lang) if value in {"NPV_COP", "payback_years", "self_consumption_ratio", "self_sufficiency_ratio", "annual_import_kwh", "annual_export_kwh"} else tr(f"risk.metric.{value}", lang))
-    ratio_mask = frame["metric"].isin(
-        [metric_label("self_consumption_ratio", lang), metric_label("self_sufficiency_ratio", lang)]
-    )
+    frame["metric_key"] = frame["metric"]
+    frame["metric"] = frame["metric_key"].map(lambda value: metric_label(value, lang))
+
+    count_columns = ["n_total", "n_finite", "n_missing"]
     numeric_columns = ["mean", "std", "min", "max", "p5", "p10", "p25", "p50", "p75", "p90", "p95"]
-    frame.loc[ratio_mask, numeric_columns] = frame.loc[ratio_mask, numeric_columns].apply(lambda column: column * 100.0)
-    frame[numeric_columns] = frame[numeric_columns].round(2)
-    return frame
+    frame[count_columns + numeric_columns] = frame[count_columns + numeric_columns].astype(object)
+
+    for column in count_columns:
+        frame[column] = frame[column].map(lambda value: "-" if pd.isna(value) else f"{int(value):,}")
+
+    for index, row in frame.iterrows():
+        metric_key = str(row["metric_key"])
+        for column in numeric_columns:
+            frame.at[index, column] = format_metric(metric_key, row[column], lang)
+
+    return frame.drop(columns=["metric_key", "percentiles_over_finite_values"], errors="ignore")

@@ -1,7 +1,12 @@
 """Service layer for deterministic PV scenario execution and Dash integration."""
 
 from .config_metadata import extract_config_metadata, update_config_table_values
-from .export_artifacts import export_deterministic_artifacts, export_risk_artifacts
+from .export_artifacts import (
+    export_deterministic_artifacts,
+    export_risk_artifacts,
+    legacy_deterministic_export_manifest,
+    legacy_risk_export_manifest,
+)
 from .export_excel import export_comparison_workbook, export_scenario_workbook
 from .io_excel import ensure_template, load_config_from_excel, load_example_config, rebuild_config_bundle
 from .result_views import (
@@ -10,6 +15,8 @@ from .result_views import (
     build_session_comparison_rows,
     resolve_selected_candidate_key_for_scenario,
 )
+from .schematic import build_unifilar_model, infer_string_layout, to_cytoscape_elements
+from .schematic import build_schematic_legend, default_schematic_inspector, resolve_schematic_inspector
 from .risk_views import prepare_risk_views
 from .i18n import tr
 from .risk_registry import clear_expired_risk_results, clear_risk_results, get_risk_result, store_risk_result
@@ -17,6 +24,7 @@ from .risk_ui import (
     build_risk_candidate_options,
     build_risk_metadata_rows,
     build_risk_result_store_payload,
+    clear_missing_risk_result_payload,
     prepare_percentile_table_for_display,
     ready_risk_scenarios,
     resolve_default_risk_candidate,
@@ -84,6 +92,7 @@ __all__ = [
     "ScenarioSessionState",
     "ValidationIssue",
     "build_assumption_sections",
+    "build_schematic_legend",
     "add_scenario",
     "build_comparison_figures",
     "build_comparison_table",
@@ -91,11 +100,13 @@ __all__ = [
     "build_risk_candidate_options",
     "build_risk_metadata_rows",
     "build_risk_result_store_payload",
+    "clear_missing_risk_result_payload",
     "build_session_comparison_rows",
     "clear_expired_risk_results",
     "clear_risk_results",
     "create_scenario_record",
     "default_scenario_name",
+    "default_schematic_inspector",
     "delete_scenario",
     "demand_profile_visibility",
     "duplicate_scenario",
@@ -104,12 +115,15 @@ __all__ = [
     "export_comparison_workbook",
     "export_risk_artifacts",
     "export_scenario_workbook",
+    "legacy_deterministic_export_manifest",
+    "legacy_risk_export_manifest",
     "extract_config_metadata",
     "format_metric",
     "frame_from_rows",
     "get_risk_result",
     "load_config_from_excel",
     "load_example_config",
+    "build_unifilar_model",
     "metric_help",
     "metric_label",
     "normalize_battery_catalog_rows",
@@ -121,6 +135,7 @@ __all__ = [
     "rebuild_config_bundle",
     "refresh_bundle_issues",
     "rename_scenario",
+    "resolve_schematic_inspector",
     "resolve_default_risk_candidate",
     "resolve_default_risk_scenario",
     "resolve_selected_candidate_key_for_scenario",
@@ -132,6 +147,8 @@ __all__ = [
     "set_comparison_scenarios",
     "store_risk_result",
     "summarize_monte_carlo",
+    "infer_string_layout",
+    "to_cytoscape_elements",
     "tr",
     "update_config_table_values",
     "update_scenario_bundle",

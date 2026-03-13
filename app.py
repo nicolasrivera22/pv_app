@@ -7,7 +7,7 @@ from services.i18n import tr
 
 def create_app() -> Dash:
     app = Dash(__name__, use_pages=True, suppress_callback_exceptions=True)
-    app.title = "PV Deterministic Workbench"
+    app.title = tr("app.title", "es")
 
     app.layout = html.Div(
         className="app-shell",
@@ -18,8 +18,8 @@ def create_app() -> Dash:
                 children=[
                     html.Div(
                         children=[
-                            html.H1(id="app-title"),
-                            html.P(id="app-subtitle"),
+                            html.H1(tr("app.title", "es"), id="app-title"),
+                            html.P(tr("app.subtitle", "es"), id="app-subtitle"),
                         ]
                     ),
                     html.Div(
@@ -28,7 +28,7 @@ def create_app() -> Dash:
                             html.Div(
                                 className="language-box",
                                 children=[
-                                    html.Label(id="language-label", htmlFor="language-selector", className="input-label"),
+                                    html.Label(tr("app.language", "es"), id="language-label", htmlFor="language-selector", className="input-label"),
                                     dcc.Dropdown(
                                         id="language-selector",
                                         options=[
@@ -44,9 +44,9 @@ def create_app() -> Dash:
                             html.Nav(
                                 className="top-nav",
                                 children=[
-                                    dcc.Link(html.Span(id="nav-workbench-label"), href="/", className="nav-link"),
-                                    dcc.Link(html.Span(id="nav-compare-label"), href="/compare", className="nav-link"),
-                                    dcc.Link(html.Span(id="nav-risk-label"), href="/risk", className="nav-link"),
+                                    dcc.Link(html.Span(tr("nav.workbench", "es"), id="nav-workbench-label"), href="/", className="nav-link"),
+                                    dcc.Link(html.Span(tr("nav.compare", "es"), id="nav-compare-label"), href="/compare", className="nav-link"),
+                                    dcc.Link(html.Span(tr("nav.risk", "es"), id="nav-risk-label"), href="/risk", className="nav-link"),
                                 ],
                             ),
                         ],
@@ -82,8 +82,11 @@ def create_app() -> Dash:
                 .controls { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem; }
                 .upload-box { border: 2px dashed #94a3b8; border-radius: 14px; padding: 1rem 1.15rem; background: rgba(255,255,255,0.92); min-width: 0; }
                 .panel, .subpanel { background: rgba(255,255,255,0.92); border-radius: 20px; padding: 1rem; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08); }
+                .secondary-panel { background: rgba(248,250,252,0.96); }
+                .subpanel { border: 1px solid rgba(203,213,225,0.75); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35); }
                 .sidebar-panel { position: sticky; top: 1rem; }
                 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.9rem; flex-wrap: wrap; }
+                .section-head h2, .section-head h3, .section-head h4 { margin: 0; }
                 .action-btn { border: none; border-radius: 999px; padding: 0.75rem 1rem; background: #0f766e; color: white; font-weight: 600; cursor: pointer; }
                 .action-btn.secondary { background: #334155; }
                 .action-btn.tertiary { background: #cbd5e1; color: #0f172a; }
@@ -104,9 +107,38 @@ def create_app() -> Dash:
                 .scenario-pill.active { border-color: #0f766e; background: #ecfeff; }
                 .scenario-meta { color: #475569; font-size: 0.9rem; }
                 .assumption-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
-                .field-card { background: #f8fafc; border-radius: 14px; padding: 0.85rem; }
+                .field-card { background: #f8fafc; border-radius: 14px; padding: 0.85rem; border: 1px solid rgba(203,213,225,0.7); }
+                .advanced-card { background: rgba(248,250,252,0.85); border-style: dashed; }
+                .section-copy { margin: 0 0 0.9rem; color: #475569; font-size: 0.93rem; max-width: 75ch; }
+                .advanced-details summary { cursor: pointer; color: #334155; font-weight: 600; margin-bottom: 0.75rem; }
                 .catalog-grid, .chart-grid, .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
                 .compare-grid > .panel { min-height: 100%; }
+                .schematic-summary-chip { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.8rem; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-weight: 600; width: fit-content; }
+                .schematic-layout { display: grid; grid-template-columns: minmax(0, 2.15fr) minmax(280px, 0.95fr); gap: 1rem; align-items: start; }
+                .schematic-main, .schematic-side { display: grid; gap: 0.75rem; }
+                .schematic-note { margin-bottom: 0; }
+                .legend-list { display: grid; gap: 0.65rem; }
+                .legend-item { display: flex; align-items: center; gap: 0.7rem; color: #334155; }
+                .legend-swatch { display: inline-flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em; }
+                .legend-node { width: 52px; height: 28px; border: 2px solid #cbd5e1; background: #fff; color: #0f172a; }
+                .legend-role-pv { clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); border-color: #f59e0b; background: #fef3c7; }
+                .legend-role-inverter { border-color: #2563eb; background: #dbeafe; border-radius: 12px; }
+                .legend-role-battery { border-color: #7c3aed; background: #ede9fe; border-radius: 999px; }
+                .legend-role-load { border-color: #16a34a; background: #dcfce7; border-radius: 12px; }
+                .legend-role-grid { border-color: #475569; background: #e2e8f0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+                .legend-line { width: 54px; height: 0; border-top: 4px solid #64748b; color: transparent; overflow: hidden; }
+                .legend-connection-ac { border-top-color: #2563eb; }
+                .legend-connection-dc { border-top-color: #f59e0b; }
+                .inspector-body { display: grid; gap: 0.75rem; }
+                .inspector-focus-title { font-size: 1rem; font-weight: 700; color: #0f172a; }
+                .inspector-description { margin: 0; color: #475569; line-height: 1.5; }
+                .inspector-list { display: grid; gap: 0.4rem; }
+                .inspector-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem; padding: 0.35rem 0; border-bottom: 1px solid rgba(226, 232, 240, 0.9); }
+                .inspector-row:last-child { border-bottom: none; }
+                .inspector-label { font-weight: 600; color: #334155; }
+                .inspector-value { color: #0f172a; text-align: right; }
+                .inspector-note { padding: 0.7rem 0.8rem; border-radius: 12px; background: #fffbeb; color: #92400e; border: 1px solid #fde68a; line-height: 1.45; }
+                @media (max-width: 1100px) { .schematic-layout { grid-template-columns: 1fr; } }
                 @media (max-width: 980px) { .workbench-grid { grid-template-columns: 1fr; } .sidebar-panel { position: static; } .app-header { align-items: start; flex-direction: column; } .header-tools { width: 100%; align-items: start; } }
             </style>
         </head>

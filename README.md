@@ -2,6 +2,26 @@
 
 This repository now provides a deterministic Dash workbench for PV sizing and financial analysis plus a usable Monte Carlo risk page. Phase 1 established the service layer and single-scenario MVP, phase 1.1 hardened validation and regression behavior, phase 2A turned the app into a multi-scenario deterministic analysis tool, phase 2B.1 added the reproducible Monte Carlo service layer, phase 2B.2 added the Dash risk UI, and phase 2B.3 refined the app into a Spanish-first, workbook-driven product.
 
+## What phase 2C adds
+
+- The Workbench now includes an interactive unifilar-style schematic for the currently selected deterministic candidate.
+- The diagram is built from a dedicated service-layer helper in `services/schematic.py`, not from callback-local logic.
+- It shows, at minimum:
+  - inferred PV string groups / MPPT blocks
+  - inverter
+  - optional battery
+  - house / load
+  - grid
+- Stringing is inferred without any prime-number exclusion rule:
+  - the service first searches for an exact equal-length layout that uses all modules and respects the existing inverter/string constraints
+  - if no exact equal-length layout can be derived from the stored candidate data, the app falls back to a clearly labeled representative layout
+- The diagram is Spanish-first and explicitly labeled as schematic / representative:
+  - it is meant to explain the selected design visually
+  - it is not a certified installation drawing
+- Schematic export is intentionally deferred:
+  - the existing artifact export flow remains unchanged
+  - this phase focuses on the interactive Workbench visualization only
+
 ## What phase 2B.3 adds
 
 - Spanish is now the default UI language.

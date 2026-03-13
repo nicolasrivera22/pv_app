@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dash import dash_table, dcc, html
 
+from services.i18n import tr
+
 
 def candidate_explorer_section() -> html.Div:
     return html.Div(
@@ -10,12 +12,12 @@ def candidate_explorer_section() -> html.Div:
             html.Div(
                 className="section-head",
                 children=[
-                    html.H3(id="candidate-explorer-title"),
+                    html.H3(tr("workbench.candidate_explorer", "es"), id="candidate-explorer-title"),
                     html.Div(
                         className="controls",
                         children=[
-                            html.Button(id="scenario-export-btn", n_clicks=0, className="action-btn secondary"),
-                            html.Button(id="scenario-artifacts-btn", n_clicks=0, className="action-btn tertiary"),
+                            html.Button(tr("workbench.export_scenario", "es"), id="scenario-export-btn", n_clicks=0, className="action-btn secondary"),
+                            html.Button(tr("common.export_artifacts", "es"), id="scenario-artifacts-btn", n_clicks=0, className="action-btn tertiary"),
                         ],
                     ),
                 ],
@@ -34,7 +36,7 @@ def candidate_explorer_section() -> html.Div:
                 filter_action="native",
                 page_size=12,
                 style_table={"overflowX": "auto"},
-                style_cell={"padding": "0.45rem", "fontFamily": "monospace", "fontSize": 12},
+                style_cell={"padding": "0.45rem", "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif", "fontSize": 12},
                 style_header={"backgroundColor": "#e2e8f0", "fontWeight": "bold"},
                 tooltip_duration=None,
                 tooltip_header={},

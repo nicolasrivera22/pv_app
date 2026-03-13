@@ -3,6 +3,8 @@ from __future__ import annotations
 from dash import dash_table, html
 import pandas as pd
 
+from services.i18n import tr
+
 
 def risk_tables_section() -> html.Div:
     return html.Div(
@@ -11,17 +13,17 @@ def risk_tables_section() -> html.Div:
             html.Div(
                 className="panel",
                 children=[
-                    html.H3(id="risk-metadata-title"),
+                    html.H3(tr("risk.metadata.title", "es"), id="risk-metadata-title"),
                     html.Div(id="risk-metadata-table"),
                     html.Div(id="risk-warnings"),
-                    html.P(id="risk-payback-note", className="scenario-meta"),
-                    html.P(id="risk-payback-band-note", className="scenario-meta"),
+                    html.P(tr("risk.payback_note", "es"), id="risk-payback-note", className="scenario-meta"),
+                    html.P(tr("risk.payback_band_note", "es"), id="risk-payback-band-note", className="scenario-meta"),
                 ],
             ),
             html.Div(
                 className="panel",
                 children=[
-                    html.H3(id="risk-percentiles-title"),
+                    html.H3(tr("risk.percentiles.title", "es"), id="risk-percentiles-title"),
                     dash_table.DataTable(
                         id="risk-percentile-table",
                         data=[],
@@ -29,7 +31,7 @@ def risk_tables_section() -> html.Div:
                         sort_action="native",
                         page_size=10,
                         style_table={"overflowX": "auto"},
-                        style_cell={"padding": "0.45rem", "fontFamily": "monospace", "fontSize": 12},
+                        style_cell={"padding": "0.45rem", "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif", "fontSize": 12},
                         style_header={"backgroundColor": "#e2e8f0", "fontWeight": "bold"},
                     ),
                 ],

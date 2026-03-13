@@ -3,9 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from pv_product.utils import _kde_gauss, _silverman_bandwidth
+
 from .types import MonteCarloRunResult, RiskViewBundle
 
 HISTOGRAM_METRICS = ("NPV_COP", "payback_years")
+KDE_METRICS = ("NPV_COP", "payback_years")
 ECDF_METRICS = ("NPV_COP", "payback_years")
 PERCENTILE_TABLE_METRICS = (
     ("npv", "NPV_COP"),
@@ -51,6 +54,20 @@ def _ecdf_frame(samples: pd.DataFrame, metric: str, max_points: int) -> pd.DataF
     return pd.DataFrame({"metric": metric, "value": values, "cdf": probs})
 
 
+def _density_frame(samples: pd.DataFrame, metric: str, points: int = 240) -> pd.DataFrame:
+    finite = np.sort(pd.to_numeric(samples[metric], errors="coerce").dropna().to_numpy(dtype=float))
+    if finite.size < 2:
+        return pd.DataFrame(columns=["metric", "value", "density"])
+
+    vmin = float(np.min(finite))
+    vmax = float(np.max(finite))
+    pad = 0.1 * (vmax - vmin + 1e-12)
+    x_grid = np.linspace(vmin - pad, vmax + pad, max(80, int(points)))
+    bandwidth = _silverman_bandwidth(finite)
+    density = _kde_gauss(x_grid, finite, bandwidth)
+    return pd.DataFrame({"metric": metric, "value": x_grid, "density": density})
+
+
 def _percentile_table(summary) -> pd.DataFrame:
     rows = []
     for attr_name, label in PERCENTILE_TABLE_METRICS:
@@ -87,11 +104,13 @@ def build_risk_views_from_samples(
     labels: dict[str, str] | None = None,
 ) -> RiskViewBundle:
     histograms = {metric: _histogram_frame(samples, metric, histogram_bins) for metric in HISTOGRAM_METRICS}
+    densities = {metric: _density_frame(samples, metric) for metric in KDE_METRICS}
     ecdfs = {metric: _ecdf_frame(samples, metric, ecdf_points) for metric in ECDF_METRICS}
     return RiskViewBundle(
         histogram_bins=int(histogram_bins),
         ecdf_points=int(ecdf_points),
         histograms=histograms,
+        densities=densities,
         ecdfs=ecdfs,
         percentile_table=_percentile_table(summary),
         labels=dict(labels or {}),

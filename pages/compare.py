@@ -46,12 +46,12 @@ layout = html.Div(
             className="main-stack",
             children=[
                 html.Div(
-                    className="panel",
-                    children=[
-                        html.Div(className="section-head", children=[html.H2(id="compare-page-title"), html.Button(id="comparison-export-btn", n_clicks=0, className="action-btn secondary")]),
-                        html.P(id="compare-page-intro"),
+                        className="panel",
+                        children=[
+                        html.Div(className="section-head", children=[html.H2(tr("compare.title", "es"), id="compare-page-title"), html.Button(tr("compare.export", "es"), id="comparison-export-btn", n_clicks=0, className="action-btn secondary")]),
+                        html.P(tr("compare.intro", "es"), id="compare-page-intro"),
                         dcc.Checklist(id="compare-scenario-checklist", className="scenario-list"),
-                        html.Div(id="compare-status", className="status-line"),
+                        html.Div(tr("compare.status.none", "es"), id="compare-status", className="status-line"),
                     ],
                 ),
                 html.Div(
@@ -60,7 +60,7 @@ layout = html.Div(
                         html.Div(
                             className="panel",
                             children=[
-                                html.H3(id="comparison-summary-title"),
+                                html.H3(tr("compare.summary", "es"), id="comparison-summary-title"),
                                 dash_table.DataTable(
                                     id="comparison-summary-table",
                                     data=[],
@@ -70,8 +70,9 @@ layout = html.Div(
                                     filter_action="native",
                                     page_size=10,
                                     style_table={"overflowX": "auto"},
-                                    style_cell={"padding": "0.45rem", "fontFamily": "monospace", "fontSize": 12},
+                                    style_cell={"padding": "0.45rem", "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif", "fontSize": 12},
                                     style_header={"backgroundColor": "#e2e8f0", "fontWeight": "bold"},
+                                    tooltip_header={},
                                 ),
                             ],
                         ),
@@ -122,6 +123,7 @@ def update_comparison_selection(selected_ids, session_payload):
     Output("compare-status", "children"),
     Output("comparison-summary-table", "data"),
     Output("comparison-summary-table", "columns"),
+    Output("comparison-summary-table", "tooltip_header"),
     Output("comparison-kpi-graph", "figure"),
     Output("comparison-npv-graph", "figure"),
     Output("comparison-export-btn", "disabled"),
@@ -139,6 +141,9 @@ def populate_comparison(session_payload, language_value):
 
     selected_records = build_session_comparison_rows(state)
     comparison_table = build_comparison_table(selected_records)
+    if not comparison_table.empty:
+        comparison_table = comparison_table.copy()
+        comparison_table["battery"] = comparison_table["battery"].replace({"None": tr("common.no_battery", lang)})
     figures = build_comparison_figures(selected_records, lang=lang)
     visible_columns = ["scenario", "best_kWp", "battery", "NPV_COP", "payback_years", "self_consumption_ratio", "self_sufficiency_ratio", "annual_import_kwh", "annual_export_kwh"]
     columns, tooltip_header = build_display_columns(visible_columns, lang)
@@ -153,6 +158,7 @@ def populate_comparison(session_payload, language_value):
         status,
         comparison_table.to_dict("records"),
         columns,
+        tooltip_header,
         figures.get("kpi_bar", _empty_figure(tr("compare.figure.kpi_title", lang), tr("compare.figure.empty_message", lang))),
         figures.get("npv_overlay", _empty_figure(tr("compare.figure.npv_title", lang), tr("compare.figure.empty_message", lang))),
         len(selected_records) < 2,

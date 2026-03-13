@@ -331,6 +331,7 @@ class RiskViewBundle:
     histogram_bins: int
     ecdf_points: int
     histograms: dict[str, pd.DataFrame]
+    densities: dict[str, pd.DataFrame]
     ecdfs: dict[str, pd.DataFrame]
     percentile_table: pd.DataFrame
     labels: dict[str, str] = field(default_factory=dict)

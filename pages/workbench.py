@@ -16,6 +16,9 @@ from components import (
     profile_editor_section,
     render_assumption_sections,
     render_kpi_cards,
+    render_schematic_inspector,
+    render_schematic_legend,
+    unifilar_diagram_section,
     render_validation_panel,
     scenario_sidebar,
 )
@@ -23,8 +26,11 @@ from services import (
     ScenarioSessionState,
     build_assumption_sections,
     build_display_columns,
+    build_schematic_legend,
+    build_unifilar_model,
     collect_config_updates,
     create_scenario_record,
+    default_schematic_inspector,
     default_scenario_name,
     delete_scenario,
     demand_profile_visibility,
@@ -39,9 +45,11 @@ from services import (
     rebuild_bundle_from_ui,
     refresh_bundle_issues,
     rename_scenario,
+    resolve_schematic_inspector,
     resolve_selected_candidate_key_for_scenario,
     run_scenario_scan,
     set_active_scenario,
+    to_cytoscape_elements,
     tr,
     update_scenario_bundle,
     update_selected_candidate,
@@ -109,24 +117,30 @@ layout = html.Div(
                                 html.Div(
                                     className="section-head",
                                     children=[
-                                        html.H2(id="active-scenario-panel-title"),
+                                        html.H2(tr("workbench.section.active", "es"), id="active-scenario-panel-title"),
                                         html.Div(
                                             className="controls",
-                                            children=[html.Button(id="run-active-scan-btn", n_clicks=0, className="action-btn")],
+                                            children=[html.Button(tr("workbench.run_scan", "es"), id="run-active-scan-btn", n_clicks=0, className="action-btn")],
                                         ),
                                     ],
                                 ),
-                                html.Div(id="active-source-status", className="status-line"),
-                                html.Div(id="active-run-status", className="status-line"),
-                                html.Div(id="active-run-progress", className="status-line", style={"display": "none"}),
-                                html.H3(id="active-validation-title"),
-                                html.Div(id="active-validation"),
+                                html.Div(tr("workbench.no_active_scenario", "es"), id="active-source-status", className="status-line"),
+                                html.Div(tr("workbench.run_pending", "es"), id="active-run-status", className="status-line"),
+                                html.Div(tr("workbench.run_running", "es"), id="active-run-progress", className="status-line", style={"display": "none"}),
+                                html.H3(tr("common.validation", "es"), id="active-validation-title"),
+                                html.Div(render_validation_panel([], lang="es"), id="active-validation"),
                             ],
                         ),
                         assumption_editor_section(),
                         profile_editor_section(),
                         catalog_editor_section(),
-                        dcc.Loading(type="default", children=html.Div(id="deterministic-results-area", children=[candidate_explorer_section()])),
+                        dcc.Loading(
+                            type="default",
+                            children=html.Div(
+                                id="deterministic-results-area",
+                                children=[candidate_explorer_section(), unifilar_diagram_section()],
+                            ),
+                        ),
                     ],
                 ),
             ],
@@ -604,6 +618,7 @@ def populate_results(session_payload, language_value):
     monthly_balance = build_monthly_balance(detail["monthly"], lang=lang)
     cash_flow = build_cash_flow(detail["monthly"])
     table = scan.candidates.copy()
+    table["battery"] = table["battery"].replace({"None": tr("common.no_battery", lang)})
     visible_columns = [
         "kWp",
         "battery",
@@ -648,6 +663,96 @@ def populate_results(session_payload, language_value):
         styles,
         tooltip_header,
     )
+
+
+@callback(
+    Output("unifilar-diagram-title", "children"),
+    Output("unifilar-diagram-summary", "children"),
+    Output("unifilar-diagram-empty", "children"),
+    Output("unifilar-diagram-empty", "style"),
+    Output("unifilar-diagram-note", "children"),
+    Output("unifilar-diagram-shell", "style"),
+    Output("active-unifilar-diagram", "elements"),
+    Output("active-unifilar-diagram", "style"),
+    Output("unifilar-legend-title", "children"),
+    Output("unifilar-legend-items", "children"),
+    Output("unifilar-inspector-title", "children"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+)
+def populate_unifilar_diagram(session_payload, language_value):
+    lang = _lang(language_value)
+    state = _state(session_payload)
+    active = state.get_scenario()
+    title = tr("workbench.schematic.title", lang)
+    empty_message = tr("workbench.schematic.empty", lang)
+    legend_title = tr("workbench.schematic.legend.title", lang)
+    inspector_title = tr("workbench.schematic.inspector.title", lang)
+    legend_children = render_schematic_legend(build_schematic_legend(lang))
+    if active is None or active.scan_result is None:
+        return (
+            title,
+            "",
+            empty_message,
+            {"display": "block"},
+            "",
+            {"display": "none"},
+            [],
+            {"width": "100%", "height": "420px"},
+            legend_title,
+            legend_children,
+            inspector_title,
+        )
+
+    selected_key = resolve_selected_candidate_key_for_scenario(active.scan_result, active.selected_candidate_key)
+    model = build_unifilar_model(active, selected_key, lang=lang)
+    pv_nodes = sum(1 for node in model.nodes if node.role == "pv")
+    has_battery = any(node.role == "battery" for node in model.nodes)
+    height = max(360, 180 + pv_nodes * 110 + (90 if has_battery else 0))
+    return (
+        title,
+        model.string_summary,
+        "",
+        {"display": "none"},
+        model.note,
+        {"display": "block"},
+        to_cytoscape_elements(model),
+        {"width": "100%", "height": f"{height}px"},
+        legend_title,
+        legend_children,
+        inspector_title,
+    )
+
+
+@callback(
+    Output("unifilar-inspector-body", "children"),
+    Input("active-unifilar-diagram", "mouseoverNodeData"),
+    Input("active-unifilar-diagram", "tapNodeData"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+)
+def populate_unifilar_inspector(mouseover_node, tap_node, session_payload, language_value):
+    lang = _lang(language_value)
+    state = _state(session_payload)
+    active = state.get_scenario()
+    if active is None or active.scan_result is None:
+        return render_schematic_inspector(
+            default_schematic_inspector(
+                model=None,
+                lang=lang,
+            )
+        )
+
+    selected_key = resolve_selected_candidate_key_for_scenario(active.scan_result, active.selected_candidate_key)
+    model = build_unifilar_model(active, selected_key, lang=lang)
+    trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
+    node_data = None
+    if trigger.endswith("tapNodeData") and tap_node:
+        node_data = tap_node
+    elif trigger.endswith("mouseoverNodeData") and mouseover_node:
+        node_data = mouseover_node
+    inspector = resolve_schematic_inspector(node_data, model, lang=lang)
+    return render_schematic_inspector(inspector)
 
 
 @callback(

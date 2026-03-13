@@ -7,6 +7,8 @@ from dash import dcc
 import pandas as pd
 
 from app import create_app
+from components.risk_controls import risk_controls_section
+from components.scenario_controls import scenario_sidebar
 from components.risk_charts import build_histogram_figure
 from services import (
     ScenarioSessionState,
@@ -18,6 +20,8 @@ from services import (
     export_risk_artifacts,
     extract_config_metadata,
     format_metric,
+    legacy_deterministic_export_manifest,
+    legacy_risk_export_manifest,
     load_config_from_excel,
     load_example_config,
     rebuild_bundle_from_ui,
@@ -64,10 +68,25 @@ def test_app_defaults_to_spanish() -> None:
     assert selector.value == "es"
 
 
+def test_first_render_placeholders_are_spanish_first() -> None:
+    sidebar = scenario_sidebar()
+    scenario_dropdown = _find_component(sidebar, "scenario-dropdown")
+    rename_input = _find_component(sidebar, "rename-scenario-input")
+    risk_controls = risk_controls_section()
+    risk_scenario_dropdown = _find_component(risk_controls, "risk-scenario-dropdown")
+    risk_candidate_dropdown = _find_component(risk_controls, "risk-candidate-dropdown")
+
+    assert scenario_dropdown.placeholder == "No hay escenarios cargados"
+    assert rename_input.placeholder == "Nombre del escenario"
+    assert risk_scenario_dropdown.placeholder == "Selecciona un escenario completado"
+    assert risk_candidate_dropdown.placeholder == "Selecciona un candidato factible"
+
+
 def test_translation_helper_prefers_spanish_fallback_for_workbench_labels() -> None:
     assert tr("workbench.sidebar.title", "es") == "Escenarios"
     assert tr("workbench.run_scan", "fr") == "Ejecutar escaneo determinístico"
     assert tr("nav.compare", "fr") == "Comparar"
+    assert tr("risk.placeholder.scenario", "fr") == "Selecciona un escenario completado"
 
 
 def test_extract_config_metadata_preserves_workbook_order_and_groups() -> None:
@@ -94,12 +113,14 @@ def test_assumption_sections_group_and_fallback_help() -> None:
 
     assert field["label"] == field_label(meta, "es")
     assert field["help"] == field_help(meta, "es")
+    assert section["help"]
 
 
 def test_display_schema_formats_metrics_and_labels() -> None:
     assert format_metric("NPV_COP", 12500000, "es") == "COP 12,500,000"
     assert format_metric("self_consumption_ratio", 0.456, "es") == "45.6%"
     assert format_metric("payback_years", 7.25, "en") == "7.25 years"
+    assert format_metric("selected_battery", "None", "es") == "Sin batería"
     columns, tooltips = build_display_columns(["kWp", "NPV_COP", "self_consumption_ratio"], "es")
     assert [column["name"] for column in columns] == ["kWp", "VPN [COP]", "Autoconsumo [%]"]
     assert tooltips["NPV_COP"].startswith("Valor presente")
@@ -146,6 +167,9 @@ def test_artifact_exports_write_into_resultados_without_deleting_existing_files(
     assert keep_file.exists()
     assert deterministic_paths
     assert any(path.suffix == ".png" for path in deterministic_paths)
+    assert {path.name for path in deterministic_paths}.issuperset({"chart_npv_vs_kWp.png", "resumen_valor_presente_neto.csv", "resumen_optimizacion.txt"})
+    scenario_root = next(path for path in deterministic_paths if path.name == "chart_npv_vs_kWp.png").parent
+    assert set(legacy_deterministic_export_manifest()).issubset({path.name for path in scenario_root.iterdir()})
     assert any(path.name == "candidatos_factibles.csv" for path in deterministic_paths)
 
     candidate_key = scenario.selected_candidate_key or scenario.scan_result.best_candidate_key
@@ -158,6 +182,7 @@ def test_artifact_exports_write_into_resultados_without_deleting_existing_files(
         baseline_scan=scenario.scan_result,
     )
     risk_paths = export_risk_artifacts(scenario, risk_result, output_root=base_dir)
+    assert {path.name for path in risk_paths}.issuperset(set(legacy_risk_export_manifest()))
     assert any(path.name == "histograma_payback.png" for path in risk_paths)
     assert any(path.name == "riesgo_percentiles.csv" for path in risk_paths)
     assert keep_file.exists()
@@ -178,5 +203,7 @@ def test_payback_histogram_highlight_band_is_rendered() -> None:
         x_title="Payback [años]",
         lang="es",
         highlight_range=(1.5, 3.5),
+        density_frame=pd.DataFrame({"value": [1.0, 2.0, 3.0], "density": [0.1, 0.2, 0.1]}),
     )
     assert len(figure.layout.shapes or []) == 1
+    assert len(figure.data) == 2

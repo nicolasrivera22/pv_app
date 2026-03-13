@@ -10,6 +10,7 @@ from services import (
     add_scenario,
     build_risk_metadata_rows,
     build_risk_result_store_payload,
+    clear_missing_risk_result_payload,
     clear_expired_risk_results,
     clear_risk_results,
     create_scenario_record,
@@ -111,6 +112,25 @@ def test_browser_payload_stays_compact() -> None:
     }
     assert "samples" not in payload
     assert "views" not in payload
+
+
+def test_missing_result_payload_clears_stale_reference_with_friendly_message() -> None:
+    payload = clear_missing_risk_result_payload(
+        {
+            "result_id": "mc-123",
+            "scenario_id": "scenario-1",
+            "candidate_key": "12.000::BAT-0",
+            "n_simulations": 100,
+            "seed": 0,
+            "retain_samples": True,
+        },
+        lang="es",
+    )
+
+    assert payload["result_id"] is None
+    assert payload["retain_samples"] is True
+    assert "ya no está en memoria" in payload["status"]
+    assert payload["errors"]
 
 
 def test_registry_stores_server_side_results_and_prunes() -> None:
