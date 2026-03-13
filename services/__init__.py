@@ -1,7 +1,9 @@
 """Service layer for deterministic PV scenario execution and Dash integration."""
 
+from .config_metadata import extract_config_metadata, update_config_table_values
+from .export_artifacts import export_deterministic_artifacts, export_risk_artifacts
 from .export_excel import export_comparison_workbook, export_scenario_workbook
-from .io_excel import ensure_template, load_config_from_excel, load_example_config
+from .io_excel import ensure_template, load_config_from_excel, load_example_config, rebuild_config_bundle
 from .result_views import (
     build_comparison_figures,
     build_comparison_table,
@@ -51,11 +53,19 @@ from .types import (
     ScenarioSessionState,
     ValidationIssue,
 )
+from .ui_schema import build_assumption_sections, build_display_columns, format_metric, metric_help, metric_label
 from .validation import (
     normalize_battery_catalog_rows,
     normalize_inverter_catalog_rows,
     refresh_bundle_issues,
     validate_config,
+)
+from .workbench_ui import (
+    collect_config_updates,
+    demand_profile_visibility,
+    frame_from_rows,
+    rebuild_bundle_from_ui,
+    workbench_status_message,
 )
 
 __all__ = [
@@ -73,9 +83,11 @@ __all__ = [
     "ScenarioRunResult",
     "ScenarioSessionState",
     "ValidationIssue",
+    "build_assumption_sections",
     "add_scenario",
     "build_comparison_figures",
     "build_comparison_table",
+    "build_display_columns",
     "build_risk_candidate_options",
     "build_risk_metadata_rows",
     "build_risk_result_store_payload",
@@ -85,18 +97,28 @@ __all__ = [
     "create_scenario_record",
     "default_scenario_name",
     "delete_scenario",
+    "demand_profile_visibility",
     "duplicate_scenario",
     "ensure_template",
+    "export_deterministic_artifacts",
     "export_comparison_workbook",
+    "export_risk_artifacts",
     "export_scenario_workbook",
+    "extract_config_metadata",
+    "format_metric",
+    "frame_from_rows",
     "get_risk_result",
     "load_config_from_excel",
     "load_example_config",
+    "metric_help",
+    "metric_label",
     "normalize_battery_catalog_rows",
     "normalize_inverter_catalog_rows",
     "prepare_percentile_table_for_display",
     "prepare_risk_views",
     "ready_risk_scenarios",
+    "rebuild_bundle_from_ui",
+    "rebuild_config_bundle",
     "refresh_bundle_issues",
     "rename_scenario",
     "resolve_default_risk_candidate",
@@ -111,8 +133,11 @@ __all__ = [
     "store_risk_result",
     "summarize_monte_carlo",
     "tr",
+    "update_config_table_values",
     "update_scenario_bundle",
     "update_selected_candidate",
     "validate_config",
     "validate_risk_run_inputs",
+    "workbench_status_message",
+    "collect_config_updates",
 ]

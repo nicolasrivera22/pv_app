@@ -1,7 +1,8 @@
-from .assumption_editor import ASSUMPTION_FIELDS, assumption_editor_section, assumption_values_from_config
+from .assumption_editor import assumption_editor_section, render_assumption_sections
 from .candidate_explorer import candidate_explorer_section
 from .catalog_editor import catalog_editor_section
 from .kpi_cards import render_kpi_cards
+from .profile_editor import profile_editor_section
 from .risk_charts import (
     build_ecdf_figure,
     build_histogram_figure,
@@ -15,14 +16,14 @@ from .scenario_controls import scenario_sidebar
 from .validation_panel import render_validation_panel
 
 __all__ = [
-    "ASSUMPTION_FIELDS",
     "assumption_editor_section",
-    "assumption_values_from_config",
     "build_ecdf_figure",
     "build_histogram_figure",
     "candidate_explorer_section",
     "catalog_editor_section",
     "empty_risk_figure",
+    "profile_editor_section",
+    "render_assumption_sections",
     "render_kpi_cards",
     "render_message_list",
     "render_metadata_table",

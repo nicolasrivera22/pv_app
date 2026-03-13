@@ -10,9 +10,11 @@ from services import (
     ScenarioSessionState,
     build_comparison_figures,
     build_comparison_table,
+    build_display_columns,
     build_session_comparison_rows,
     export_comparison_workbook,
     set_comparison_scenarios,
+    tr,
 )
 
 register_page(__name__, path="/compare", name="Compare")
@@ -46,8 +48,8 @@ layout = html.Div(
                 html.Div(
                     className="panel",
                     children=[
-                        html.Div(className="section-head", children=[html.H2("Scenario comparison"), html.Button("Export comparison", id="comparison-export-btn", n_clicks=0, className="action-btn secondary")]),
-                        html.P("Select at least two deterministic scenarios with completed runs to compare headline KPIs and NPV curves."),
+                        html.Div(className="section-head", children=[html.H2(id="compare-page-title"), html.Button(id="comparison-export-btn", n_clicks=0, className="action-btn secondary")]),
+                        html.P(id="compare-page-intro"),
                         dcc.Checklist(id="compare-scenario-checklist", className="scenario-list"),
                         html.Div(id="compare-status", className="status-line"),
                     ],
@@ -58,11 +60,12 @@ layout = html.Div(
                         html.Div(
                             className="panel",
                             children=[
-                                html.H3("Comparison summary"),
+                                html.H3(id="comparison-summary-title"),
                                 dash_table.DataTable(
                                     id="comparison-summary-table",
                                     data=[],
                                     columns=[],
+                                    hidden_columns=["scenario_id", "candidate_key"],
                                     sort_action="native",
                                     filter_action="native",
                                     page_size=10,
@@ -80,6 +83,23 @@ layout = html.Div(
         ),
     ],
 )
+
+
+@callback(
+    Output("compare-page-title", "children"),
+    Output("comparison-export-btn", "children"),
+    Output("compare-page-intro", "children"),
+    Output("comparison-summary-title", "children"),
+    Input("language-selector", "value"),
+)
+def translate_compare_page(language_value):
+    lang = language_value if language_value in {"en", "es"} else "es"
+    return (
+        tr("compare.title", lang),
+        tr("compare.export", lang),
+        tr("compare.intro", lang),
+        tr("compare.summary", lang),
+    )
 
 
 @callback(
@@ -106,22 +126,26 @@ def update_comparison_selection(selected_ids, session_payload):
     Output("comparison-npv-graph", "figure"),
     Output("comparison-export-btn", "disabled"),
     Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
 )
-def populate_comparison(session_payload):
+def populate_comparison(session_payload, language_value):
+    lang = language_value if language_value in {"en", "es"} else "es"
     state = _state(session_payload)
     options = []
     for scenario in state.scenarios:
         disabled = scenario.scan_result is None or scenario.dirty
-        label = scenario.name if not disabled else f"{scenario.name} (rerun needed)"
+        label = scenario.name if not disabled else tr("compare.rerun_needed", lang, name=scenario.name)
         options.append({"label": label, "value": scenario.scenario_id, "disabled": disabled})
 
     selected_records = build_session_comparison_rows(state)
     comparison_table = build_comparison_table(selected_records)
-    figures = build_comparison_figures(selected_records)
-    columns = [{"name": column, "id": column} for column in comparison_table.columns]
-    status = f"{len(selected_records)} scenario(s) selected for comparison."
+    figures = build_comparison_figures(selected_records, lang=lang)
+    visible_columns = ["scenario", "best_kWp", "battery", "NPV_COP", "payback_years", "self_consumption_ratio", "self_sufficiency_ratio", "annual_import_kwh", "annual_export_kwh"]
+    columns, tooltip_header = build_display_columns(visible_columns, lang)
+    columns.extend([{"name": "scenario_id", "id": "scenario_id"}, {"name": "candidate_key", "id": "candidate_key"}])
+    status = tr("compare.status.selected", lang, count=len(selected_records))
     if len(selected_records) < 2:
-        status = "Select at least two completed deterministic scenarios to compare."
+        status = tr("compare.status.none", lang)
 
     return (
         options,
@@ -129,8 +153,8 @@ def populate_comparison(session_payload):
         status,
         comparison_table.to_dict("records"),
         columns,
-        figures.get("kpi_bar", _empty_figure("Scenario KPI comparison", "Select scenarios to compare.")),
-        figures.get("npv_overlay", _empty_figure("NPV vs kWp across scenarios", "Select scenarios to compare.")),
+        figures.get("kpi_bar", _empty_figure(tr("compare.figure.kpi_title", lang), tr("compare.figure.empty_message", lang))),
+        figures.get("npv_overlay", _empty_figure(tr("compare.figure.npv_title", lang), tr("compare.figure.empty_message", lang))),
         len(selected_records) < 2,
     )
 

@@ -45,6 +45,12 @@ class LoadedConfigBundle:
     demand_month_factor: np.ndarray
     cop_kwp_table: pd.DataFrame
     cop_kwp_table_others: pd.DataFrame
+    config_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    demand_profile_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    demand_profile_general_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    demand_profile_weights_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    month_profile_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    sun_profile_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     source_name: str = "config.xlsx"
     issues: tuple[ValidationIssue, ...] = ()
 
@@ -60,6 +66,12 @@ class LoadedConfigBundle:
             "demand_month_factor": _array_to_list(self.demand_month_factor),
             "cop_kwp_table": _frame_to_payload(self.cop_kwp_table),
             "cop_kwp_table_others": _frame_to_payload(self.cop_kwp_table_others),
+            "config_table": _frame_to_payload(self.config_table),
+            "demand_profile_table": _frame_to_payload(self.demand_profile_table),
+            "demand_profile_general_table": _frame_to_payload(self.demand_profile_general_table),
+            "demand_profile_weights_table": _frame_to_payload(self.demand_profile_weights_table),
+            "month_profile_table": _frame_to_payload(self.month_profile_table),
+            "sun_profile_table": _frame_to_payload(self.sun_profile_table),
             "source_name": self.source_name,
             "issues": [issue.to_payload() for issue in self.issues],
         }
@@ -77,6 +89,12 @@ class LoadedConfigBundle:
             demand_month_factor=np.asarray(payload["demand_month_factor"], dtype=float),
             cop_kwp_table=_frame_from_payload(payload["cop_kwp_table"]),
             cop_kwp_table_others=_frame_from_payload(payload["cop_kwp_table_others"]),
+            config_table=_frame_from_payload(payload["config_table"]) if "config_table" in payload else pd.DataFrame(),
+            demand_profile_table=_frame_from_payload(payload["demand_profile_table"]) if "demand_profile_table" in payload else pd.DataFrame(),
+            demand_profile_general_table=_frame_from_payload(payload["demand_profile_general_table"]) if "demand_profile_general_table" in payload else pd.DataFrame(),
+            demand_profile_weights_table=_frame_from_payload(payload["demand_profile_weights_table"]) if "demand_profile_weights_table" in payload else pd.DataFrame(),
+            month_profile_table=_frame_from_payload(payload["month_profile_table"]) if "month_profile_table" in payload else pd.DataFrame(),
+            sun_profile_table=_frame_from_payload(payload["sun_profile_table"]) if "sun_profile_table" in payload else pd.DataFrame(),
             source_name=payload.get("source_name", "config.xlsx"),
             issues=tuple(ValidationIssue.from_payload(issue) for issue in payload.get("issues", [])),
         )

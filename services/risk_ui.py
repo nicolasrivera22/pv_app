@@ -6,6 +6,7 @@ import pandas as pd
 
 from .i18n import tr
 from .types import MonteCarloRunResult, RiskViewBundle, ScenarioRecord, ScenarioSessionState
+from .ui_schema import metric_label
 
 RATIO_METRICS = {"self_consumption_ratio", "self_sufficiency_ratio"}
 
@@ -151,10 +152,11 @@ def prepare_percentile_table_for_display(views: RiskViewBundle, *, lang: str = "
     if frame.empty:
         return frame
     frame = frame.drop(columns=["percentiles_over_finite_values"], errors="ignore")
-    frame["metric"] = frame["metric"].map(lambda value: tr(f"risk.metric.{value}", lang))
+    frame["metric"] = frame["metric"].map(lambda value: metric_label(value, lang) if value in {"NPV_COP", "payback_years", "self_consumption_ratio", "self_sufficiency_ratio", "annual_import_kwh", "annual_export_kwh"} else tr(f"risk.metric.{value}", lang))
     ratio_mask = frame["metric"].isin(
-        [tr("risk.metric.self_consumption_ratio", lang), tr("risk.metric.self_sufficiency_ratio", lang)]
+        [metric_label("self_consumption_ratio", lang), metric_label("self_sufficiency_ratio", lang)]
     )
     numeric_columns = ["mean", "std", "min", "max", "p5", "p10", "p25", "p50", "p75", "p90", "p95"]
     frame.loc[ratio_mask, numeric_columns] = frame.loc[ratio_mask, numeric_columns].apply(lambda column: column * 100.0)
+    frame[numeric_columns] = frame[numeric_columns].round(2)
     return frame

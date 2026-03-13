@@ -21,21 +21,21 @@ def catalog_editor_section() -> html.Div:
     return html.Div(
         className="panel",
         children=[
-            html.Div(className="section-head", children=[html.H3("Hardware catalogs")]),
+            html.Div(className="section-head", children=[html.H3(id="catalog-editor-title")]),
             html.Div(
                 className="catalog-grid",
                 children=[
                     html.Div(
                         className="subpanel",
                         children=[
-                            html.Div(className="section-head", children=[html.H4("Inverters"), html.Button("Add row", id="add-inverter-row-btn", n_clicks=0, className="action-btn tertiary")]),
+                            html.Div(className="section-head", children=[html.H4(id="inverter-editor-title"), html.Button(id="add-inverter-row-btn", n_clicks=0, className="action-btn tertiary")]),
                             _catalog_table("inverter-table-editor"),
                         ],
                     ),
                     html.Div(
                         className="subpanel",
                         children=[
-                            html.Div(className="section-head", children=[html.H4("Batteries"), html.Button("Add row", id="add-battery-row-btn", n_clicks=0, className="action-btn tertiary")]),
+                            html.Div(className="section-head", children=[html.H4(id="battery-editor-title"), html.Button(id="add-battery-row-btn", n_clicks=0, className="action-btn tertiary")]),
                             _catalog_table("battery-table-editor"),
                         ],
                     ),

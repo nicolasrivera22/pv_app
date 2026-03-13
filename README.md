@@ -1,6 +1,33 @@
 # PV Deterministic Workbench
 
-This repository now provides a deterministic Dash workbench for PV sizing and financial analysis plus a first usable Monte Carlo risk page. Phase 1 established the service layer and single-scenario MVP, phase 1.1 hardened validation and regression behavior, phase 2A turned the app into a multi-scenario deterministic analysis tool, phase 2B.1 added the reproducible Monte Carlo service layer, and phase 2B.2 adds the Dash risk UI on top of that backend.
+This repository now provides a deterministic Dash workbench for PV sizing and financial analysis plus a usable Monte Carlo risk page. Phase 1 established the service layer and single-scenario MVP, phase 1.1 hardened validation and regression behavior, phase 2A turned the app into a multi-scenario deterministic analysis tool, phase 2B.1 added the reproducible Monte Carlo service layer, phase 2B.2 added the Dash risk UI, and phase 2B.3 refined the app into a Spanish-first, workbook-driven product.
+
+## What phase 2B.3 adds
+
+- Spanish is now the default UI language.
+- The lightweight translation layer now covers the shell, workbench, comparison, validation, exports, and risk-page copy.
+- The assumptions editor is now driven by metadata from the workbook `Config` table:
+  - fields keep workbook order
+  - fields are grouped by `Grupo`
+  - help text comes from `Descripción`, with small curated overrides where needed
+  - units from `Unidad` are shown in the editor
+  - a curated basic view is shown first, with advanced parameters still available
+- The app now surfaces more workbook flexibility from `Perfiles`:
+  - `Month_Demand_Profile`
+  - `SUN_HSP_PROFILE`
+  - `Precios_kWp_relativos`
+  - `Precios_kWp_relativos_Otros`
+  - mode-aware demand-profile editing for:
+    - `Demand_Profile`
+    - `Demand_Profile_General`
+    - `Demand_Profile_Weights`
+- UI-facing metric aliases, formatting, and tooltips are centralized in `services/ui_schema.py`.
+- Deterministic runs now show explicit loading feedback in the workbench.
+- The risk payback histogram highlights the central 80% finite-payback band (`P10-P90`).
+- Explicit artifact export is available again:
+  - deterministic artifacts can be written into `Resultados/`
+  - risk artifacts can be written into `Resultados/`
+  - exports are additive only; the app never wipes output folders automatically
 
 ## What phase 2A adds
 
@@ -74,6 +101,16 @@ This repository now provides a deterministic Dash workbench for PV sizing and fi
   - English and Spanish translation dictionaries via `services/i18n.py`
   - shared shell labels plus all new Risk page labels/messages use the translation helper
 
+## Spanish-first UI notes
+
+- The app now defaults to Spanish (`es`) in the shell language selector.
+- Translation fallback order is:
+  - selected language
+  - Spanish
+  - English
+  - raw key
+- This keeps new UI coverage maintainable without introducing a heavy i18n framework.
+
 ## Risk UI notes
 
 - Phase 2B.2 still supports `fixed_candidate` mode only. `optimal_per_draw` is not exposed in the UI yet.
@@ -86,6 +123,9 @@ This repository now provides a deterministic Dash workbench for PV sizing and fi
   - it does not survive app restarts
   - it is not shared across multiple workers
   - it is bounded and prunes older results
+- The payback histogram highlight band represents the central 80% finite-payback range:
+  - left bound = `P10`
+  - right bound = `P90`
 
 ## Run the app
 
@@ -119,7 +159,31 @@ pytest
 - `pages/compare.py`: deterministic scenario comparison flow
 - `pages/risk.py`: fixed-candidate Monte Carlo risk analysis flow
 - `components/`: reusable layout blocks for scenarios, assumptions, catalogs, validation, KPIs, and candidate exploration
-- `services/`: Excel I/O, validation, deterministic runner, scenario-session state, stochastic runner, server-side risk registry, exports, translation helper, and result shaping
+- `services/`: Excel I/O, config metadata extraction, validation, deterministic runner, scenario-session state, stochastic runner, server-side risk registry, display schema, exports, translation helper, and result shaping
+
+## Workbook-driven editing notes
+
+- The assumptions board now reads the workbook-facing `Config` metadata directly and no longer depends on a narrow hardcoded field list.
+- The UI schema still applies curated overrides for:
+  - widget type
+  - display label
+  - help text when the workbook description is too technical
+  - basic vs advanced visibility
+- Most workbook controls are now surfaced either as direct config fields or as editable `Perfiles` tables.
+- Controls that remain intentionally out of the UI are limited to fields that are currently:
+  - internal/legacy implementation knobs not meant for normal operators
+  - redundant with already exposed controls
+  - unsafe to present casually without deeper workflow design
+- At the moment, the main intentionally deferred controls are the legacy low-level island/SoC iteration knobs that are present in `DEFAULT_CONFIG` but not part of the shipped workbook contract.
+
+## Explicit artifact export
+
+- Workbook export remains available from the app as before.
+- In addition, explicit artifact export now writes charts/files into `Resultados/`:
+  - deterministic export writes scenario-specific PNG/CSV/TXT artifacts
+  - risk export writes scenario-specific risk PNG/CSV/TXT artifacts
+- The export path is service-driven and opt-in.
+- The app does not delete or wipe existing contents inside `Resultados/`.
 
 ## Stochastic service notes
 
@@ -165,7 +229,8 @@ pytest
 ## Known technical debt
 
 - Peak-ratio logic is still intentionally legacy-compatible. Representative-week aggregation and the current demand-seasonality interaction were not redesigned in this pass because changing them would alter the deterministic regression baseline.
-- The browser session store now holds full deterministic scenario bundles and scan results. That is acceptable for phase 2A, but phase 2B may need more deliberate client-state sizing if scenario counts grow.
+- The browser-side scenario store is in-memory only. That avoids storage quota issues, but scenarios do not survive a full browser refresh.
 - The preserved `Resultados` artifacts still serve as the legacy regression oracle for the shipped workbook.
 - The stochastic backend reuses the current monthly perturbation assumptions and representative-week simulator. It is suitable for phase 2B.1 risk summaries, but it does not yet model uncertainty in feasibility, hardware failures, or broader commercial assumptions.
 - The risk registry in phase 2B.2 is intentionally single-process and in-memory. It is appropriate for local analysis, not for multi-worker deployment.
+- Display labels and help text are now centralized, but a few older deterministic/risk internals still carry technical column names beneath the UI layer. Those should keep shrinking rather than being copied into callbacks.

@@ -6,7 +6,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from .i18n import tr
 from .types import ScenarioRecord, ScenarioSessionState
+from .ui_schema import metric_label
 
 
 def candidate_key_for(k_wp: float, battery_name: str) -> str:
@@ -96,15 +98,22 @@ def build_kpis(detail: dict) -> dict[str, float | str | None]:
     }
 
 
-def build_monthly_balance(monthly: pd.DataFrame) -> pd.DataFrame:
+def build_monthly_balance(monthly: pd.DataFrame, lang: str = "en") -> pd.DataFrame:
     first_year = monthly.iloc[:12].copy()
-    columns = [
-        ("PV_a_Carga_kWh", "PV to load"),
-        ("Bateria_a_Carga_kWh", "Battery to load"),
-        ("Importacion_Red_kWh", "Grid import"),
-    ]
+    if lang == "es":
+        columns = [
+            ("PV_a_Carga_kWh", "FV a carga"),
+            ("Bateria_a_Carga_kWh", "Batería a carga"),
+            ("Importacion_Red_kWh", "Importación de red"),
+        ]
+    else:
+        columns = [
+            ("PV_a_Carga_kWh", "PV to load"),
+            ("Bateria_a_Carga_kWh", "Battery to load"),
+            ("Importacion_Red_kWh", "Grid import"),
+        ]
     if "Exportacion_kWh" in first_year.columns:
-        columns.append(("Exportacion_kWh", "Export"))
+        columns.append(("Exportacion_kWh", "Exportación" if lang == "es" else "Export"))
     frame = pd.DataFrame({"Año_mes": first_year["Año_mes"].tolist()})
     for source_column, label in columns:
         frame[label] = first_year.get(source_column, 0.0)
@@ -126,15 +135,22 @@ def build_npv_curve(candidate_table: pd.DataFrame) -> pd.DataFrame:
     return grouped.sort_values("kWp").reset_index(drop=True)
 
 
-def build_npv_figure(candidate_table: pd.DataFrame, selected_key: str | None = None, title: str = "NPV vs kWp") -> go.Figure:
+def build_npv_figure(
+    candidate_table: pd.DataFrame,
+    selected_key: str | None = None,
+    *,
+    lang: str = "es",
+    title: str | None = None,
+) -> go.Figure:
     curve = build_npv_curve(candidate_table)
+    figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
     figure = px.line(
         curve,
         x="kWp",
         y="NPV_COP",
         markers=True,
         template="plotly_white",
-        title=title,
+        title=figure_title,
         hover_data={
             "candidate_key": True,
             "battery": True,
@@ -153,17 +169,23 @@ def build_npv_figure(candidate_table: pd.DataFrame, selected_key: str | None = N
                 y=selected_row["NPV_COP"],
                 mode="markers",
                 marker={"size": 14, "color": "#b91c1c"},
-                name="Selected candidate",
+                name="Candidato seleccionado" if lang == "es" else "Selected candidate",
                 customdata=selected_row[["candidate_key"]],
-                hovertemplate="Selected: %{customdata[0]}<extra></extra>",
+                hovertemplate=("Seleccionado" if lang == "es" else "Selected") + ": %{customdata[0]}<extra></extra>",
             )
-    figure.update_yaxes(title="NPV (COP)")
-    figure.update_xaxes(title="Installed kWp")
+    figure.update_yaxes(title=metric_label("NPV_COP", lang))
+    figure.update_xaxes(title="kWp instalado" if lang == "es" else "Installed kWp")
     return figure
 
 
-def build_monthly_balance_figure(monthly_balance: pd.DataFrame, title: str = "Monthly energy balance (year 1)") -> go.Figure:
+def build_monthly_balance_figure(
+    monthly_balance: pd.DataFrame,
+    *,
+    lang: str = "es",
+    title: str | None = None,
+) -> go.Figure:
     melted = monthly_balance.melt(id_vars="Año_mes", var_name="series", value_name="kWh")
+    figure_title = title or ("Balance mensual de energía (año 1)" if lang == "es" else "Monthly energy balance (year 1)")
     figure = px.bar(
         melted,
         x="Año_mes",
@@ -171,24 +193,30 @@ def build_monthly_balance_figure(monthly_balance: pd.DataFrame, title: str = "Mo
         color="series",
         barmode="stack",
         template="plotly_white",
-        title=title,
+        title=figure_title,
     )
-    figure.update_xaxes(title="Month")
+    figure.update_xaxes(title="Mes" if lang == "es" else "Month")
     figure.update_yaxes(title="kWh")
     return figure
 
 
-def build_cash_flow_figure(cash_flow: pd.DataFrame, title: str = "Cumulative cash flow") -> go.Figure:
+def build_cash_flow_figure(
+    cash_flow: pd.DataFrame,
+    *,
+    lang: str = "es",
+    title: str | None = None,
+) -> go.Figure:
+    figure_title = title or ("Flujo acumulado descontado" if lang == "es" else "Cumulative cash flow")
     figure = px.line(
         cash_flow,
         x="Año_mes",
         y="cumulative_npv",
         template="plotly_white",
-        title=title,
+        title=figure_title,
     )
     figure.add_hline(y=0, line_dash="dash", line_color="#334155")
-    figure.update_xaxes(title="Month")
-    figure.update_yaxes(title="Discounted cumulative cash flow (COP)")
+    figure.update_xaxes(title="Mes" if lang == "es" else "Month")
+    figure.update_yaxes(title="Flujo acumulado descontado [COP]" if lang == "es" else "Discounted cumulative cash flow (COP)")
     return figure
 
 
@@ -268,7 +296,7 @@ def build_comparison_table(scenarios: list[ScenarioRecord]) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("scenario").reset_index(drop=True)
 
 
-def build_comparison_figures(scenarios: list[ScenarioRecord]) -> dict[str, go.Figure]:
+def build_comparison_figures(scenarios: list[ScenarioRecord], lang: str = "es") -> dict[str, go.Figure]:
     clean_scenarios = [scenario for scenario in scenarios if scenario.scan_result is not None and not scenario.dirty]
     summary = build_comparison_table(clean_scenarios)
 
@@ -276,8 +304,8 @@ def build_comparison_figures(scenarios: list[ScenarioRecord]) -> dict[str, go.Fi
         empty = go.Figure()
         empty.update_layout(
             template="plotly_white",
-            title="Comparison",
-            annotations=[{"text": "Run at least two scenarios to compare results.", "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.5, "showarrow": False}],
+            title=tr("compare.figure.empty_title", lang),
+            annotations=[{"text": tr("compare.figure.empty_message", lang), "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.5, "showarrow": False}],
         )
         return {"kpi_bar": empty, "npv_overlay": empty}
 
@@ -288,7 +316,11 @@ def build_comparison_figures(scenarios: list[ScenarioRecord]) -> dict[str, go.Fi
         value_name="value",
     )
     metrics["metric_label"] = metrics["metric"].map(
-        {"NPV_COP": "NPV", "payback_years": "Payback", "self_consumption_ratio": "Self-consumption"}
+        {
+            "NPV_COP": metric_label("NPV_COP", lang),
+            "payback_years": metric_label("payback_years", lang),
+            "self_consumption_ratio": metric_label("self_consumption_ratio", lang),
+        }
     )
     metrics["display_value"] = metrics.apply(
         lambda row: row["value"] * 100 if row["metric"] == "self_consumption_ratio" else row["value"],
@@ -301,10 +333,10 @@ def build_comparison_figures(scenarios: list[ScenarioRecord]) -> dict[str, go.Fi
         color="metric_label",
         barmode="group",
         template="plotly_white",
-        title="Scenario KPI comparison",
+        title=tr("compare.figure.kpi_title", lang),
     )
-    kpi_bar.update_yaxes(title="Metric value")
-    kpi_bar.update_xaxes(title="Scenario")
+    kpi_bar.update_yaxes(title=tr("compare.axis.metric", lang))
+    kpi_bar.update_xaxes(title=tr("compare.axis.scenario", lang))
 
     npv_overlay = go.Figure()
     for scenario in clean_scenarios:
@@ -317,16 +349,23 @@ def build_comparison_figures(scenarios: list[ScenarioRecord]) -> dict[str, go.Fi
                 mode="lines+markers",
                 name=scenario.name,
                 customdata=curve[["candidate_key", "battery"]],
-                hovertemplate="%{fullData.name}<br>kWp=%{x:.3f}<br>NPV=%{y:,.0f}<br>Candidate=%{customdata[0]}<br>Battery=%{customdata[1]}<extra></extra>",
+                hovertemplate=(
+                    "%{fullData.name}<br>"
+                    + f"{tr('compare.axis.kwp', lang)}=%{{x:.3f}}<br>"
+                    + f"{metric_label('NPV_COP', lang)}=%{{y:,.0f}}<br>"
+                    + ("Candidato" if lang == "es" else "Candidate")
+                    + "=%{customdata[0]}<br>"
+                    + metric_label("battery", lang)
+                    + "=%{customdata[1]}<extra></extra>"
+                ),
             )
         )
-    npv_overlay.update_layout(template="plotly_white", title="NPV vs kWp across scenarios")
-    npv_overlay.update_xaxes(title="Installed kWp")
-    npv_overlay.update_yaxes(title="NPV (COP)")
+    npv_overlay.update_layout(template="plotly_white", title=tr("compare.figure.npv_title", lang))
+    npv_overlay.update_xaxes(title=tr("compare.axis.kwp", lang))
+    npv_overlay.update_yaxes(title=metric_label("NPV_COP", lang))
     return {"kpi_bar": kpi_bar, "npv_overlay": npv_overlay}
 
 
 def build_session_comparison_rows(state: ScenarioSessionState) -> list[ScenarioRecord]:
     selected_ids = set(state.comparison_scenario_ids)
     return [scenario for scenario in state.scenarios if scenario.scenario_id in selected_ids]
-

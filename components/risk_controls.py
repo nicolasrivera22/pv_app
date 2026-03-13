@@ -11,7 +11,13 @@ def risk_controls_section() -> html.Div:
                 className="section-head",
                 children=[
                     html.H2(id="risk-page-title"),
-                    html.Button(id="risk-run-btn", n_clicks=0, className="action-btn"),
+                    html.Div(
+                        className="controls",
+                        children=[
+                            html.Button(id="risk-run-btn", n_clicks=0, className="action-btn"),
+                            html.Button(id="risk-export-artifacts-btn", n_clicks=0, className="action-btn tertiary"),
+                        ],
+                    ),
                 ],
             ),
             html.P(id="risk-page-intro"),
@@ -53,6 +59,7 @@ def risk_controls_section() -> html.Div:
                         children=[
                             html.Label(id="risk-retain-samples-label", className="input-label"),
                             dcc.Checklist(id="risk-retain-samples", value=[]),
+                            html.Div(id="risk-retain-samples-help", className="scenario-meta"),
                         ],
                     ),
                 ],

@@ -10,30 +10,39 @@ from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
 
 from components import (
-    ASSUMPTION_FIELDS,
     assumption_editor_section,
-    assumption_values_from_config,
     candidate_explorer_section,
     catalog_editor_section,
+    profile_editor_section,
+    render_assumption_sections,
     render_kpi_cards,
     render_validation_panel,
     scenario_sidebar,
 )
 from services import (
     ScenarioSessionState,
+    build_assumption_sections,
+    build_display_columns,
+    collect_config_updates,
     create_scenario_record,
     default_scenario_name,
     delete_scenario,
+    demand_profile_visibility,
     duplicate_scenario,
+    export_deterministic_artifacts,
     export_scenario_workbook,
+    frame_from_rows,
     load_config_from_excel,
     load_example_config,
     normalize_battery_catalog_rows,
     normalize_inverter_catalog_rows,
+    rebuild_bundle_from_ui,
+    refresh_bundle_issues,
     rename_scenario,
     resolve_selected_candidate_key_for_scenario,
     run_scenario_scan,
     set_active_scenario,
+    tr,
     update_scenario_bundle,
     update_selected_candidate,
 )
@@ -48,6 +57,9 @@ from services.result_views import (
 from services.validation import BATTERY_REQUIRED_COLUMNS, INVERTER_REQUIRED_COLUMNS
 
 register_page(__name__, path="/", name="Workbench")
+
+def _lang(value: str | None) -> str:
+    return value if value in {"en", "es"} else "es"
 
 
 def _empty_figure(title: str, message: str) -> go.Figure:
@@ -97,28 +109,109 @@ layout = html.Div(
                                 html.Div(
                                     className="section-head",
                                     children=[
-                                        html.H2("Active scenario"),
+                                        html.H2(id="active-scenario-panel-title"),
                                         html.Div(
                                             className="controls",
-                                            children=[html.Button("Run deterministic scan", id="run-active-scan-btn", n_clicks=0, className="action-btn")],
+                                            children=[html.Button(id="run-active-scan-btn", n_clicks=0, className="action-btn")],
                                         ),
                                     ],
                                 ),
                                 html.Div(id="active-source-status", className="status-line"),
                                 html.Div(id="active-run-status", className="status-line"),
-                                html.H3("Validation"),
+                                html.Div(id="active-run-progress", className="status-line", style={"display": "none"}),
+                                html.H3(id="active-validation-title"),
                                 html.Div(id="active-validation"),
                             ],
                         ),
                         assumption_editor_section(),
+                        profile_editor_section(),
                         catalog_editor_section(),
-                        candidate_explorer_section(),
+                        dcc.Loading(type="default", children=html.Div(id="deterministic-results-area", children=[candidate_explorer_section()])),
                     ],
                 ),
             ],
         ),
     ],
 )
+
+
+@callback(
+    Output("scenario-sidebar-title", "children"),
+    Output("scenario-upload-prefix", "children"),
+    Output("scenario-upload-link", "children"),
+    Output("load-example-btn", "children"),
+    Output("duplicate-scenario-btn", "children"),
+    Output("delete-scenario-btn", "children"),
+    Output("active-scenario-label", "children"),
+    Output("scenario-dropdown", "placeholder"),
+    Output("set-active-scenario-btn", "children"),
+    Output("rename-scenario-input", "placeholder"),
+    Output("rename-scenario-btn", "children"),
+    Output("active-scenario-panel-title", "children"),
+    Output("run-active-scan-btn", "children"),
+    Output("active-validation-title", "children"),
+    Output("active-run-progress", "children"),
+    Output("assumption-editor-title", "children"),
+    Output("assumption-show-all", "options"),
+    Output("apply-edits-btn", "children"),
+    Output("profile-editor-title", "children"),
+    Output("profile-editor-note", "children"),
+    Output("month-profile-title", "children"),
+    Output("sun-profile-title", "children"),
+    Output("price-kwp-title", "children"),
+    Output("price-kwp-others-title", "children"),
+    Output("demand-profile-title", "children"),
+    Output("demand-profile-general-title", "children"),
+    Output("demand-profile-weights-title", "children"),
+    Output("catalog-editor-title", "children"),
+    Output("inverter-editor-title", "children"),
+    Output("battery-editor-title", "children"),
+    Output("add-inverter-row-btn", "children"),
+    Output("add-battery-row-btn", "children"),
+    Output("candidate-explorer-title", "children"),
+    Output("scenario-export-btn", "children"),
+    Output("scenario-artifacts-btn", "children"),
+    Input("language-selector", "value"),
+)
+def translate_workbench_page(language_value):
+    lang = _lang(language_value)
+    return (
+        tr("workbench.sidebar.title", lang),
+        tr("workbench.upload.prefix", lang),
+        tr("workbench.upload.link", lang),
+        tr("workbench.load_example", lang),
+        tr("workbench.duplicate", lang),
+        tr("workbench.delete", lang),
+        tr("workbench.active_scenario", lang),
+        tr("workbench.no_scenarios_loaded", lang),
+        tr("workbench.set_active", lang),
+        tr("workbench.rename_placeholder", lang),
+        tr("workbench.rename", lang),
+        tr("workbench.section.active", lang),
+        tr("workbench.run_scan", lang),
+        tr("common.validation", lang),
+        tr("workbench.run_running", lang),
+        tr("workbench.assumptions", lang),
+        [{"label": tr("workbench.assumptions.show_all", lang), "value": "all"}],
+        tr("workbench.assumptions.apply", lang),
+        tr("workbench.profiles", lang),
+        tr("workbench.profiles.note", lang),
+        tr("workbench.profiles.month", lang),
+        tr("workbench.profiles.sun", lang),
+        tr("workbench.profiles.price", lang),
+        tr("workbench.profiles.price_others", lang),
+        tr("workbench.profiles.demand_weekday", lang),
+        tr("workbench.profiles.demand_general", lang),
+        tr("workbench.profiles.demand_weights", lang),
+        tr("workbench.catalogs", lang),
+        tr("workbench.catalogs.inverters", lang),
+        tr("workbench.catalogs.batteries", lang),
+        tr("workbench.add_row", lang),
+        tr("workbench.add_row", lang),
+        tr("workbench.candidate_explorer", lang),
+        tr("workbench.export_scenario", lang),
+        tr("common.export_artifacts", lang),
+    )
 
 
 @callback(
@@ -131,16 +224,21 @@ layout = html.Div(
     Output("active-validation", "children"),
     Output("run-active-scan-btn", "disabled"),
     Output("scenario-export-btn", "disabled"),
+    Output("scenario-artifacts-btn", "disabled"),
     Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
 )
-def populate_scenario_shell(session_payload):
+def populate_scenario_shell(session_payload, language_value):
+    lang = _lang(language_value)
     state = _state(session_payload)
     options = [{"label": scenario.name, "value": scenario.scenario_id} for scenario in state.scenarios]
     active = state.get_scenario()
     pills = []
     for scenario in state.scenarios:
         css = "scenario-pill active" if scenario.scenario_id == state.active_scenario_id else "scenario-pill"
-        status = "dirty" if scenario.dirty else "ready"
+        status = "pendiente" if scenario.dirty and scenario.scan_result is None else ("requiere recálculo" if scenario.dirty else "listo")
+        if lang == "en":
+            status = "pending" if scenario.dirty and scenario.scan_result is None else ("rerun needed" if scenario.dirty else "ready")
         pills.append(
             html.Div(
                 className=css,
@@ -152,12 +250,24 @@ def populate_scenario_shell(session_payload):
         )
 
     if active is None:
-        return options, None, "", pills, "No active scenario.", "Run status: pending.", render_validation_panel([]), True, True
+        return (
+            options,
+            None,
+            "",
+            pills,
+            tr("workbench.no_active_scenario", lang),
+            tr("workbench.run_pending", lang),
+            render_validation_panel([], lang=lang),
+            True,
+            True,
+            True,
+        )
 
-    run_status = "Run status: not executed yet."
     if active.last_run_at:
-        run_status = f"Last deterministic run: {active.last_run_at}."
-    validation_children = render_validation_panel(active.config_bundle.issues)
+        run_status = tr("workbench.last_run", lang, value=active.last_run_at)
+    else:
+        run_status = tr("workbench.run_not_executed", lang)
+    validation_children = render_validation_panel(active.config_bundle.issues, lang=lang)
     has_errors = any(issue.level == "error" for issue in active.config_bundle.issues)
     export_disabled = active.scan_result is None or active.dirty
     return (
@@ -165,35 +275,111 @@ def populate_scenario_shell(session_payload):
         active.scenario_id,
         active.name,
         pills,
-        f"Source: {active.source_name}.",
+        tr("workbench.source_status", lang, value=active.source_name),
         run_status,
         validation_children,
         has_errors,
+        export_disabled,
         export_disabled,
     )
 
 
 @callback(
-    Output({"type": "assumption-input", "field": ALL}, "value"),
+    Output("assumption-sections", "children"),
+    Input("scenario-session-store", "data"),
+    Input("assumption-show-all", "value"),
+    Input("language-selector", "value"),
+)
+def populate_assumptions(session_payload, show_all_values, language_value):
+    lang = _lang(language_value)
+    state = _state(session_payload)
+    active = state.get_scenario()
+    if active is None:
+        return render_assumption_sections(
+            [],
+            show_all=False,
+            empty_message=tr("workbench.assumptions.none", lang),
+            advanced_label=tr("workbench.assumptions.advanced", lang),
+        )
+
+    sections = build_assumption_sections(active.config_bundle, lang=lang, show_all="all" in (show_all_values or []))
+    return render_assumption_sections(
+        sections,
+        show_all="all" in (show_all_values or []),
+        empty_message=tr("workbench.assumptions.none", lang),
+        advanced_label=tr("workbench.assumptions.advanced", lang),
+    )
+
+
+@callback(
     Output("inverter-table-editor", "data"),
     Output("inverter-table-editor", "columns"),
     Output("battery-table-editor", "data"),
     Output("battery-table-editor", "columns"),
+    Output("month-profile-editor", "data"),
+    Output("month-profile-editor", "columns"),
+    Output("sun-profile-editor", "data"),
+    Output("sun-profile-editor", "columns"),
+    Output("price-kwp-editor", "data"),
+    Output("price-kwp-editor", "columns"),
+    Output("price-kwp-others-editor", "data"),
+    Output("price-kwp-others-editor", "columns"),
+    Output("demand-profile-editor", "data"),
+    Output("demand-profile-editor", "columns"),
+    Output("demand-profile-general-editor", "data"),
+    Output("demand-profile-general-editor", "columns"),
+    Output("demand-profile-weights-editor", "data"),
+    Output("demand-profile-weights-editor", "columns"),
+    Output("demand-profile-panel", "style"),
+    Output("demand-profile-general-panel", "style"),
+    Output("demand-profile-weights-panel", "style"),
     Input("scenario-session-store", "data"),
 )
 def populate_editors(session_payload):
     state = _state(session_payload)
     active = state.get_scenario()
     if active is None:
-        return [None for _ in ASSUMPTION_FIELDS], [], [], [], []
-    inverter_catalog = active.config_bundle.inverter_catalog.copy()
-    battery_catalog = active.config_bundle.battery_catalog.copy()
+        empty = ([], [])
+        hidden = {"display": "none"}
+        return (
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            hidden,
+            hidden,
+            hidden,
+        )
+
+    bundle = active.config_bundle
+    visibility = demand_profile_visibility(str(bundle.config.get("use_excel_profile", "")))
     return (
-        assumption_values_from_config(active.config_bundle.config),
-        inverter_catalog.to_dict("records"),
-        _table_columns(inverter_catalog),
-        battery_catalog.to_dict("records"),
-        _table_columns(battery_catalog),
+        bundle.inverter_catalog.to_dict("records"),
+        _table_columns(bundle.inverter_catalog),
+        bundle.battery_catalog.to_dict("records"),
+        _table_columns(bundle.battery_catalog),
+        bundle.month_profile_table.to_dict("records"),
+        _table_columns(bundle.month_profile_table),
+        bundle.sun_profile_table.to_dict("records"),
+        _table_columns(bundle.sun_profile_table),
+        bundle.cop_kwp_table.to_dict("records"),
+        _table_columns(bundle.cop_kwp_table),
+        bundle.cop_kwp_table_others.to_dict("records"),
+        _table_columns(bundle.cop_kwp_table_others),
+        bundle.demand_profile_table.to_dict("records"),
+        _table_columns(bundle.demand_profile_table),
+        bundle.demand_profile_general_table.to_dict("records"),
+        _table_columns(bundle.demand_profile_general_table),
+        bundle.demand_profile_weights_table.to_dict("records"),
+        _table_columns(bundle.demand_profile_weights_table),
+        visibility["demand-profile-panel"],
+        visibility["demand-profile-general-panel"],
+        visibility["demand-profile-weights-panel"],
     )
 
 
@@ -240,10 +426,23 @@ def add_battery_row(n_clicks, table_rows):
     State("rename-scenario-input", "value"),
     State("scenario-dropdown", "value"),
     State("scenario-session-store", "data"),
+    State({"type": "assumption-input", "field": ALL}, "id"),
     State({"type": "assumption-input", "field": ALL}, "value"),
     State("inverter-table-editor", "data"),
     State("battery-table-editor", "data"),
+    State("month-profile-editor", "data"),
+    State("sun-profile-editor", "data"),
+    State("price-kwp-editor", "data"),
+    State("price-kwp-others-editor", "data"),
+    State("demand-profile-editor", "data"),
+    State("demand-profile-general-editor", "data"),
+    State("demand-profile-weights-editor", "data"),
+    State("language-selector", "value"),
     prevent_initial_call=True,
+    running=[
+        (Output("run-active-scan-btn", "disabled"), True, False),
+        (Output("active-run-progress", "style"), {"display": "block"}, {"display": "none"}),
+    ],
 )
 def mutate_session_state(
     upload_contents,
@@ -258,10 +457,20 @@ def mutate_session_state(
     rename_value,
     scenario_dropdown_value,
     session_payload,
+    assumption_input_ids,
     assumption_values,
     inverter_rows,
     battery_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    price_kwp_rows,
+    price_kwp_others_rows,
+    demand_profile_rows,
+    demand_profile_general_rows,
+    demand_profile_weights_rows,
+    language_value,
 ):
+    lang = _lang(language_value)
     trigger = ctx.triggered_id
     state = _state(session_payload)
 
@@ -271,17 +480,17 @@ def mutate_session_state(
                 raise PreventUpdate
             _, encoded = upload_contents.split(",", 1)
             bundle = load_config_from_excel(base64.b64decode(encoded))
-            scenario_name = _scenario_name_from_filename(upload_filename, default_scenario_name(state))
+            scenario_name = _scenario_name_from_filename(upload_filename, default_scenario_name(state, prefix="Escenario" if lang == "es" else "Scenario"))
             record = create_scenario_record(scenario_name, bundle, source_name=upload_filename or bundle.source_name)
             state = replace(state, scenarios=(*state.scenarios, record), active_scenario_id=record.scenario_id)
-            return state.to_payload(), f"Loaded workbook into scenario '{record.name}'."
+            return state.to_payload(), tr("workbench.loaded_workbook", lang, name=record.name)
 
         if trigger == "load-example-btn":
             bundle = load_example_config()
-            name = default_scenario_name(state)
+            name = default_scenario_name(state, prefix="Escenario" if lang == "es" else "Scenario")
             record = create_scenario_record(name, bundle, source_name=bundle.source_name)
             state = replace(state, scenarios=(*state.scenarios, record), active_scenario_id=record.scenario_id)
-            return state.to_payload(), f"Loaded bundled example as '{record.name}'."
+            return state.to_payload(), tr("workbench.loaded_example", lang, name=record.name)
 
         active = state.get_scenario()
         if active is None:
@@ -289,48 +498,54 @@ def mutate_session_state(
 
         if trigger == "duplicate-scenario-btn":
             state = duplicate_scenario(state, active.scenario_id)
-            return state.to_payload(), "Duplicated active scenario."
+            return state.to_payload(), tr("workbench.duplicated", lang)
 
         if trigger == "rename-scenario-btn":
             state = rename_scenario(state, active.scenario_id, rename_value or active.name)
-            return state.to_payload(), "Renamed active scenario."
+            return state.to_payload(), tr("workbench.renamed", lang)
 
         if trigger == "delete-scenario-btn":
             state = delete_scenario(state, active.scenario_id)
-            return state.to_payload(), "Deleted active scenario."
+            return state.to_payload(), tr("workbench.deleted", lang)
 
         if trigger == "set-active-scenario-btn":
             if scenario_dropdown_value == state.active_scenario_id:
                 raise PreventUpdate
             state = set_active_scenario(state, scenario_dropdown_value)
             selected = state.get_scenario()
-            return state.to_payload(), f"Active scenario set to '{selected.name}'." if selected else "No active scenario."
+            return state.to_payload(), tr("workbench.set_active_status", lang, name=selected.name) if selected else tr("workbench.no_active_scenario", lang)
 
         if trigger == "apply-edits-btn":
-            config = dict(active.config_bundle.config)
-            for definition, value in zip(ASSUMPTION_FIELDS, assumption_values):
-                config[definition["field"]] = value
+            config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
             inverter_catalog, inverter_issues = normalize_inverter_catalog_rows(inverter_rows)
             battery_catalog, battery_issues = normalize_battery_catalog_rows(battery_rows)
-            updated_bundle = replace(
+
+            bundle = rebuild_bundle_from_ui(
                 active.config_bundle,
-                config=config,
+                config_updates=config,
                 inverter_catalog=inverter_catalog,
                 battery_catalog=battery_catalog,
-                issues=tuple([*inverter_issues, *battery_issues]),
+                demand_profile=frame_from_rows(demand_profile_rows, list(active.config_bundle.demand_profile_table.columns)),
+                demand_profile_weights=frame_from_rows(demand_profile_weights_rows, list(active.config_bundle.demand_profile_weights_table.columns)),
+                demand_profile_general=frame_from_rows(demand_profile_general_rows, list(active.config_bundle.demand_profile_general_table.columns)),
+                month_profile=frame_from_rows(month_profile_rows, list(active.config_bundle.month_profile_table.columns)),
+                sun_profile=frame_from_rows(sun_profile_rows, list(active.config_bundle.sun_profile_table.columns)),
+                cop_kwp_table=frame_from_rows(price_kwp_rows, list(active.config_bundle.cop_kwp_table.columns)),
+                cop_kwp_table_others=frame_from_rows(price_kwp_others_rows, list(active.config_bundle.cop_kwp_table_others.columns)),
             )
-            state = update_scenario_bundle(state, active.scenario_id, updated_bundle)
-            return state.to_payload(), "Applied scenario edits. Deterministic results marked dirty until rerun."
+            bundle = refresh_bundle_issues(bundle, extra_issues=[*inverter_issues, *battery_issues])
+            state = update_scenario_bundle(state, active.scenario_id, bundle)
+            return state.to_payload(), tr("workbench.applied_edits", lang)
 
         if trigger == "run-active-scan-btn":
             state = run_scenario_scan(state, active.scenario_id)
             updated = state.get_scenario(active.scenario_id)
-            return state.to_payload(), f"Deterministic scan completed for '{updated.name}'."
+            return state.to_payload(), tr("workbench.scan_completed", lang, name=updated.name)
 
     except PreventUpdate:
         raise
     except Exception as exc:
-        return state.to_payload(), f"Action failed: {exc}"
+        return state.to_payload(), tr("common.action_failed", lang, error=exc)
 
     raise PreventUpdate
 
@@ -370,23 +585,45 @@ def persist_selected_candidate(selected_rows, click_data, table_rows, session_pa
     Output("active-candidate-table", "columns"),
     Output("active-candidate-table", "selected_rows"),
     Output("active-candidate-table", "style_data_conditional"),
+    Output("active-candidate-table", "tooltip_header"),
     Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
 )
-def populate_results(session_payload):
+def populate_results(session_payload, language_value):
+    lang = _lang(language_value)
     state = _state(session_payload)
     active = state.get_scenario()
-    empty = _empty_figure("Results", "Run a deterministic scan to view results.")
+    empty = _empty_figure(tr("common.results", lang), tr("workbench.results.empty", lang))
     if active is None or active.scan_result is None:
-        return [], empty, empty, empty, [], [], [], []
+        return [], empty, empty, empty, [], [], [], [], {}
 
     scan = active.scan_result
     selected_key = resolve_selected_candidate_key_for_scenario(scan, active.selected_candidate_key)
     detail = scan.candidate_details[selected_key]
     kpis = build_kpis(detail)
-    monthly_balance = build_monthly_balance(detail["monthly"])
+    monthly_balance = build_monthly_balance(detail["monthly"], lang=lang)
     cash_flow = build_cash_flow(detail["monthly"])
     table = scan.candidates.copy()
-    columns = _table_columns(table)
+    visible_columns = [
+        "kWp",
+        "battery",
+        "NPV_COP",
+        "payback_years",
+        "capex_client",
+        "self_consumption_ratio",
+        "self_sufficiency_ratio",
+        "annual_import_kwh",
+        "annual_export_kwh",
+        "peak_ratio",
+    ]
+    columns, tooltip_header = build_display_columns(visible_columns, lang)
+    columns.extend(
+        [
+            {"name": "candidate_key", "id": "candidate_key"},
+            {"name": "scan_order", "id": "scan_order"},
+            {"name": "best_battery_for_kwp", "id": "best_battery_for_kwp"},
+        ]
+    )
     selected_index = table.index[table["candidate_key"] == selected_key].tolist()
     best_key = scan.best_candidate_key
     styles = [
@@ -401,14 +638,15 @@ def populate_results(session_payload):
         },
     ]
     return (
-        render_kpi_cards(kpis),
-        build_npv_figure(table, selected_key=selected_key),
-        build_monthly_balance_figure(monthly_balance),
-        build_cash_flow_figure(cash_flow),
+        render_kpi_cards(kpis, lang),
+        build_npv_figure(table, selected_key=selected_key, lang=lang),
+        build_monthly_balance_figure(monthly_balance, lang=lang),
+        build_cash_flow_figure(cash_flow, lang=lang),
         table.to_dict("records"),
         columns,
         [selected_index[0]] if selected_index else [],
         styles,
+        tooltip_header,
     )
 
 
@@ -428,3 +666,22 @@ def export_active_scenario(n_clicks, session_payload):
     content = export_scenario_workbook(active)
     filename = f"{active.name.replace(' ', '_')}_deterministic.xlsx"
     return _download_payload(content, filename)
+
+
+@callback(
+    Output("workbench-status", "children", allow_duplicate=True),
+    Input("scenario-artifacts-btn", "n_clicks"),
+    State("scenario-session-store", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def export_active_artifacts(n_clicks, session_payload, language_value):
+    if not n_clicks:
+        raise PreventUpdate
+    lang = _lang(language_value)
+    state = _state(session_payload)
+    active = state.get_scenario()
+    if active is None or active.scan_result is None or active.dirty:
+        raise PreventUpdate
+    paths = export_deterministic_artifacts(active)
+    return tr("workbench.export_artifacts_done", lang, path=str(paths[0].parent))

@@ -54,7 +54,7 @@ def _clear_registry():
 
 def test_translation_helper_supports_spanish_and_fallback() -> None:
     assert tr("nav.risk", "es") == "Riesgo"
-    assert tr("risk.page_title", "fr") == tr("risk.page_title", "en")
+    assert tr("risk.page_title", "fr") == tr("risk.page_title", "es")
     assert tr("missing.translation", "es") == "missing.translation"
 
 
@@ -169,7 +169,7 @@ def test_risk_display_helpers_build_metadata_tables_and_figures() -> None:
 
     assert list(metadata.columns) == ["label", "value"]
     assert "Scenario" in metadata["label"].tolist()
-    assert "NPV (COP)" in percentile_table["metric"].tolist()
+    assert "NPV [COP]" in percentile_table["metric"].tolist()
 
     npv_hist = build_histogram_figure(
         stored.views.histograms["NPV_COP"],
