@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dash import Dash, dcc, html, page_container
+from dash import Dash, Input, Output, callback, dcc, html, page_container
+
+from services.i18n import tr
 
 
 def create_app() -> Dash:
@@ -16,15 +18,37 @@ def create_app() -> Dash:
                 children=[
                     html.Div(
                         children=[
-                            html.H1("PV deterministic workbench"),
-                            html.P("Compare deterministic scenarios, edit assumptions, inspect candidates, and export results."),
+                            html.H1(id="app-title"),
+                            html.P(id="app-subtitle"),
                         ]
                     ),
-                    html.Nav(
-                        className="top-nav",
+                    html.Div(
+                        className="header-tools",
                         children=[
-                            dcc.Link("Workbench", href="/", className="nav-link"),
-                            dcc.Link("Compare", href="/compare", className="nav-link"),
+                            html.Div(
+                                className="language-box",
+                                children=[
+                                    html.Label(id="language-label", htmlFor="language-selector", className="input-label"),
+                                    dcc.Dropdown(
+                                        id="language-selector",
+                                        options=[
+                                            {"label": "English", "value": "en"},
+                                            {"label": "Español", "value": "es"},
+                                        ],
+                                        value="en",
+                                        clearable=False,
+                                        className="language-select",
+                                    ),
+                                ],
+                            ),
+                            html.Nav(
+                                className="top-nav",
+                                children=[
+                                    dcc.Link(html.Span(id="nav-workbench-label"), href="/", className="nav-link"),
+                                    dcc.Link(html.Span(id="nav-compare-label"), href="/compare", className="nav-link"),
+                                    dcc.Link(html.Span(id="nav-risk-label"), href="/risk", className="nav-link"),
+                                ],
+                            ),
                         ],
                     ),
                 ],
@@ -47,6 +71,9 @@ def create_app() -> Dash:
                 .app-header { max-width: 1400px; margin: 0 auto; padding: 1.4rem 1.25rem 0.5rem; display: flex; gap: 1rem; align-items: end; justify-content: space-between; }
                 .app-header h1 { margin: 0; }
                 .app-header p { margin: 0.35rem 0 0; color: #475569; }
+                .header-tools { display: flex; gap: 1rem; flex-wrap: wrap; align-items: end; }
+                .language-box { min-width: 180px; }
+                .language-select { min-width: 160px; }
                 .top-nav { display: flex; gap: 0.65rem; flex-wrap: wrap; }
                 .nav-link { text-decoration: none; padding: 0.75rem 1rem; border-radius: 999px; background: rgba(255,255,255,0.82); color: #0f172a; font-weight: 600; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05); }
                 .page { max-width: 1400px; margin: 0 auto; padding: 1rem 1.25rem 3rem; }
@@ -80,7 +107,7 @@ def create_app() -> Dash:
                 .field-card { background: #f8fafc; border-radius: 14px; padding: 0.85rem; }
                 .catalog-grid, .chart-grid, .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
                 .compare-grid > .panel { min-height: 100%; }
-                @media (max-width: 980px) { .workbench-grid { grid-template-columns: 1fr; } .sidebar-panel { position: static; } .app-header { align-items: start; flex-direction: column; } }
+                @media (max-width: 980px) { .workbench-grid { grid-template-columns: 1fr; } .sidebar-panel { position: static; } .app-header { align-items: start; flex-direction: column; } .header-tools { width: 100%; align-items: start; } }
             </style>
         </head>
         <body>
@@ -98,6 +125,27 @@ def create_app() -> Dash:
 
 app = create_app()
 server = app.server
+
+
+@callback(
+    Output("app-title", "children"),
+    Output("app-subtitle", "children"),
+    Output("language-label", "children"),
+    Output("nav-workbench-label", "children"),
+    Output("nav-compare-label", "children"),
+    Output("nav-risk-label", "children"),
+    Input("language-selector", "value"),
+)
+def translate_shell(language_value: str):
+    lang = language_value if language_value in {"en", "es"} else "en"
+    return (
+        tr("app.title", lang),
+        tr("app.subtitle", lang),
+        tr("app.language", lang),
+        tr("nav.workbench", lang),
+        tr("nav.compare", lang),
+        tr("nav.risk", lang),
+    )
 
 
 if __name__ == "__main__":
