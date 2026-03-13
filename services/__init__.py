@@ -9,6 +9,18 @@ from .result_views import (
     resolve_selected_candidate_key_for_scenario,
 )
 from .risk_views import prepare_risk_views
+from .i18n import tr
+from .risk_registry import clear_expired_risk_results, clear_risk_results, get_risk_result, store_risk_result
+from .risk_ui import (
+    build_risk_candidate_options,
+    build_risk_metadata_rows,
+    build_risk_result_store_payload,
+    prepare_percentile_table_for_display,
+    ready_risk_scenarios,
+    resolve_default_risk_candidate,
+    resolve_default_risk_scenario,
+    validate_risk_run_inputs,
+)
 from .scenario_runner import run_scan, run_scenario
 from .scenario_session import (
     add_scenario,
@@ -64,7 +76,12 @@ __all__ = [
     "add_scenario",
     "build_comparison_figures",
     "build_comparison_table",
+    "build_risk_candidate_options",
+    "build_risk_metadata_rows",
+    "build_risk_result_store_payload",
     "build_session_comparison_rows",
+    "clear_expired_risk_results",
+    "clear_risk_results",
     "create_scenario_record",
     "default_scenario_name",
     "delete_scenario",
@@ -72,13 +89,18 @@ __all__ = [
     "ensure_template",
     "export_comparison_workbook",
     "export_scenario_workbook",
+    "get_risk_result",
     "load_config_from_excel",
     "load_example_config",
     "normalize_battery_catalog_rows",
     "normalize_inverter_catalog_rows",
+    "prepare_percentile_table_for_display",
     "prepare_risk_views",
+    "ready_risk_scenarios",
     "refresh_bundle_issues",
     "rename_scenario",
+    "resolve_default_risk_candidate",
+    "resolve_default_risk_scenario",
     "resolve_selected_candidate_key_for_scenario",
     "run_monte_carlo",
     "run_scan",
@@ -86,8 +108,11 @@ __all__ = [
     "run_scenario_scan",
     "set_active_scenario",
     "set_comparison_scenarios",
+    "store_risk_result",
     "summarize_monte_carlo",
+    "tr",
     "update_scenario_bundle",
     "update_selected_candidate",
     "validate_config",
+    "validate_risk_run_inputs",
 ]

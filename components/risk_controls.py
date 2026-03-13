@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+from dash import dcc, html
+
+
+def risk_controls_section() -> html.Div:
+    return html.Div(
+        className="panel",
+        children=[
+            html.Div(
+                className="section-head",
+                children=[
+                    html.H2(id="risk-page-title"),
+                    html.Button(id="risk-run-btn", n_clicks=0, className="action-btn"),
+                ],
+            ),
+            html.P(id="risk-page-intro"),
+            html.P(id="risk-mode-note", className="scenario-meta"),
+            html.Div(
+                className="assumption-grid",
+                children=[
+                    html.Div(
+                        className="field-card",
+                        children=[
+                            html.Label(id="risk-scenario-label", className="input-label"),
+                            dcc.Dropdown(id="risk-scenario-dropdown", placeholder=""),
+                        ],
+                    ),
+                    html.Div(
+                        className="field-card",
+                        children=[
+                            html.Label(id="risk-candidate-label", className="input-label"),
+                            dcc.Dropdown(id="risk-candidate-dropdown", placeholder=""),
+                        ],
+                    ),
+                    html.Div(
+                        className="field-card",
+                        children=[
+                            html.Label(id="risk-n-simulations-label", className="input-label"),
+                            dcc.Input(id="risk-n-simulations-input", type="number", min=1, step=1, value=None, className="text-input"),
+                        ],
+                    ),
+                    html.Div(
+                        className="field-card",
+                        children=[
+                            html.Label(id="risk-seed-label", className="input-label"),
+                            dcc.Input(id="risk-seed-input", type="number", min=0, step=1, value=0, className="text-input"),
+                            html.Div(id="risk-seed-help", className="scenario-meta"),
+                        ],
+                    ),
+                    html.Div(
+                        className="field-card",
+                        children=[
+                            html.Label(id="risk-retain-samples-label", className="input-label"),
+                            dcc.Checklist(id="risk-retain-samples", value=[]),
+                        ],
+                    ),
+                ],
+            ),
+            html.Div(id="risk-validation", className="validation-box"),
+            html.Div(id="risk-status", className="status-line"),
+        ],
+    )
