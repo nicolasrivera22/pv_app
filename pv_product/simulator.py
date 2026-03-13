@@ -11,6 +11,15 @@ from .dispatch import dispatch_day
 from .models import Battery, DispatchConfig, DispatchResult, PVSystem, SimResult
 
 
+def _draw_normal(rng, std: float) -> float:
+    """Draw a zero-mean normal deviate from either a Python Random or NumPy Generator."""
+    if std <= 0:
+        return 0.0
+    if hasattr(rng, "normal"):
+        return float(rng.normal(0.0, std))
+    return float(rng.normalvariate(0.0, std))
+
+
 def _ann_to_month_rate(r_annual: float) -> float:
     """Convierte tasa anual efectiva a mensual equivalente."""
     return (1.0 + r_annual) ** (1.0 / 12.0) - 1.0
@@ -121,7 +130,7 @@ class Simulator:
         battery: Optional[Battery],
         years: int,
         price_per_kwp_cop: float,
-        rng: Optional[random.Random] = None,
+        rng=None,
         stochastic: bool = False,
     ) -> SimResult:
         """Simula mes a mes durante `years` usando 7x24 + estacionalidad."""
@@ -166,19 +175,19 @@ class Simulator:
                     sell_mnth *= (1 + g_sell_m)
 
                 if stochastic and cfg.get("mc_buy_std", 0) > 0:
-                    buy_mnth *= 1 + rng.normalvariate(0, cfg.get("mc_buy_std", 0))
+                    buy_mnth *= 1 + _draw_normal(rng, cfg.get("mc_buy_std", 0))
                 if stochastic and cfg.get("mc_sell_std", 0) > 0:
-                    sell_mnth *= 1 + rng.normalvariate(0, cfg.get("mc_sell_std", 0))
+                    sell_mnth *= 1 + _draw_normal(rng, cfg.get("mc_sell_std", 0))
 
                 pr_noise = cfg.get("mc_PR_std", 0.0) if stochastic else 0.0
                 PR_mon = (
                     system.pr
                     * pr_deg_y
-                    * (1 + (rng.normalvariate(0, pr_noise) if pr_noise > 0 else 0))
+                    * (1 + _draw_normal(rng, pr_noise))
                 )
                 E_month = float(self.demand_month_factor[mi]) * float(cfg["E_month_kWh"])
                 if stochastic and cfg.get("mc_demand_std", 0) > 0:
-                    E_month *= 1 + rng.normalvariate(0, cfg.get("mc_demand_std", 0))
+                    E_month *= 1 + _draw_normal(rng, cfg.get("mc_demand_std", 0))
                 E_week = E_month / self.weeks_per_month
 
                 def run_week(soc0: float):

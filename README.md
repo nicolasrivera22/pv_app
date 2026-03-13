@@ -1,6 +1,6 @@
 # PV Deterministic Workbench
 
-This repository now provides a deterministic Dash workbench for PV sizing and financial analysis. Phase 1 established the service layer and single-scenario MVP, phase 1.1 hardened validation and regression behavior, and phase 2A turns the app into a multi-scenario deterministic analysis tool.
+This repository now provides a deterministic Dash workbench for PV sizing and financial analysis plus the first stochastic backend foundation. Phase 1 established the service layer and single-scenario MVP, phase 1.1 hardened validation and regression behavior, phase 2A turned the app into a multi-scenario deterministic analysis tool, and phase 2B.1 adds a reproducible Monte Carlo service layer for future risk UI work.
 
 ## What phase 2A adds
 
@@ -24,6 +24,32 @@ This repository now provides a deterministic Dash workbench for PV sizing and fi
 - Explicit deterministic export:
   - scenario workbook export from the workbench
   - comparison workbook export from the comparison page
+
+## What phase 2B.1 adds
+
+- A dedicated stochastic service layer:
+  - `run_monte_carlo(...)`
+  - `summarize_monte_carlo(...)`
+  - `prepare_risk_views(...)`
+- Reproducible fixed-candidate Monte Carlo with explicit `seed=0` default behavior.
+- Structured stochastic result objects with:
+  - metadata
+  - compact distribution summaries
+  - risk probabilities
+  - histogram / ECDF / percentile-table view data
+  - optional raw per-draw samples
+- Monte Carlo perturbation of the existing supported uncertainty inputs only:
+  - `mc_PR_std`
+  - `mc_buy_std`
+  - `mc_sell_std`
+  - `mc_demand_std`
+- Payback semantics for stochastic runs:
+  - `payback_years` stays `NaN` when payback is not reached within the horizon
+  - payback percentiles are computed over finite cases only
+  - `probability_payback_within_horizon` is reported separately
+- A documented soft warning threshold for large runs:
+  - `MONTE_CARLO_WARNING_THRESHOLD = 5000`
+  - large runs are allowed, but the result carries a warning
 
 ## Run the app
 
@@ -58,6 +84,14 @@ pytest
 - `components/`: reusable layout blocks for scenarios, assumptions, catalogs, validation, KPIs, and candidate exploration
 - `services/`: Excel I/O, validation, deterministic runner, scenario-session state, exports, and result shaping
 
+## Stochastic service notes
+
+- Phase 2B.1 supports `fixed_candidate` mode only.
+- The stochastic path starts from a validated deterministic scenario and a resolved deterministic candidate.
+- Deterministic scans remain deterministic; Monte Carlo perturbations are applied only inside the stochastic runner.
+- By default, stochastic runs return compact summaries and chart-ready tables, not full raw sample payloads.
+- If you need per-draw samples for debugging or offline analysis, use `return_samples=True`.
+
 ## Notes on the Excel contract
 
 - The bundled `PV_inputs.xlsx` remains the authoritative workbook contract for the deterministic app.
@@ -83,14 +117,16 @@ pytest
 
 ## What remains deferred
 
-- Monte Carlo UI and stochastic scenario workflows
+- Monte Carlo Dash UI and stochastic scenario workflows
 - background jobs and multi-user persistence
 - scenario rejection-reason tracing for infeasible candidates
 - broader economics-model redesign
 - full removal of old matplotlib cross-check helpers
+- `optimal_per_draw` stochastic mode
 
 ## Known technical debt
 
 - Peak-ratio logic is still intentionally legacy-compatible. Representative-week aggregation and the current demand-seasonality interaction were not redesigned in this pass because changing them would alter the deterministic regression baseline.
 - The browser session store now holds full deterministic scenario bundles and scan results. That is acceptable for phase 2A, but phase 2B may need more deliberate client-state sizing if scenario counts grow.
 - The preserved `Resultados` artifacts still serve as the legacy regression oracle for the shipped workbook.
+- The stochastic backend reuses the current monthly perturbation assumptions and representative-week simulator. It is suitable for phase 2B.1 risk summaries, but it does not yet model uncertainty in feasibility, hardware failures, or broader commercial assumptions.
