@@ -6,6 +6,7 @@ from typing import Any
 from dash.dash_table.Format import Format, Group, Scheme
 
 from .config_metadata import ConfigFieldMeta, extract_config_metadata
+from .i18n import tr
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,8 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "basic",
         "Modo de perfil",
         "Profile mode",
+        "Define cómo se reparte la demanda horaria. También controla qué tabla de perfiles debes editar más abajo.",
+        "Defines how hourly demand is distributed. It also controls which profile table you should edit below.",
         options=(
             ("Perfil hora-día-semana", "perfil hora dia de semana"),
             ("Perfil horario relativo", "perfil horario relativo"),
@@ -54,6 +57,8 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "basic",
         "Modo de precio",
         "Pricing mode",
+        "Elige si el costo base se calcula por bandas de kWp o como un total fijo del proyecto.",
+        "Choose whether the base cost is calculated from kWp pricing bands or from a fixed project total.",
         options=(("Variable", "variable"), ("Total", "total")),
     ),
     "price_total_COP": FieldUiSchema("number", "advanced", "Precio total", "Total price"),
@@ -62,6 +67,8 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "advanced",
         "Agregar hardware aparte",
         "Add hardware on top",
+        "Si activas esta opción, inversor y batería se suman aparte del precio base del proyecto.",
+        "If enabled, inverter and battery are added on top of the base project price.",
         options=(("Sí", True), ("No", False)),
     ),
     "include_var_others": FieldUiSchema(
@@ -69,6 +76,8 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "advanced",
         "Incluir otros variables",
         "Include variable others",
+        "Suma la tabla de 'otros costos variables' además del precio principal por kWp.",
+        "Adds the 'other variable costs' table on top of the main kWp pricing table.",
         options=(("Sí", True), ("No", False)),
     ),
     "price_others_total": FieldUiSchema("number", "advanced", "Otros fijos", "Fixed others"),
@@ -132,6 +141,8 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "basic",
         "Permitir exportación",
         "Allow export",
+        "Permite vender excedentes a la red. Si se desactiva, el modelo opera como cero inyección.",
+        "Allows exports to the grid. If disabled, the model behaves as zero-export.",
         options=(("Sí", True), ("No", False)),
     ),
     "include_battery": FieldUiSchema(
@@ -139,6 +150,8 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "basic",
         "Incluir batería",
         "Include battery",
+        "Activa el análisis con almacenamiento. Si lo desactivas, solo se evaluarán diseños FV sin batería.",
+        "Enables storage analysis. If disabled, only PV-only designs are evaluated.",
         options=(("Sí", True), ("No", False)),
     ),
     "battery_name": FieldUiSchema("text", "advanced", "Batería fija", "Fixed battery"),
@@ -147,6 +160,8 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "basic",
         "Optimizar batería",
         "Optimize battery",
+        "Prueba el catálogo de baterías para cada kWp. Si está desactivado, se usa la batería fija elegida arriba.",
+        "Tries the battery catalog for each kWp. If disabled, the fixed battery selected above is used.",
         options=(("Sí", True), ("No", False)),
     ),
     "bat_DoD": FieldUiSchema("number", "advanced", "Profundidad de descarga", "Depth of discharge"),
@@ -155,6 +170,8 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "advanced",
         "Acoplamiento de batería",
         "Battery coupling",
+        "Define si la batería se conecta en AC o DC dentro del modelo.",
+        "Defines whether the battery is modeled as AC-coupled or DC-coupled.",
         options=(("AC", "ac"), ("DC", "dc")),
     ),
     "bat_eta_rt": FieldUiSchema("number", "advanced", "Eficiencia batería", "Battery efficiency"),
@@ -171,6 +188,33 @@ GROUP_LABELS = {
     "Restricción de Proporción Pico": {"es": "Restricción de Proporción Pico", "en": "Peak-Ratio Constraint"},
     "Semilla": {"es": "Semilla", "en": "Seed"},
     "Controles de Batería y Exporte": {"es": "Batería y Exporte", "en": "Battery and Export"},
+}
+
+GROUP_HELP = {
+    "Demanda y Perfil": {
+        "es": "Estos parámetros cambian el tamaño y la forma de la demanda que el sistema debe cubrir.",
+        "en": "These parameters change the size and shape of the demand the system must cover.",
+    },
+    "Economía": {
+        "es": "Afecta los ahorros, el VPN y el payback del proyecto.",
+        "en": "These values affect savings, NPV, and project payback.",
+    },
+    "Precios": {
+        "es": "Controla cómo se calcula el CAPEX base y cómo se aplican las bandas variables por kWp.",
+        "en": "Controls how base CAPEX is calculated and how variable kWp bands are applied.",
+    },
+    "Semilla": {
+        "es": "Define desde dónde empieza el barrido de kWp y hasta qué tan amplio será.",
+        "en": "Defines where the kWp sweep starts and how wide it is.",
+    },
+    "Controles de Batería y Exporte": {
+        "es": "Reúne las decisiones más prácticas sobre batería, exportación y autoconsumo.",
+        "en": "Collects the most practical battery, export, and self-consumption decisions.",
+    },
+    "Monte Carlo": {
+        "es": "Estos valores solo afectan el análisis de riesgo en la página de Monte Carlo.",
+        "en": "These values only affect risk analysis on the Monte Carlo page.",
+    },
 }
 
 METRIC_SCHEMA = {
@@ -316,6 +360,13 @@ def group_label(group: str, lang: str = "es") -> str:
     return mapping.get(lang, mapping.get("es", group))
 
 
+def section_help(group: str, lang: str = "es") -> str:
+    mapping = GROUP_HELP.get(group)
+    if mapping is None:
+        return ""
+    return mapping.get(lang, mapping.get("es", ""))
+
+
 def field_schema_for(meta: ConfigFieldMeta) -> FieldUiSchema:
     default_kind = "number" if isinstance(meta.value, (int, float)) and not isinstance(meta.value, bool) else "text"
     if isinstance(meta.value, bool):
@@ -368,7 +419,15 @@ def build_assumption_sections(bundle, lang: str = "es", show_all: bool = False) 
             continue
         target = "all" if show_all or schema.visibility == "basic" else "advanced"
         group = group_label(meta.group, lang)
-        bucket = sections_by_group.setdefault(group, {"group": group, "basic": [], "advanced": []})
+        bucket = sections_by_group.setdefault(
+            group,
+            {
+                "group": group,
+                "help": section_help(meta.group, lang),
+                "basic": [],
+                "advanced": [],
+            },
+        )
         bucket["basic" if target == "all" else target].append(
             {
                 "field": meta.config_key,
@@ -442,6 +501,8 @@ def format_metric(metric_key: str, value: Any, lang: str = "es") -> str:
     schema = METRIC_SCHEMA.get(metric_key, {"format": "text", "precision": 0})
     fmt = schema.get("format", "text")
     precision = int(schema.get("precision", 0))
+    if metric_key in {"battery", "selected_battery"} and str(value).strip().lower() == "none":
+        return tr("common.no_battery", lang)
     if fmt == "currency_cop":
         return f"COP {float(value):,.{precision}f}" if precision else f"COP {float(value):,.0f}"
     if fmt == "kwh":

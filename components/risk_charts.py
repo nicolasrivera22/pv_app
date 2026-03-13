@@ -15,9 +15,9 @@ def risk_charts_section() -> html.Div:
     return html.Div(
         className="panel",
         children=[
-            html.H3(id="risk-summary-title"),
+            html.H3(tr("risk.summary.title", "es"), id="risk-summary-title"),
             html.Div(id="risk-summary-cards", className="kpi-grid"),
-            html.H3(id="risk-distributions-title"),
+            html.H3(tr("risk.distributions.title", "es"), id="risk-distributions-title"),
             html.Div(
                 className="chart-grid",
                 children=[
@@ -78,6 +78,7 @@ def build_histogram_figure(
     lang: str = "en",
     empty_message: str | None = None,
     highlight_range: tuple[float, float] | None = None,
+    density_frame: pd.DataFrame | None = None,
 ) -> go.Figure:
     if frame.empty:
         return empty_risk_figure(title, empty_message or tr("risk.empty.no_result", lang))
@@ -99,12 +100,22 @@ def build_histogram_figure(
             )
         ]
     )
+    if density_frame is not None and not density_frame.empty:
+        width = float((frame["bin_right"] - frame["bin_left"]).mean()) if not frame.empty else 1.0
+        figure.add_scatter(
+            x=density_frame["value"],
+            y=density_frame["density"] * width,
+            mode="lines",
+            line={"color": "#0f172a", "width": 2},
+            name="Curva suave" if lang == "es" else "Smooth curve",
+            hovertemplate=f"{x_title}: %{{x:,.2f}}<br>{tr('risk.axis.probability', lang)}: %{{y:.2%}}<extra></extra>",
+        )
     figure.update_layout(template="plotly_white", title=title)
     if highlight_range is not None:
         left, right = highlight_range
         figure.add_vrect(x0=left, x1=right, fillcolor="#0f766e", opacity=0.12, line_width=0)
     figure.update_xaxes(title=x_title)
-    figure.update_yaxes(title=tr("risk.axis.probability", lang))
+    figure.update_yaxes(title=tr("risk.axis.probability", lang), tickformat=".0%")
     return figure
 
 
@@ -123,5 +134,5 @@ def build_ecdf_figure(frame: pd.DataFrame, *, title: str, x_title: str, lang: st
     )
     figure.update_layout(template="plotly_white", title=title)
     figure.update_xaxes(title=x_title)
-    figure.update_yaxes(title=tr("risk.axis.cdf", lang), range=[0, 1])
+    figure.update_yaxes(title=tr("risk.axis.cdf", lang), range=[0, 1], tickformat=".0%")
     return figure

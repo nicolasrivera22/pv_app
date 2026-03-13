@@ -13,6 +13,7 @@ from .risk_charts import (
 from .risk_controls import risk_controls_section
 from .risk_tables import render_message_list, render_metadata_table, risk_tables_section
 from .scenario_controls import scenario_sidebar
+from .unifilar_diagram import render_schematic_inspector, render_schematic_legend, unifilar_diagram_section
 from .validation_panel import render_validation_panel
 
 __all__ = [
@@ -28,9 +29,12 @@ __all__ = [
     "render_message_list",
     "render_metadata_table",
     "render_risk_summary_cards",
+    "render_schematic_inspector",
+    "render_schematic_legend",
     "render_validation_panel",
     "risk_charts_section",
     "risk_controls_section",
     "risk_tables_section",
     "scenario_sidebar",
+    "unifilar_diagram_section",
 ]

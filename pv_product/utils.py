@@ -574,7 +574,6 @@ def plot_autoconsumo_anual(df: pd.DataFrame, out_dir: str, name_png: str, n_mods
     plt.tight_layout()
     if best:
         plt.savefig(os.path.join(out_dir, name_png), dpi=160)
-        plt.close()
     plt.savefig(os.path.join(os.path.join(out_dir, "detalle_bateria"), name_png), dpi=160)
     plt.close()
 

@@ -1,0 +1,7 @@
+Escenario: PV_inputs
+Candidato: 24.600::BAT-20
+kWp: 24.600
+Batería: BAT-20
+Simulaciones: 200
+Semilla: 3
+Banda central del histograma de payback: P10-P90 sobre paybacks finitos.

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dash import dcc, html
 
+from services.i18n import tr
+
 
 def _assumption_input(field: dict):
     component_id = {"type": "assumption-input", "field": field["field"]}
@@ -46,6 +48,8 @@ def render_assumption_sections(
         basic_fields = section.get("basic", [])
         advanced_fields = section.get("advanced", [])
         blocks = [html.H4(section["group"])]
+        if section.get("help"):
+            blocks.append(html.P(section["help"], className="section-copy"))
         if basic_fields:
             blocks.append(
                 html.Div(
@@ -63,7 +67,7 @@ def render_assumption_sections(
             else:
                 blocks.append(
                     html.Details(
-                        className="subpanel",
+                        className="subpanel advanced-details",
                         children=[
                             html.Summary(advanced_label),
                             advanced_grid,
@@ -81,16 +85,20 @@ def assumption_editor_section() -> html.Div:
             html.Div(
                 className="section-head",
                 children=[
-                    html.H3(id="assumption-editor-title"),
+                    html.H3(tr("workbench.assumptions", "es"), id="assumption-editor-title"),
                     html.Div(
                         className="controls",
                         children=[
-                            dcc.Checklist(id="assumption-show-all", value=[], options=[]),
-                            html.Button(id="apply-edits-btn", n_clicks=0, className="action-btn"),
+                            dcc.Checklist(
+                                id="assumption-show-all",
+                                value=[],
+                                options=[{"label": tr("workbench.assumptions.show_all", "es"), "value": "all"}],
+                            ),
+                            html.Button(tr("workbench.assumptions.apply", "es"), id="apply-edits-btn", n_clicks=0, className="action-btn"),
                         ],
                     ),
                 ],
             ),
-            html.Div(id="assumption-sections"),
+            html.Div(id="assumption-sections", children=[html.Div(className="validation-empty", children=tr("workbench.assumptions.none", "es"))]),
         ],
     )

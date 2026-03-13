@@ -18,6 +18,7 @@ from components import (
 )
 from services import (
     ScenarioSessionState,
+    clear_missing_risk_result_payload,
     export_risk_artifacts,
     get_risk_result,
     run_monte_carlo,
@@ -173,6 +174,22 @@ def populate_risk_candidates(session_payload, scenario_id, language_value, curre
         n_simulations = default_n
 
     return options, candidate_key, n_simulations
+
+
+@callback(
+    Output("risk-result-store", "data", allow_duplicate=True),
+    Input("risk-result-store", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def clear_missing_risk_result(result_payload, language_value):
+    payload = result_payload or {}
+    result_id = payload.get("result_id")
+    if not result_id:
+        raise PreventUpdate
+    if get_risk_result(str(result_id)) is not None:
+        raise PreventUpdate
+    return clear_missing_risk_result_payload(payload, lang=_lang(language_value))
 
 
 @callback(
@@ -363,7 +380,7 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
         missing = tr("risk.error.result_missing", lang)
         return (
             render_message_list([missing]),
-            tr("risk.status.failed", lang),
+            tr("risk.status.rerun_needed", lang),
             [],
             empty_risk_figure(tr("risk.chart.npv_hist", lang), missing),
             empty_risk_figure(tr("risk.chart.npv_ecdf", lang), missing),
@@ -420,6 +437,7 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             title=tr("risk.chart.npv_hist", lang),
             x_title=tr("risk.axis.npv", lang),
             lang=lang,
+            density_frame=result.views.densities.get("NPV_COP"),
         ),
         build_ecdf_figure(
             result.views.ecdfs["NPV_COP"],
@@ -438,6 +456,7 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
                 if result.summary.payback_years.p10 is not None and result.summary.payback_years.p90 is not None
                 else None
             ),
+            density_frame=result.views.densities.get("payback_years"),
         ),
         build_ecdf_figure(
             result.views.ecdfs["payback_years"],

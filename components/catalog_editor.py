@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dash import dash_table, html
 
+from services.i18n import tr
+
 
 def _catalog_table(table_id: str) -> dash_table.DataTable:
     return dash_table.DataTable(
@@ -12,30 +14,30 @@ def _catalog_table(table_id: str) -> dash_table.DataTable:
         sort_action="native",
         page_size=8,
         style_table={"overflowX": "auto"},
-        style_cell={"padding": "0.4rem", "fontFamily": "monospace", "fontSize": 12},
+        style_cell={"padding": "0.4rem", "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif", "fontSize": 12},
         style_header={"backgroundColor": "#dbeafe", "fontWeight": "bold"},
     )
 
 
 def catalog_editor_section() -> html.Div:
     return html.Div(
-        className="panel",
+        className="panel secondary-panel",
         children=[
-            html.Div(className="section-head", children=[html.H3(id="catalog-editor-title")]),
+            html.Div(className="section-head", children=[html.H3(tr("workbench.catalogs", "es"), id="catalog-editor-title")]),
             html.Div(
                 className="catalog-grid",
                 children=[
                     html.Div(
                         className="subpanel",
                         children=[
-                            html.Div(className="section-head", children=[html.H4(id="inverter-editor-title"), html.Button(id="add-inverter-row-btn", n_clicks=0, className="action-btn tertiary")]),
+                            html.Div(className="section-head", children=[html.H4(tr("workbench.catalogs.inverters", "es"), id="inverter-editor-title"), html.Button(tr("workbench.add_row", "es"), id="add-inverter-row-btn", n_clicks=0, className="action-btn tertiary")]),
                             _catalog_table("inverter-table-editor"),
                         ],
                     ),
                     html.Div(
                         className="subpanel",
                         children=[
-                            html.Div(className="section-head", children=[html.H4(id="battery-editor-title"), html.Button(id="add-battery-row-btn", n_clicks=0, className="action-btn tertiary")]),
+                            html.Div(className="section-head", children=[html.H4(tr("workbench.catalogs.batteries", "es"), id="battery-editor-title"), html.Button(tr("workbench.add_row", "es"), id="add-battery-row-btn", n_clicks=0, className="action-btn tertiary")]),
                             _catalog_table("battery-table-editor"),
                         ],
                     ),
