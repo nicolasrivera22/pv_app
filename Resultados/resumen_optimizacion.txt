@@ -1,0 +1,9 @@
+[PV App v6]  export_allowed = True
+    kWp semilla (energía o manual): ~15.60 kWp
+    kWp óptimo (módulo-step): 24.00 kWp   |   peak_ratio≈2.42
+    Batería óptima: BAT-20
+    Inversor: INV-15k (15 kW)  ILR=1.60
+    Strings: Ns=20  Np=2  N_mod=40
+    Payback (base) ≈ 5.166666666666667 años
+    Monte Carlo (kWp óptimo) | P5=3.00, P50=4.42, P95=6.93 años
+    CapEx cliente (Año 0): 98400000 COP
