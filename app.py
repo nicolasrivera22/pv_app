@@ -35,7 +35,7 @@ def create_app() -> Dash:
                                             {"label": "English", "value": "en"},
                                             {"label": "Español", "value": "es"},
                                         ],
-                                        value="en",
+                                        value="es",
                                         clearable=False,
                                         className="language-select",
                                     ),
@@ -137,7 +137,7 @@ server = app.server
     Input("language-selector", "value"),
 )
 def translate_shell(language_value: str):
-    lang = language_value if language_value in {"en", "es"} else "en"
+    lang = language_value if language_value in {"en", "es"} else "es"
     return (
         tr("app.title", lang),
         tr("app.subtitle", lang),

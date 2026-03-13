@@ -4,27 +4,20 @@ from typing import Any
 
 from dash import html
 
+from services.ui_schema import format_metric, metric_label
 
-def _currency(value: float | None) -> str:
-    if value is None:
-        return "-"
-    return f"COP {value:,.0f}"
-
-
-def _number(value: float | None, suffix: str = "") -> str:
-    if value is None:
-        return "-"
-    return f"{value:,.2f}{suffix}"
-
-
-def render_kpi_cards(kpis: dict[str, Any]) -> list[html.Div]:
+def render_kpi_cards(kpis: dict[str, Any], lang: str = "es") -> list[html.Div]:
+    keys = [
+        "best_kWp",
+        "selected_battery",
+        "NPV",
+        "payback_years",
+        "self_consumption_ratio",
+        "self_sufficiency_ratio",
+    ]
     cards = [
-        ("Best kWp", _number(kpis.get("best_kWp"), " kWp")),
-        ("Battery", str(kpis.get("selected_battery", "-"))),
-        ("NPV", _currency(kpis.get("NPV"))),
-        ("Payback", _number(kpis.get("payback_years"), " years")),
-        ("Self-consumption", _number(100 * float(kpis.get("self_consumption_ratio", 0.0)), "%")),
-        ("Self-sufficiency", _number(100 * float(kpis.get("self_sufficiency_ratio", 0.0)), "%")),
+        (metric_label(key, lang), format_metric(key, kpis.get(key), lang))
+        for key in keys
     ]
     return [
         html.Div(

@@ -15,6 +15,7 @@ def risk_tables_section() -> html.Div:
                     html.Div(id="risk-metadata-table"),
                     html.Div(id="risk-warnings"),
                     html.P(id="risk-payback-note", className="scenario-meta"),
+                    html.P(id="risk-payback-band-note", className="scenario-meta"),
                 ],
             ),
             html.Div(

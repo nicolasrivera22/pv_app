@@ -296,6 +296,7 @@ def _default_tables() -> dict[str, pd.DataFrame]:
 
 def _bundle_from_frames(
     config: dict[str, Any],
+    config_table: pd.DataFrame,
     inverter_catalog: pd.DataFrame,
     battery_catalog: pd.DataFrame,
     demand_profile: pd.DataFrame,
@@ -355,6 +356,12 @@ def _bundle_from_frames(
         demand_month_factor=np.asarray(demand_month_factor, dtype=float),
         cop_kwp_table=cop_kwp_table.copy(),
         cop_kwp_table_others=cop_kwp_table_others.copy(),
+        config_table=config_table.copy(),
+        demand_profile_table=demand_profile.copy(),
+        demand_profile_general_table=demand_profile_general.copy(),
+        demand_profile_weights_table=demand_profile_weights.copy(),
+        month_profile_table=month_profile.copy(),
+        sun_profile_table=sun_profile.copy() if sun_profile is not None else pd.DataFrame(),
         source_name=source_name,
     )
     issues = [*normalization_issues, *validate_config(bundle)]
@@ -387,6 +394,7 @@ def load_config_from_excel(path_or_bytes: str | bytes | Path | BytesIO) -> Loade
 
     return _bundle_from_frames(
         config=config,
+        config_table=config_table,
         inverter_catalog=inverter_catalog,
         battery_catalog=battery_catalog,
         demand_profile=demand_profile,
@@ -412,6 +420,9 @@ def load_example_config() -> LoadedConfigBundle:
     config["bat_coupling"] = "ac"
     return _bundle_from_frames(
         config=config,
+        config_table=pd.DataFrame(
+            [{"Grupo": "", "Descripción": "", "Item": key, "Valor": value, "Unidad": ""} for key, value in config.items()]
+        ),
         inverter_catalog=inverter_catalog,
         battery_catalog=battery_catalog,
         demand_profile=tables["Demand_Profile"],
@@ -422,6 +433,37 @@ def load_example_config() -> LoadedConfigBundle:
         cop_kwp_table=tables["Precios_kWp_relativos"],
         cop_kwp_table_others=tables["Precios_kWp_relativos_Otros"],
         source_name="default-example",
+    )
+
+
+def rebuild_config_bundle(
+    base_bundle: LoadedConfigBundle,
+    *,
+    config: dict[str, Any] | None = None,
+    config_table: pd.DataFrame | None = None,
+    inverter_catalog: pd.DataFrame | None = None,
+    battery_catalog: pd.DataFrame | None = None,
+    demand_profile: pd.DataFrame | None = None,
+    demand_profile_weights: pd.DataFrame | None = None,
+    demand_profile_general: pd.DataFrame | None = None,
+    month_profile: pd.DataFrame | None = None,
+    sun_profile: pd.DataFrame | None = None,
+    cop_kwp_table: pd.DataFrame | None = None,
+    cop_kwp_table_others: pd.DataFrame | None = None,
+) -> LoadedConfigBundle:
+    return _bundle_from_frames(
+        config=config or dict(base_bundle.config),
+        config_table=config_table if config_table is not None else base_bundle.config_table,
+        inverter_catalog=inverter_catalog if inverter_catalog is not None else base_bundle.inverter_catalog,
+        battery_catalog=battery_catalog if battery_catalog is not None else base_bundle.battery_catalog,
+        demand_profile=demand_profile if demand_profile is not None else base_bundle.demand_profile_table,
+        demand_profile_weights=demand_profile_weights if demand_profile_weights is not None else base_bundle.demand_profile_weights_table,
+        demand_profile_general=demand_profile_general if demand_profile_general is not None else base_bundle.demand_profile_general_table,
+        month_profile=month_profile if month_profile is not None else base_bundle.month_profile_table,
+        sun_profile=sun_profile if sun_profile is not None else base_bundle.sun_profile_table,
+        cop_kwp_table=cop_kwp_table if cop_kwp_table is not None else base_bundle.cop_kwp_table,
+        cop_kwp_table_others=cop_kwp_table_others if cop_kwp_table_others is not None else base_bundle.cop_kwp_table_others,
+        source_name=base_bundle.source_name,
     )
 
 

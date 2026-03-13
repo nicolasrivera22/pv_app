@@ -16,7 +16,13 @@ from components import (
     risk_controls_section,
     risk_tables_section,
 )
-from services import ScenarioSessionState, get_risk_result, run_monte_carlo, store_risk_result
+from services import (
+    ScenarioSessionState,
+    export_risk_artifacts,
+    get_risk_result,
+    run_monte_carlo,
+    store_risk_result,
+)
 from services.i18n import tr
 from services.risk_ui import (
     build_risk_candidate_options,
@@ -37,7 +43,7 @@ def _state(payload) -> ScenarioSessionState:
 
 
 def _lang(value: str | None) -> str:
-    return value if value in {"en", "es"} else "en"
+    return value if value in {"en", "es"} else "es"
 
 
 def _retain_samples(values: list[str] | None) -> bool:
@@ -90,12 +96,15 @@ layout = html.Div(
     Output("risk-seed-help", "children"),
     Output("risk-retain-samples-label", "children"),
     Output("risk-retain-samples", "options"),
+    Output("risk-retain-samples-help", "children"),
     Output("risk-run-btn", "children"),
+    Output("risk-export-artifacts-btn", "children"),
     Output("risk-summary-title", "children"),
     Output("risk-distributions-title", "children"),
     Output("risk-metadata-title", "children"),
     Output("risk-percentiles-title", "children"),
     Output("risk-payback-note", "children"),
+    Output("risk-payback-band-note", "children"),
     Input("language-selector", "value"),
 )
 def translate_risk_page(language_value):
@@ -111,12 +120,15 @@ def translate_risk_page(language_value):
         tr("risk.seed.help", lang),
         tr("risk.retain_samples.label", lang),
         [{"label": tr("risk.retain_samples.option", lang), "value": "retain"}],
+        tr("risk.retain_samples.help", lang),
         tr("risk.run", lang),
+        tr("risk.export_artifacts", lang),
         tr("risk.summary.title", lang),
         tr("risk.distributions.title", lang),
         tr("risk.metadata.title", lang),
         tr("risk.percentiles.title", lang),
         tr("risk.payback_note", lang),
+        tr("risk.payback_band_note", lang),
     )
 
 
@@ -298,6 +310,7 @@ def invalidate_risk_result(
     Output("risk-percentile-table", "columns"),
     Output("risk-metadata-table", "children"),
     Output("risk-warnings", "children"),
+    Output("risk-export-artifacts-btn", "disabled"),
     Input("scenario-session-store", "data"),
     Input("risk-result-store", "data"),
     Input("risk-scenario-dropdown", "value"),
@@ -322,6 +335,7 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             [],
             render_message_list([], empty_message=message),
             html.Div(),
+            True,
         )
 
     result_payload = result_payload or {}
@@ -341,6 +355,7 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             [],
             render_message_list([], empty_message=message),
             html.Div(),
+            True,
         )
 
     result = get_risk_result(str(result_payload["result_id"]))
@@ -358,6 +373,7 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             [],
             render_message_list([], empty_message=missing),
             html.Div(),
+            True,
         )
 
     scenario = state.get_scenario(result_payload.get("scenario_id") or scenario_id)
@@ -375,6 +391,7 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             [],
             render_message_list([], empty_message=unavailable),
             html.Div(),
+            True,
         )
 
     percentile_table = prepare_percentile_table_for_display(result.views, lang=lang)
@@ -416,6 +433,11 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             x_title=tr("risk.axis.payback", lang),
             lang=lang,
             empty_message=tr("risk.empty.no_payback", lang),
+            highlight_range=(
+                (result.summary.payback_years.p10, result.summary.payback_years.p90)
+                if result.summary.payback_years.p10 is not None and result.summary.payback_years.p90 is not None
+                else None
+            ),
         ),
         build_ecdf_figure(
             result.views.ecdfs["payback_years"],
@@ -428,4 +450,32 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
         columns,
         render_metadata_table(build_risk_metadata_rows(scenario, result, lang=lang)),
         warning_children,
+        False,
     )
+
+
+@callback(
+    Output("risk-status", "children", allow_duplicate=True),
+    Input("risk-export-artifacts-btn", "n_clicks"),
+    State("risk-result-store", "data"),
+    State("scenario-session-store", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def export_risk_result_artifacts(n_clicks, result_payload, session_payload, language_value):
+    if not n_clicks:
+        raise PreventUpdate
+    lang = _lang(language_value)
+    payload = result_payload or {}
+    result_id = payload.get("result_id")
+    if not result_id:
+        raise PreventUpdate
+    result = get_risk_result(str(result_id))
+    if result is None:
+        return tr("risk.error.result_missing", lang)
+    state = _state(session_payload)
+    scenario = state.get_scenario(payload.get("scenario_id"))
+    if scenario is None:
+        return tr("risk.error.scenario_unavailable", lang)
+    paths = export_risk_artifacts(scenario, result)
+    return tr("risk.export_done", lang, path=str(paths[0].parent))
