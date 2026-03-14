@@ -141,27 +141,38 @@ def build_npv_figure(
     *,
     lang: str = "es",
     title: str | None = None,
+    module_power_w: float | None = None,
 ) -> go.Figure:
     curve = build_npv_curve(candidate_table)
     curve = curve.copy()
     curve["battery_display"] = curve["battery"].map(lambda value: format_metric("selected_battery", value, lang))
+    if module_power_w and float(module_power_w) > 0:
+        curve["panel_count"] = curve["kWp"].map(lambda value: int(round(float(value) / (float(module_power_w) / 1000.0))))
+    else:
+        curve["panel_count"] = None
     figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
-    figure = px.line(
-        curve,
-        x="kWp",
-        y="NPV_COP",
-        markers=True,
-        template="plotly_white",
-        title=figure_title,
-        hover_data={
-            "candidate_key": True,
-            "battery_display": True,
-            "NPV_COP": ":,.0f",
-            "payback_years": ":.2f",
-            "self_consumption_ratio": ":.2%",
-            "peak_ratio": ":.3f",
-        },
-        custom_data=["candidate_key"],
+    figure = go.Figure()
+    hover_template = (
+        f"{'Candidato' if lang == 'es' else 'Candidate'}: %{{customdata[0]}}<br>"
+        f"{'kWp' if lang == 'es' else 'kWp'}: %{{x:.3f}}<br>"
+        f"{'Paneles' if lang == 'es' else 'Panels'}: %{{customdata[1]}}<br>"
+        f"{'Batería' if lang == 'es' else 'Battery'}: %{{customdata[2]}}<br>"
+        f"{metric_label('NPV_COP', lang)}: %{{y:,.0f}}<br>"
+        f"{metric_label('payback_years', lang)}: %{{customdata[3]:.2f}}<br>"
+        f"{metric_label('self_consumption_ratio', lang)}: %{{customdata[4]:.1%}}<br>"
+        f"{metric_label('peak_ratio', lang)}: %{{customdata[5]:.1%}}<extra></extra>"
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=curve["kWp"],
+            y=curve["NPV_COP"],
+            mode="lines+markers",
+            name=figure_title,
+            line={"color": "#2563eb", "width": 3},
+            marker={"size": 9, "color": "#2563eb"},
+            customdata=curve[["candidate_key", "panel_count", "battery_display", "payback_years", "self_consumption_ratio", "peak_ratio"]],
+            hovertemplate=hover_template,
+        )
     )
     if selected_key:
         selected_row = curve[curve["candidate_key"] == selected_key]
@@ -172,12 +183,36 @@ def build_npv_figure(
                 mode="markers",
                 marker={"size": 14, "color": "#b91c1c"},
                 name="Candidato seleccionado" if lang == "es" else "Selected candidate",
-                customdata=selected_row[["candidate_key"]],
-                hovertemplate=("Seleccionado" if lang == "es" else "Selected") + ": %{customdata[0]}<extra></extra>",
+                customdata=selected_row[["candidate_key", "panel_count"]],
+                hovertemplate=(
+                    ("Seleccionado" if lang == "es" else "Selected")
+                    + ": %{customdata[0]}<br>"
+                    + ("Paneles" if lang == "es" else "Panels")
+                    + ": %{customdata[1]}<extra></extra>"
+                ),
             )
-    figure.update_yaxes(title=metric_label("NPV_COP", lang))
-    figure.update_yaxes(tickformat=",.0f")
+    figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified")
+    figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f")
     figure.update_xaxes(title="kWp instalado" if lang == "es" else "Installed kWp")
+    if module_power_w and float(module_power_w) > 0 and not curve.empty:
+        min_kwp = float(curve["kWp"].min())
+        max_kwp = float(curve["kWp"].max())
+        if min_kwp == max_kwp:
+            tickvals = [min_kwp]
+        else:
+            step_count = min(6, max(2, len(curve)))
+            tickvals = [min_kwp + ((max_kwp - min_kwp) * index / (step_count - 1)) for index in range(step_count)]
+        ticktext = [f"{int(round(value / (float(module_power_w) / 1000.0))):,}" for value in tickvals]
+        figure.update_layout(
+            xaxis2={
+                "overlaying": "x",
+                "side": "top",
+                "title": ("Número de paneles" if lang == "es" else "Panel count"),
+                "tickvals": tickvals,
+                "ticktext": ticktext,
+                "showgrid": False,
+            }
+        )
     return figure
 
 

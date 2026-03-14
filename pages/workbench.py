@@ -27,6 +27,7 @@ from services import (
     build_assumption_sections,
     build_display_columns,
     build_schematic_legend,
+    build_table_display_columns,
     build_unifilar_model,
     collect_config_updates,
     create_scenario_record,
@@ -87,10 +88,6 @@ def _state(payload) -> ScenarioSessionState:
 
 def _download_payload(content: bytes, filename: str) -> dict:
     return {"content": base64.b64encode(content).decode("ascii"), "filename": filename, "base64": True}
-
-
-def _table_columns(frame: pd.DataFrame) -> list[dict]:
-    return [{"name": column, "id": column} for column in frame.columns]
 
 
 def _scenario_name_from_filename(filename: str | None, fallback: str) -> str:
@@ -186,6 +183,7 @@ layout = html.Div(
     Output("candidate-explorer-title", "children"),
     Output("scenario-export-btn", "children"),
     Output("scenario-artifacts-btn", "children"),
+    Output("scenario-artifacts-progress", "children"),
     Input("language-selector", "value"),
 )
 def translate_workbench_page(language_value):
@@ -226,6 +224,7 @@ def translate_workbench_page(language_value):
         tr("workbench.candidate_explorer", lang),
         tr("workbench.export_scenario", lang),
         tr("common.export_artifacts", lang),
+        tr("workbench.export_artifacts_running", lang),
     )
 
 
@@ -329,32 +328,43 @@ def populate_assumptions(session_payload, show_all_values, language_value):
 @callback(
     Output("inverter-table-editor", "data"),
     Output("inverter-table-editor", "columns"),
+    Output("inverter-table-editor", "tooltip_header"),
     Output("battery-table-editor", "data"),
     Output("battery-table-editor", "columns"),
+    Output("battery-table-editor", "tooltip_header"),
     Output("month-profile-editor", "data"),
     Output("month-profile-editor", "columns"),
+    Output("month-profile-editor", "tooltip_header"),
     Output("sun-profile-editor", "data"),
     Output("sun-profile-editor", "columns"),
+    Output("sun-profile-editor", "tooltip_header"),
     Output("price-kwp-editor", "data"),
     Output("price-kwp-editor", "columns"),
+    Output("price-kwp-editor", "tooltip_header"),
     Output("price-kwp-others-editor", "data"),
     Output("price-kwp-others-editor", "columns"),
+    Output("price-kwp-others-editor", "tooltip_header"),
     Output("demand-profile-editor", "data"),
     Output("demand-profile-editor", "columns"),
+    Output("demand-profile-editor", "tooltip_header"),
     Output("demand-profile-general-editor", "data"),
     Output("demand-profile-general-editor", "columns"),
+    Output("demand-profile-general-editor", "tooltip_header"),
     Output("demand-profile-weights-editor", "data"),
     Output("demand-profile-weights-editor", "columns"),
+    Output("demand-profile-weights-editor", "tooltip_header"),
     Output("demand-profile-panel", "style"),
     Output("demand-profile-general-panel", "style"),
     Output("demand-profile-weights-panel", "style"),
     Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
 )
-def populate_editors(session_payload):
+def populate_editors(session_payload, language_value):
+    lang = _lang(language_value)
     state = _state(session_payload)
     active = state.get_scenario()
     if active is None:
-        empty = ([], [])
+        empty = ([], [], {})
         hidden = {"display": "none"}
         return (
             *empty,
@@ -373,25 +383,43 @@ def populate_editors(session_payload):
 
     bundle = active.config_bundle
     visibility = demand_profile_visibility(str(bundle.config.get("use_excel_profile", "")))
+    inverter_columns, inverter_tooltips = build_table_display_columns("inverter_catalog", list(bundle.inverter_catalog.columns), lang)
+    battery_columns, battery_tooltips = build_table_display_columns("battery_catalog", list(bundle.battery_catalog.columns), lang)
+    month_columns, month_tooltips = build_table_display_columns("month_profile", list(bundle.month_profile_table.columns), lang)
+    sun_columns, sun_tooltips = build_table_display_columns("sun_profile", list(bundle.sun_profile_table.columns), lang)
+    kwp_columns, kwp_tooltips = build_table_display_columns("cop_kwp", list(bundle.cop_kwp_table.columns), lang)
+    kwp_other_columns, kwp_other_tooltips = build_table_display_columns("cop_kwp_others", list(bundle.cop_kwp_table_others.columns), lang)
+    demand_columns, demand_tooltips = build_table_display_columns("demand_profile", list(bundle.demand_profile_table.columns), lang)
+    demand_general_columns, demand_general_tooltips = build_table_display_columns("demand_profile_general", list(bundle.demand_profile_general_table.columns), lang)
+    demand_weight_columns, demand_weight_tooltips = build_table_display_columns("demand_profile_weights", list(bundle.demand_profile_weights_table.columns), lang)
     return (
         bundle.inverter_catalog.to_dict("records"),
-        _table_columns(bundle.inverter_catalog),
+        inverter_columns,
+        inverter_tooltips,
         bundle.battery_catalog.to_dict("records"),
-        _table_columns(bundle.battery_catalog),
+        battery_columns,
+        battery_tooltips,
         bundle.month_profile_table.to_dict("records"),
-        _table_columns(bundle.month_profile_table),
+        month_columns,
+        month_tooltips,
         bundle.sun_profile_table.to_dict("records"),
-        _table_columns(bundle.sun_profile_table),
+        sun_columns,
+        sun_tooltips,
         bundle.cop_kwp_table.to_dict("records"),
-        _table_columns(bundle.cop_kwp_table),
+        kwp_columns,
+        kwp_tooltips,
         bundle.cop_kwp_table_others.to_dict("records"),
-        _table_columns(bundle.cop_kwp_table_others),
+        kwp_other_columns,
+        kwp_other_tooltips,
         bundle.demand_profile_table.to_dict("records"),
-        _table_columns(bundle.demand_profile_table),
+        demand_columns,
+        demand_tooltips,
         bundle.demand_profile_general_table.to_dict("records"),
-        _table_columns(bundle.demand_profile_general_table),
+        demand_general_columns,
+        demand_general_tooltips,
         bundle.demand_profile_weights_table.to_dict("records"),
-        _table_columns(bundle.demand_profile_weights_table),
+        demand_weight_columns,
+        demand_weight_tooltips,
         visibility["demand-profile-panel"],
         visibility["demand-profile-general-panel"],
         visibility["demand-profile-weights-panel"],
@@ -655,7 +683,12 @@ def populate_results(session_payload, language_value):
     ]
     return (
         render_kpi_cards(kpis, lang),
-        build_npv_figure(table, selected_key=selected_key, lang=lang),
+        build_npv_figure(
+            table,
+            selected_key=selected_key,
+            lang=lang,
+            module_power_w=float(active.config_bundle.config.get("P_mod_W", 0.0) or 0.0),
+        ),
         build_monthly_balance_figure(monthly_balance, lang=lang),
         build_cash_flow_figure(cash_flow, lang=lang),
         table.to_dict("records"),
@@ -739,12 +772,11 @@ def sync_unifilar_inspector_lock(tap_node, session_payload):
 
 @callback(
     Output("unifilar-inspector-body", "children"),
-    Input("active-unifilar-diagram", "mouseoverNodeData"),
     Input("unifilar-inspector-lock", "data"),
     Input("scenario-session-store", "data"),
     Input("language-selector", "value"),
 )
-def populate_unifilar_inspector(mouseover_node, inspector_lock, session_payload, language_value):
+def populate_unifilar_inspector(inspector_lock, session_payload, language_value):
     lang = _lang(language_value)
     state = _state(session_payload)
     active = state.get_scenario()
@@ -759,10 +791,7 @@ def populate_unifilar_inspector(mouseover_node, inspector_lock, session_payload,
     selected_key = resolve_selected_candidate_key_for_scenario(active.scan_result, active.selected_candidate_key)
     model = build_unifilar_model(active, selected_key, lang=lang)
     locked_node_id = str((inspector_lock or {}).get("node_id") or "") or None
-    node_data, is_locked = resolve_schematic_focus(
-        locked_node_id=locked_node_id,
-        hover_node_data=mouseover_node,
-    )
+    node_data, is_locked = resolve_schematic_focus(locked_node_id=locked_node_id, hover_node_data=None)
     inspector = resolve_schematic_inspector(node_data, model, lang=lang, locked=is_locked)
     return render_schematic_inspector(inspector)
 
@@ -791,6 +820,10 @@ def export_active_scenario(n_clicks, session_payload):
     State("scenario-session-store", "data"),
     State("language-selector", "value"),
     prevent_initial_call=True,
+    running=[
+        (Output("scenario-artifacts-btn", "disabled"), True, False),
+        (Output("scenario-artifacts-progress", "style"), {"display": "block"}, {"display": "none"}),
+    ],
 )
 def export_active_artifacts(n_clicks, session_payload, language_value):
     if not n_clicks:
@@ -801,4 +834,4 @@ def export_active_artifacts(n_clicks, session_payload, language_value):
     if active is None or active.scan_result is None or active.dirty:
         raise PreventUpdate
     paths = export_deterministic_artifacts(active)
-    return tr("workbench.export_artifacts_done", lang, path=str(paths[0].parent))
+    return tr("workbench.export_artifacts_done", lang, path=str(paths[0].parent.resolve()))

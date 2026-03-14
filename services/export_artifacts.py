@@ -44,6 +44,14 @@ def _safe_name(value: str) -> str:
     return cleaned.strip("_") or "escenario"
 
 
+def _resolve_output_root(output_root: Path) -> Path:
+    root = Path(output_root).expanduser()
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
 def _scenario_root(output_root: Path, scenario: ScenarioRecord) -> Path:
     return output_root / _safe_name(scenario.name)
 
@@ -186,7 +194,7 @@ def export_deterministic_artifacts(
     if scenario_record.scan_result is None or scenario_record.dirty:
         raise ValueError(f"El escenario '{scenario_record.name}' necesita una corrida determinística válida antes de exportar.")
 
-    output_dir = _scenario_root(output_root, scenario_record)
+    output_dir = _scenario_root(_resolve_output_root(output_root), scenario_record)
     directories = _ensure_legacy_directories(output_dir)
     candidate_key, selected_detail = _selected_detail(scenario_record)
     cfg = scenario_record.config_bundle.config
@@ -289,7 +297,7 @@ def export_risk_artifacts(
     monte_carlo_result: MonteCarloRunResult,
     output_root: Path = Path("Resultados"),
 ) -> list[Path]:
-    output_dir = _scenario_root(output_root, scenario_record) / "riesgo"
+    output_dir = _scenario_root(_resolve_output_root(output_root), scenario_record) / "riesgo"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     npv_png = output_dir / "histograma_vpn.png"

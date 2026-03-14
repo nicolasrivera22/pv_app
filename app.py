@@ -111,6 +111,10 @@ def create_app() -> Dash:
                 .advanced-card { background: rgba(248,250,252,0.85); border-style: dashed; }
                 .section-copy { margin: 0 0 0.9rem; color: #475569; font-size: 0.93rem; max-width: 75ch; }
                 .advanced-details summary { cursor: pointer; color: #334155; font-weight: 600; margin-bottom: 0.75rem; }
+                .field-help { position: relative; display: inline-flex; align-items: center; margin-left: 0.35rem; }
+                .field-help-trigger { display: inline-flex; align-items: center; justify-content: center; width: 1.2rem; height: 1.2rem; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 0.75rem; font-weight: 700; cursor: help; }
+                .field-help-tooltip { position: absolute; left: 0; top: calc(100% + 0.35rem); z-index: 30; min-width: 220px; max-width: 280px; padding: 0.55rem 0.7rem; border-radius: 10px; background: #0f172a; color: white; font-size: 0.8rem; line-height: 1.45; opacity: 0; pointer-events: none; transform: translateY(-2px); transition: opacity 100ms ease, transform 100ms ease; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.26); }
+                .field-help:hover .field-help-tooltip, .field-help:focus-within .field-help-tooltip { opacity: 1; transform: translateY(0); }
                 .catalog-grid, .chart-grid, .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
                 .compare-grid > .panel { min-height: 100%; }
                 .schematic-summary-chip { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.8rem; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-weight: 600; width: fit-content; }
@@ -125,7 +129,7 @@ def create_app() -> Dash:
                 .legend-role-inverter { border-color: #2563eb; background-color: #eff6ff; }
                 .legend-role-battery { border-color: #7c3aed; background-color: #f5f3ff; }
                 .legend-role-load { border-color: #16a34a; background-color: #f0fdf4; }
-                .legend-role-grid { border-color: #475569; background-color: #f8fafc; }
+                .legend-role-grid { border-color: #1e293b; background-color: #e2e8f0; }
                 .legend-line { width: 54px; height: 0; border-top: 4px solid #64748b; color: transparent; overflow: hidden; }
                 .legend-connection-ac { border-top-color: #2563eb; }
                 .legend-connection-dc { border-top-color: #7c3aed; }

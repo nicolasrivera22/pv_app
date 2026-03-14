@@ -45,7 +45,7 @@ CYTOSCAPE_STYLESHEET = [
     {"selector": ".role-inverter", "style": {"shape": "round-rectangle", "background-color": "#eff6ff", "border-color": "#2563eb"}},
     {"selector": ".role-battery", "style": {"shape": "round-rectangle", "background-color": "#f5f3ff", "border-color": "#7c3aed"}},
     {"selector": ".role-load", "style": {"shape": "round-rectangle", "background-color": "#f0fdf4", "border-color": "#16a34a"}},
-    {"selector": ".role-grid", "style": {"shape": "round-rectangle", "background-color": "#f8fafc", "border-color": "#475569"}},
+    {"selector": ".role-grid", "style": {"shape": "round-rectangle", "background-color": "#e2e8f0", "border-color": "#1e293b", "border-width": 3.5}},
     {
         "selector": "edge",
         "style": {

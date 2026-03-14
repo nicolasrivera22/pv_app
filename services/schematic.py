@@ -645,7 +645,7 @@ def build_unifilar_model(
             id="load",
             role="load",
             display_label=_simple_node_display_label("workbench.schematic.load_node", lang=lang),
-            position={"x": 690.0, "y": center_y},
+            position={"x": 670.0, "y": center_y},
             metadata=_load_metadata(lang=lang),
             icon_role=_icon_role("load"),
         )
@@ -655,7 +655,7 @@ def build_unifilar_model(
             id="grid",
             role="grid",
             display_label=_simple_node_display_label("workbench.schematic.grid_node", lang=lang),
-            position={"x": 970.0, "y": center_y},
+            position={"x": 900.0, "y": center_y},
             metadata=_grid_metadata(lang=lang),
             icon_role=_icon_role("grid"),
         )

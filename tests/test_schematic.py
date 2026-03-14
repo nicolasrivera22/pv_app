@@ -194,9 +194,10 @@ def test_default_inspector_and_legend_are_spanish_first() -> None:
         "Red",
     ]
     assert inspector.title == "Cómo leer este esquema"
-    assert inspector.description.startswith("Pasa el cursor")
+    assert inspector.description.startswith("Haz clic o toca")
     assert inspector.status == "Guía rápida"
     assert legend[0].icon_url and legend[0].icon_url.endswith("/assets/icons/pv.svg")
+    assert legend[4].icon_url and legend[4].icon_url.endswith("/assets/icons/grid.svg")
 
 
 def test_resolve_schematic_inspector_returns_practical_rows() -> None:

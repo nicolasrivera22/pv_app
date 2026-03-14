@@ -24,6 +24,7 @@ def risk_controls_section() -> html.Div:
             ),
             html.P(tr("risk.page_intro", "es"), id="risk-page-intro"),
             html.P(tr("risk.mode_note", "es"), id="risk-mode-note", className="scenario-meta"),
+            html.Div("", id="risk-export-progress", className="status-line", style={"display": "none"}),
             html.Div(
                 className="assumption-grid",
                 children=[

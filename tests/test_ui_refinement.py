@@ -10,11 +10,16 @@ from app import create_app
 from components.risk_controls import risk_controls_section
 from components.scenario_controls import scenario_sidebar
 from components.risk_charts import build_histogram_figure
+from components.assumption_editor import render_assumption_sections
+from components.candidate_explorer import candidate_explorer_section
+from components.profile_editor import profile_editor_section
+from components.catalog_editor import catalog_editor_section
 from services import (
     ScenarioSessionState,
     add_scenario,
     build_assumption_sections,
     build_display_columns,
+    build_table_display_columns,
     create_scenario_record,
     export_deterministic_artifacts,
     export_risk_artifacts,
@@ -29,6 +34,7 @@ from services import (
     run_scenario_scan,
     tr,
 )
+from services.result_views import build_npv_figure
 from services.ui_schema import field_help, field_label, metric_label
 from services.workbench_ui import demand_profile_visibility, frame_from_rows
 
@@ -119,12 +125,63 @@ def test_assumption_sections_group_and_fallback_help() -> None:
 def test_display_schema_formats_metrics_and_labels() -> None:
     assert format_metric("NPV_COP", 12500000, "es") == "COP 12,500,000"
     assert format_metric("self_consumption_ratio", 0.456, "es") == "45.6%"
+    assert format_metric("peak_ratio", 1.125, "es") == "112.5%"
     assert format_metric("payback_years", 7.25, "en") == "7.25 years"
     assert format_metric("selected_battery", "None", "es") == "Sin batería"
-    columns, tooltips = build_display_columns(["kWp", "NPV_COP", "self_consumption_ratio"], "es")
-    assert [column["name"] for column in columns] == ["kWp", "VPN [COP]", "Autoconsumo [%]"]
+    columns, tooltips = build_display_columns(["kWp", "NPV_COP", "self_consumption_ratio", "peak_ratio"], "es")
+    assert [column["name"] for column in columns] == ["kWp", "VPN [COP]", "Autoconsumo [%]", "Pico FV / pico carga [%]"]
     assert tooltips["NPV_COP"].startswith("Valor presente")
     assert metric_label("annual_import_kwh", "es") == "Importación anual [kWh]"
+
+
+def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() -> None:
+    price_columns, price_tooltips = build_table_display_columns("cop_kwp", ["MIN", "PRECIO_POR_KWP"], "es")
+    battery_columns, battery_tooltips = build_table_display_columns("battery_catalog", ["nom_kWh", "max_kW"], "es")
+    weight_columns, weight_tooltips = build_table_display_columns("demand_profile_weights", ["W_RES", "TOTAL_kWh"], "es")
+    month_columns, month_tooltips = build_table_display_columns("month_profile", ["Demand_month", "HSP_month"], "es")
+
+    assert [column["name"] for column in price_columns] == ["kWp mín", "Precio por kWp [COP]"]
+    assert price_columns[1]["type"] == "numeric"
+    assert battery_columns[0]["name"] == "Energía nominal [kWh]"
+    assert battery_columns[1]["name"] == "Potencia máx [kW]"
+    assert weight_columns[0]["name"] == "Peso res [%]"
+    assert month_columns[0]["name"] == "Factor demanda"
+    assert month_columns[1]["name"] == "Factor HSP"
+    assert "costo" in price_tooltips["PRECIO_POR_KWP"].lower()
+    assert "capacidad" in battery_tooltips["nom_kWh"].lower()
+    assert "peso" in weight_tooltips["W_RES"].lower()
+    assert "mensual" in month_tooltips["Demand_month"].lower()
+
+    candidate_table = _find_component(candidate_explorer_section(), "active-candidate-table")
+    profile_table = _find_component(profile_editor_section(), "month-profile-editor")
+    catalog_table = _find_component(catalog_editor_section(), "inverter-table-editor")
+    assert candidate_table.tooltip_delay == 0
+    assert candidate_table.tooltip_duration is None
+    assert profile_table.tooltip_delay == 0
+    assert profile_table.tooltip_duration is None
+    assert catalog_table.tooltip_delay == 0
+    assert catalog_table.tooltip_duration is None
+
+
+def test_assumption_editor_uses_inline_help_instead_of_native_title() -> None:
+    field = {
+        "field": "E_month_kWh",
+        "label": "Demanda mensual",
+        "help": "Define la energía mensual de referencia.",
+        "kind": "number",
+        "value": 1234,
+        "unit": "kWh/mes",
+        "options": [],
+    }
+    rendered = render_assumption_sections(
+        [{"group": "Demanda y Perfil", "help": "Ayuda", "basic": [field], "advanced": []}],
+        show_all=False,
+        empty_message="Sin datos",
+        advanced_label="Avanzado",
+    )
+    markup = str(rendered[0].to_plotly_json())
+    assert "field-help-tooltip" in markup
+    assert "'title':" not in markup
 
 
 def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
@@ -151,6 +208,40 @@ def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
 
     assert float(rebuilt.month_profile_table.loc[0, "Demand_month"]) == 1.15
     assert float(rebuilt.demand_month_factor[0]) == 1.15
+
+
+def test_npv_chart_adds_top_axis_for_panel_count() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery": "None",
+                "NPV_COP": 10_000_000,
+                "payback_years": 5.5,
+                "self_consumption_ratio": 0.45,
+                "peak_ratio": 1.1,
+                "scan_order": 0,
+            },
+            {
+                "candidate_key": "18.000::BAT-10",
+                "kWp": 18.0,
+                "battery": "BAT-10",
+                "NPV_COP": 16_000_000,
+                "payback_years": 6.2,
+                "self_consumption_ratio": 0.52,
+                "peak_ratio": 1.25,
+                "scan_order": 1,
+            },
+        ]
+    )
+
+    figure = build_npv_figure(table, selected_key="18.000::BAT-10", lang="es", module_power_w=600.0)
+
+    assert figure.layout.xaxis.title.text == "kWp instalado"
+    assert figure.layout.xaxis2.title.text == "Número de paneles"
+    assert list(figure.data[0].customdata[0][:2]) == ["12.000::None", 20]
+    assert any(trace.name == "Candidato seleccionado" for trace in figure.data)
 
 
 def test_artifact_exports_write_into_resultados_without_deleting_existing_files(tmp_path) -> None:
@@ -186,6 +277,19 @@ def test_artifact_exports_write_into_resultados_without_deleting_existing_files(
     assert any(path.name == "histograma_payback.png" for path in risk_paths)
     assert any(path.name == "riesgo_percentiles.csv" for path in risk_paths)
     assert keep_file.exists()
+
+
+def test_relative_output_root_resolves_to_absolute_path(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+
+    paths = export_deterministic_artifacts(scenario, output_root=Path("Resultados_rel"))
+
+    assert paths
+    assert all(path.is_absolute() for path in paths)
+    assert paths[0].parts[-2] == "Base"
 
 
 def test_payback_histogram_highlight_band_is_rendered() -> None:

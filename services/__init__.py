@@ -69,7 +69,14 @@ from .types import (
     ScenarioSessionState,
     ValidationIssue,
 )
-from .ui_schema import build_assumption_sections, build_display_columns, format_metric, metric_help, metric_label
+from .ui_schema import (
+    build_assumption_sections,
+    build_display_columns,
+    build_table_display_columns,
+    format_metric,
+    metric_help,
+    metric_label,
+)
 from .validation import (
     normalize_battery_catalog_rows,
     normalize_inverter_catalog_rows,
@@ -105,6 +112,7 @@ __all__ = [
     "build_comparison_figures",
     "build_comparison_table",
     "build_display_columns",
+    "build_table_display_columns",
     "build_risk_candidate_options",
     "build_risk_metadata_rows",
     "build_risk_result_store_payload",
