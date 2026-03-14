@@ -1,13 +1,26 @@
 """Service layer for deterministic PV scenario execution and Dash integration."""
 
 from .config_metadata import extract_config_metadata, update_config_table_values
+from .design_compare import (
+    MAX_COMPARE_DESIGNS,
+    append_design_selection,
+    build_available_design_rows,
+    build_design_compare_state,
+    build_design_comparison_figures,
+    build_design_comparison_rows,
+    build_monthly_pv_destination_frame,
+    derive_panel_count,
+    remove_design_selection,
+    resolve_design_selection,
+    sanitize_design_selection,
+)
 from .export_artifacts import (
     export_deterministic_artifacts,
     export_risk_artifacts,
     legacy_deterministic_export_manifest,
     legacy_risk_export_manifest,
 )
-from .export_excel import export_comparison_workbook, export_scenario_workbook
+from .export_excel import export_comparison_workbook, export_design_comparison_workbook, export_scenario_workbook
 from .io_excel import ensure_template, load_config_from_excel, load_example_config, rebuild_config_bundle
 from .result_views import (
     build_comparison_figures,
@@ -50,6 +63,7 @@ from .scenario_session import (
     run_scenario_scan,
     set_active_scenario,
     set_comparison_scenarios,
+    set_design_comparison_candidates,
     update_scenario_bundle,
     update_selected_candidate,
 )
@@ -93,6 +107,7 @@ from .workbench_ui import (
 
 __all__ = [
     "LoadedConfigBundle",
+    "MAX_COMPARE_DESIGNS",
     "MetricDistributionSummary",
     "MONTE_CARLO_WARNING_THRESHOLD",
     "MonteCarloRunRequest",
@@ -109,10 +124,16 @@ __all__ = [
     "build_assumption_sections",
     "build_schematic_legend",
     "add_scenario",
+    "append_design_selection",
+    "build_available_design_rows",
     "build_comparison_figures",
     "build_comparison_table",
+    "build_design_compare_state",
+    "build_design_comparison_figures",
+    "build_design_comparison_rows",
     "build_display_columns",
     "build_table_display_columns",
+    "build_monthly_pv_destination_frame",
     "build_risk_candidate_options",
     "build_risk_metadata_rows",
     "build_risk_result_store_payload",
@@ -125,10 +146,12 @@ __all__ = [
     "default_schematic_inspector",
     "delete_scenario",
     "demand_profile_visibility",
+    "derive_panel_count",
     "duplicate_scenario",
     "ensure_template",
     "export_deterministic_artifacts",
     "export_comparison_workbook",
+    "export_design_comparison_workbook",
     "export_risk_artifacts",
     "export_scenario_workbook",
     "legacy_deterministic_export_manifest",
@@ -151,9 +174,11 @@ __all__ = [
     "rebuild_config_bundle",
     "refresh_bundle_issues",
     "rename_scenario",
+    "remove_design_selection",
     "resolve_schematic_inspector",
     "resolve_schematic_focus",
     "resolve_schematic_icon_url",
+    "resolve_design_selection",
     "resolve_default_risk_candidate",
     "resolve_default_risk_scenario",
     "resolve_selected_candidate_key_for_scenario",
@@ -163,6 +188,8 @@ __all__ = [
     "run_scenario_scan",
     "set_active_scenario",
     "set_comparison_scenarios",
+    "set_design_comparison_candidates",
+    "sanitize_design_selection",
     "store_risk_result",
     "summarize_monte_carlo",
     "infer_string_layout",
