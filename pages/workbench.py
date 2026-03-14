@@ -45,6 +45,7 @@ from services import (
     rebuild_bundle_from_ui,
     refresh_bundle_issues,
     rename_scenario,
+    resolve_schematic_focus,
     resolve_schematic_inspector,
     resolve_selected_candidate_key_for_scenario,
     run_scenario_scan,
@@ -725,13 +726,25 @@ def populate_unifilar_diagram(session_payload, language_value):
 
 
 @callback(
+    Output("unifilar-inspector-lock", "data"),
+    Input("active-unifilar-diagram", "tapNodeData"),
+    Input("scenario-session-store", "data"),
+)
+def sync_unifilar_inspector_lock(tap_node, session_payload):
+    trigger = ctx.triggered_id
+    if trigger == "active-unifilar-diagram" and tap_node and tap_node.get("id"):
+        return {"node_id": str(tap_node["id"])}
+    return None
+
+
+@callback(
     Output("unifilar-inspector-body", "children"),
     Input("active-unifilar-diagram", "mouseoverNodeData"),
-    Input("active-unifilar-diagram", "tapNodeData"),
+    Input("unifilar-inspector-lock", "data"),
     Input("scenario-session-store", "data"),
     Input("language-selector", "value"),
 )
-def populate_unifilar_inspector(mouseover_node, tap_node, session_payload, language_value):
+def populate_unifilar_inspector(mouseover_node, inspector_lock, session_payload, language_value):
     lang = _lang(language_value)
     state = _state(session_payload)
     active = state.get_scenario()
@@ -745,13 +758,12 @@ def populate_unifilar_inspector(mouseover_node, tap_node, session_payload, langu
 
     selected_key = resolve_selected_candidate_key_for_scenario(active.scan_result, active.selected_candidate_key)
     model = build_unifilar_model(active, selected_key, lang=lang)
-    trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
-    node_data = None
-    if trigger.endswith("tapNodeData") and tap_node:
-        node_data = tap_node
-    elif trigger.endswith("mouseoverNodeData") and mouseover_node:
-        node_data = mouseover_node
-    inspector = resolve_schematic_inspector(node_data, model, lang=lang)
+    locked_node_id = str((inspector_lock or {}).get("node_id") or "") or None
+    node_data, is_locked = resolve_schematic_focus(
+        locked_node_id=locked_node_id,
+        hover_node_data=mouseover_node,
+    )
+    inspector = resolve_schematic_inspector(node_data, model, lang=lang, locked=is_locked)
     return render_schematic_inspector(inspector)
 
 

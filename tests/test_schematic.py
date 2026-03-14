@@ -14,7 +14,9 @@ from services import (
     default_schematic_inspector,
     infer_string_layout,
     load_example_config,
+    resolve_schematic_focus,
     resolve_schematic_inspector,
+    resolve_schematic_icon_url,
     to_cytoscape_elements,
 )
 
@@ -110,6 +112,8 @@ def test_unifilar_model_builds_required_core_nodes_without_battery() -> None:
     assert model.string_summary.startswith("Arreglo FV:")
     assert pv_node.metadata["component_kind"] == "pv"
     assert pv_node.metadata["title"].startswith("FV · MPPT")
+    assert "[FV]" not in pv_node.display_label
+    assert pv_node.display_label.startswith("MPPT 1")
     assert pv_node.metadata["details"]
 
 
@@ -174,6 +178,8 @@ def test_cytoscape_elements_include_inspector_metadata() -> None:
     assert inverter_node["data"]["title"] == "Inversor"
     assert inverter_node["data"]["description"].startswith("Convierte la energía DC")
     assert inverter_node["data"]["details"]
+    assert inverter_node["data"]["icon_url"].endswith("/assets/icons/inverter.svg")
+    assert "[" not in inverter_node["data"]["label"]
 
 
 def test_default_inspector_and_legend_are_spanish_first() -> None:
@@ -189,6 +195,8 @@ def test_default_inspector_and_legend_are_spanish_first() -> None:
     ]
     assert inspector.title == "Cómo leer este esquema"
     assert inspector.description.startswith("Pasa el cursor")
+    assert inspector.status == "Guía rápida"
+    assert legend[0].icon_url and legend[0].icon_url.endswith("/assets/icons/pv.svg")
 
 
 def test_resolve_schematic_inspector_returns_practical_rows() -> None:
@@ -200,10 +208,11 @@ def test_resolve_schematic_inspector_returns_practical_rows() -> None:
     model = build_unifilar_model(scenario, "12.000::BAT-10", lang="es")
     battery_node = next(node for node in model.nodes if node.role == "battery")
 
-    inspector = resolve_schematic_inspector({"id": battery_node.id}, model, "es")
+    inspector = resolve_schematic_inspector({"id": battery_node.id}, model, "es", locked=True)
 
     assert inspector.title == "Batería"
     assert inspector.description.startswith("Almacena excedentes")
+    assert inspector.status == "Detalle fijado"
     assert {row.label for row in inspector.details}.issuperset({"Componente", "Modelo", "Energía nominal", "Energía útil", "Acoplamiento"})
 
 
@@ -215,11 +224,26 @@ def test_incomplete_hardware_data_and_component_defaults_are_graceful() -> None:
 
     model = build_unifilar_model(scenario, "5.000::None", lang="es")
     section = unifilar_diagram_section()
+    section_title = _find_component(section, "unifilar-diagram-title")
     legend_title = _find_component(section, "unifilar-legend-title")
     inspector_title = _find_component(section, "unifilar-inspector-title")
 
     assert model.nodes
     assert model.note.startswith("Este es un esquema unifilar")
-    assert getattr(section.children[0].children[0], "children", None) == "Esquema unifilar"
+    assert section_title.children == "Esquema unifilar"
     assert legend_title.children == "Leyenda"
     assert inspector_title.children == "Detalle del componente"
+
+
+def test_resolve_schematic_focus_prioritizes_locked_selection() -> None:
+    focus, locked = resolve_schematic_focus(
+        locked_node_id="battery",
+        hover_node_data={"id": "pv-1"},
+    )
+
+    assert locked is True
+    assert focus == {"id": "battery"}
+
+
+def test_missing_icon_role_falls_back_cleanly() -> None:
+    assert resolve_schematic_icon_url("missing-role") is None
