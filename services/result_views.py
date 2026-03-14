@@ -6,6 +6,14 @@ from typing import Any
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+from pv_product.utils import (
+    prepare_autoconsumo_anual_series,
+    prepare_battery_monthly_series,
+    prepare_cumulative_npv_series,
+    prepare_typical_day_series,
+)
 
 from .i18n import tr
 from .types import ScenarioRecord, ScenarioSessionState
@@ -119,6 +127,50 @@ def build_monthly_balance(monthly: pd.DataFrame, lang: str = "en") -> pd.DataFra
     for source_column, label in columns:
         frame[label] = first_year.get(source_column, 0.0)
     return frame
+
+
+def _empty_result_figure(title: str, message: str) -> go.Figure:
+    figure = go.Figure()
+    figure.update_layout(
+        title=title,
+        template="plotly_white",
+        annotations=[{"text": message, "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.5, "showarrow": False}],
+    )
+    return figure
+
+
+def _module_count(k_wp: float | None, module_power_w: float | None) -> int | None:
+    if k_wp is None or module_power_w is None:
+        return None
+    if float(module_power_w) <= 0:
+        return None
+    return max(1, int(round((1000.0 * float(k_wp)) / float(module_power_w))))
+
+
+def _module_annotation(k_wp: float | None, module_power_w: float | None, *, lang: str = "es") -> dict[str, Any] | None:
+    panel_count = _module_count(k_wp, module_power_w)
+    if panel_count is None:
+        return None
+    label = "# módulos" if lang == "es" else "# panels"
+    return {
+        "text": f"{label}={panel_count}",
+        "xref": "paper",
+        "yref": "paper",
+        "x": 0.01,
+        "y": 0.99,
+        "xanchor": "left",
+        "yanchor": "top",
+        "showarrow": False,
+        "font": {"size": 11},
+        "bgcolor": "whitesmoke",
+        "bordercolor": "gray",
+        "borderwidth": 1,
+        "borderpad": 4,
+    }
+
+
+def _deep_dive_empty(title: str, *, lang: str = "es") -> go.Figure:
+    return _empty_result_figure(title, tr("workbench.deep_dive.no_data", lang))
 
 
 def build_project_timeline(month_count: int, *, base_year: int | None = None) -> pd.DataFrame:
@@ -313,14 +365,187 @@ def build_monthly_balance_figure(
     return figure
 
 
+def build_annual_coverage_figure(
+    detail: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    lang: str = "es",
+) -> go.Figure:
+    export_allowed = bool(config.get("export_allowed", True))
+    title = (
+        "Autoconsumo, Importación y Exportación (Año 1)"
+        if lang == "es" and export_allowed
+        else "Cobertura mensual de demanda (Año 1)"
+        if lang == "es"
+        else "Self-consumption, import, and export (Year 1)"
+        if export_allowed
+        else "Monthly demand coverage (Year 1)"
+    )
+    monthly = detail.get("monthly")
+    if not isinstance(monthly, pd.DataFrame) or monthly.empty:
+        return _deep_dive_empty(title, lang=lang)
+    prepared = prepare_autoconsumo_anual_series(monthly, export_allowed=export_allowed)
+    figure = go.Figure()
+    for series in prepared["series"]:
+        figure.add_bar(
+            x=prepared["xlabels"],
+            y=series["values"],
+            name=series["label"],
+            marker_color=series["color"],
+        )
+    figure.update_layout(
+        template="plotly_white",
+        title=title,
+        barmode="stack",
+        annotations=[annotation] if (annotation := _module_annotation(detail.get("kWp"), config.get("P_mod_W"), lang=lang)) else [],
+    )
+    figure.update_xaxes(title="Mes" if lang == "es" else "Month")
+    figure.update_yaxes(title="kWh", tickformat=",.0f")
+    return figure
+
+
+def build_battery_load_figure(
+    detail: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    lang: str = "es",
+) -> go.Figure:
+    title = "Cobertura de la Demanda (mensual)" if lang == "es" else "Demand coverage (monthly)"
+    monthly = detail.get("monthly")
+    required = {"PV_a_Carga_kWh", "Bateria_a_Carga_kWh", "Importacion_Red_kWh"}
+    if not isinstance(monthly, pd.DataFrame) or monthly.empty or not required.issubset(monthly.columns):
+        return _deep_dive_empty(title, lang=lang)
+    prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy())
+    color_map = {
+        "PV → Carga": "#57eb36",
+        "Batería → Carga": "#6fa8dc",
+        "Importación Red": "#f26c4f",
+    }
+    figure = go.Figure()
+    for series in prepared["coverage_series"]:
+        figure.add_bar(
+            x=prepared["xlabels"],
+            y=series["values"],
+            name=series["label"],
+            marker_color=color_map.get(series["label"], "#94a3b8"),
+        )
+    figure.update_layout(
+        template="plotly_white",
+        title=title,
+        barmode="stack",
+        annotations=[annotation] if (annotation := _module_annotation(detail.get("kWp"), config.get("P_mod_W"), lang=lang)) else [],
+    )
+    figure.update_xaxes(title="Mes" if lang == "es" else "Month")
+    figure.update_yaxes(title="Energía [kWh]" if lang == "es" else "Energy [kWh]", tickformat=",.0f")
+    return figure
+
+
+def build_pv_destination_figure(
+    detail: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    lang: str = "es",
+) -> go.Figure:
+    title = "Destino de la Generación FV (mensual)" if lang == "es" else "PV generation destination (monthly)"
+    monthly = detail.get("monthly")
+    required = {"PV_a_Carga_kWh", "PV_a_Bateria_kWh", "Exportacion_kWh"}
+    if not isinstance(monthly, pd.DataFrame) or monthly.empty or not required.issubset(monthly.columns):
+        return _deep_dive_empty(title, lang=lang)
+    prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy())
+    color_map = {
+        "PV → Carga": "#57eb36",
+        "PV → Batería": "#6fa8dc",
+        "Exportación": "#f7b32b",
+        "Curtailment": "#94a3b8",
+    }
+    figure = go.Figure()
+    for series in prepared["destination_series"]:
+        values = list(series["values"])
+        if series["label"] == "Curtailment" and not any(abs(float(value)) > 1e-6 for value in values):
+            continue
+        figure.add_bar(
+            x=prepared["xlabels"],
+            y=values,
+            name=series["label"],
+            marker_color=color_map.get(series["label"], "#94a3b8"),
+        )
+    figure.update_layout(
+        template="plotly_white",
+        title=title,
+        barmode="stack",
+        annotations=[annotation] if (annotation := _module_annotation(detail.get("kWp"), config.get("P_mod_W"), lang=lang)) else [],
+    )
+    figure.update_xaxes(title="Mes" if lang == "es" else "Month")
+    figure.update_yaxes(title="Energía [kWh]" if lang == "es" else "Energy [kWh]", tickformat=",.0f")
+    return figure
+
+
+def build_typical_day_figure(
+    detail: dict[str, Any],
+    scenario: ScenarioRecord,
+    *,
+    lang: str = "es",
+) -> go.Figure:
+    export_allowed = bool(scenario.config_bundle.config.get("export_allowed", True))
+    title = "Día Típico" if lang == "es" else "Typical day"
+    if not scenario.config_bundle.demand_profile_7x24.size or not scenario.config_bundle.solar_profile.size:
+        return _deep_dive_empty(title, lang=lang)
+    prepared = prepare_typical_day_series(
+        detail.get("kWp", 0.0),
+        detail.get("inv_sel") or {"inverter": {"AC_kW": 0.0}},
+        scenario.config_bundle.config,
+        scenario.config_bundle.demand_profile_7x24[0],
+        scenario.config_bundle.solar_profile,
+        scenario.config_bundle.hsp_month,
+        scenario.config_bundle.demand_month_factor,
+    )
+    figure = make_subplots(specs=[[{"secondary_y": True}]])
+    figure.add_bar(
+        x=prepared["hours"],
+        y=prepared["demand_kw"],
+        name="Consumo" if lang == "es" else "Demand",
+        marker_color="red",
+        offsetgroup="demand",
+    )
+    figure.add_bar(
+        x=prepared["hours"],
+        y=prepared["pv_ac_kw"],
+        name="FV" if lang == "es" else "PV",
+        marker_color="#57eb36",
+        offsetgroup="pv",
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=prepared["hours"],
+            y=prepared["solar_factor_pct"],
+            mode="lines",
+            name="Factor Solar" if lang == "es" else "Solar factor",
+            line={"color": "#f2bb4b", "width": 2.5},
+        ),
+        secondary_y=True,
+    )
+    figure.update_layout(
+        template="plotly_white",
+        title=title + (" (Cero inyección)" if lang == "es" and export_allowed is False else (" (Zero export)" if export_allowed is False else "")),
+        barmode="group",
+        annotations=[annotation] if (annotation := _module_annotation(detail.get("kWp"), scenario.config_bundle.config.get("P_mod_W"), lang=lang)) else [],
+    )
+    figure.update_xaxes(title="Hora" if lang == "es" else "Hour", tickmode="linear", dtick=1, range=[-0.5, 23.5])
+    figure.update_yaxes(title="Potencia [kW]" if lang == "es" else "Power [kW]", secondary_y=False)
+    figure.update_yaxes(title="Factor solar [%]" if lang == "es" else "Solar factor [%]", secondary_y=True)
+    return figure
+
+
 def build_cash_flow_figure(
     cash_flow: pd.DataFrame,
     *,
     lang: str = "es",
     title: str | None = None,
     base_year: int | None = None,
+    k_wp: float | None = None,
+    module_power_w: float | None = None,
 ) -> go.Figure:
-    figure_title = title or ("Flujo acumulado descontado" if lang == "es" else "Cumulative cash flow")
+    figure_title = title or ("Flujo acumulado descontado" if lang == "es" else "Cumulative discounted cash flow")
     frame = cash_flow.copy()
     if "month_index" not in frame.columns or "calendar_year" not in frame.columns or "project_year" not in frame.columns:
         timeline = build_project_timeline(len(frame), base_year=base_year)
@@ -328,13 +553,20 @@ def build_cash_flow_figure(
             frame = frame.reset_index(drop=True).join(timeline)
     figure = go.Figure()
     if not frame.empty:
+        prepared = prepare_cumulative_npv_series(
+            frame.rename(
+                columns={
+                    "cumulative_npv": "NPV_COP",
+                    "monthly_savings": "Ahorro_COP",
+                }
+            )
+        )
         figure.add_trace(
-            go.Scatter(
+            go.Bar(
                 x=frame["month_index"],
                 y=frame["cumulative_npv"],
-                mode="lines",
-                line={"color": "#2563eb", "width": 3},
                 name=figure_title,
+                marker={"color": prepared["colors"]},
                 customdata=frame[["month_index", "calendar_year", "project_year", "monthly_savings"]],
                 hovertemplate=(
                     tr("timeline.hover.project_month", lang)
@@ -352,11 +584,16 @@ def build_cash_flow_figure(
                 ),
             )
         )
+        if prepared["crossing_x"] is not None and "Año_mes" in frame.columns:
+            crossing_match = frame.loc[frame["Año_mes"] == prepared["crossing_x"], "month_index"]
+            if not crossing_match.empty:
+                figure.add_vline(x=float(crossing_match.iloc[0]), line_dash="dash", line_color="blue")
         _apply_project_time_axes(figure, frame[["month_index", "calendar_year", "project_year", "is_year_start"]], lang=lang)
     figure.update_layout(
         template="plotly_white",
         title=figure_title,
         hovermode="x unified",
+        annotations=[annotation] if (annotation := _module_annotation(k_wp, module_power_w, lang=lang)) else [],
     )
     figure.add_hline(y=0, line_dash="dash", line_color="#334155")
     figure.update_yaxes(

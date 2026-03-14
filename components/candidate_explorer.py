@@ -7,6 +7,7 @@ from services.i18n import tr
 
 def candidate_explorer_section() -> html.Div:
     return html.Div(
+        id="candidate-selection-section",
         className="panel",
         children=[
             html.Div(
@@ -23,9 +24,15 @@ def candidate_explorer_section() -> html.Div:
                 ],
             ),
             html.Div("", id="scenario-artifacts-progress", className="status-line", style={"display": "none"}),
+            html.Div(tr("workbench.selected_design.summary", "es"), id="selected-candidate-kpi-title", className="selected-candidate-kpi-title"),
             html.Div(id="active-kpi-cards", className="kpi-grid"),
             dcc.Graph(id="active-npv-graph"),
-            html.Div(className="chart-grid", children=[dcc.Graph(id="active-monthly-balance-graph"), dcc.Graph(id="active-cash-flow-graph")]),
+            html.P(
+                tr("workbench.candidate_selection.helper", "es"),
+                id="candidate-selection-helper",
+                className="section-copy candidate-selection-helper",
+            ),
+            html.Div(id="selected-candidate-banner", className="selected-candidate-banner"),
             dash_table.DataTable(
                 id="active-candidate-table",
                 data=[],

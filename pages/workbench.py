@@ -15,7 +15,7 @@ from components import (
     render_kpi_cards,
     render_schematic_inspector,
     render_schematic_legend,
-    unifilar_diagram_section,
+    selected_candidate_deep_dive_section,
     render_validation_panel,
     scenario_sidebar,
 )
@@ -36,6 +36,7 @@ from services import (
     duplicate_scenario,
     export_deterministic_artifacts,
     export_scenario_workbook,
+    format_metric,
     frame_from_rows,
     load_config_from_excel,
     load_example_config,
@@ -63,12 +64,15 @@ from services import (
     update_selected_candidate,
 )
 from services.result_views import (
+    build_annual_coverage_figure,
+    build_battery_load_figure,
     build_cash_flow,
     build_cash_flow_figure,
     build_kpis,
     build_monthly_balance,
     build_monthly_balance_figure,
     build_npv_figure,
+    build_typical_day_figure,
 )
 from services.validation import BATTERY_REQUIRED_COLUMNS, INVERTER_REQUIRED_COLUMNS
 
@@ -113,6 +117,61 @@ def _project_options():
     return [{"label": manifest.name, "value": manifest.slug} for manifest in list_projects()]
 
 
+def _candidate_table_styles(selected_key: str, best_key: str) -> list[dict]:
+    return [
+        {
+            "if": {"filter_query": f'{{candidate_key}} = "{best_key}"'},
+            "backgroundColor": "#dcfce7",
+            "fontWeight": "bold",
+        },
+        {
+            "if": {"filter_query": "{best_battery_for_kwp} = true"},
+            "backgroundColor": "#eff6ff",
+        },
+        {
+            "if": {"filter_query": f'{{candidate_key}} = "{selected_key}"'},
+            "backgroundColor": "#fee2e2",
+            "borderTop": "2px solid #b91c1c",
+            "borderBottom": "2px solid #b91c1c",
+            "fontWeight": "bold",
+        },
+    ]
+
+
+def _selected_candidate_banner(detail: dict | None, *, lang: str = "es") -> list[html.Div]:
+    fallback = "—"
+    if not detail:
+        return [
+            html.Div(
+                className="selected-candidate-banner-item",
+                children=[
+                    html.Span(tr("workbench.selected_design.banner.label", lang), className="selected-candidate-banner-label"),
+                    html.Span(fallback, className="selected-candidate-banner-value"),
+                ],
+            )
+        ]
+    inverter_name = (((detail.get("inv_sel") or {}).get("inverter") or {}).get("name")) or fallback
+    battery_name = format_metric("selected_battery", detail.get("battery_name", "None"), lang) if detail.get("battery_name") is not None else fallback
+    npv_value = detail.get("summary", {}).get("cum_disc_final")
+    kwp_value = detail.get("kWp")
+    banner_values = [
+        (tr("workbench.selected_design.banner.kwp", lang), f"{float(kwp_value):.3f} kWp" if kwp_value is not None else fallback),
+        (tr("workbench.selected_design.banner.battery", lang), battery_name or fallback),
+        (tr("workbench.selected_design.banner.inverter", lang), str(inverter_name)),
+        (tr("workbench.selected_design.banner.npv", lang), format_metric("NPV_COP", npv_value, lang) if npv_value is not None else fallback),
+    ]
+    return [
+        html.Div(
+            className="selected-candidate-banner-item",
+            children=[
+                html.Span(label, className="selected-candidate-banner-label"),
+                html.Span(value, className="selected-candidate-banner-value"),
+            ],
+        )
+        for label, value in banner_values
+    ]
+
+
 layout = html.Div(
     className="page",
     children=[
@@ -151,7 +210,7 @@ layout = html.Div(
                             type="default",
                             children=html.Div(
                                 id="deterministic-results-area",
-                                children=[candidate_explorer_section(), unifilar_diagram_section()],
+                                children=[candidate_explorer_section(), selected_candidate_deep_dive_section()],
                             ),
                         ),
                     ],
@@ -204,6 +263,9 @@ layout = html.Div(
     Output("add-inverter-row-btn", "children"),
     Output("add-battery-row-btn", "children"),
     Output("candidate-explorer-title", "children"),
+    Output("selected-candidate-kpi-title", "children"),
+    Output("candidate-selection-helper", "children"),
+    Output("selected-candidate-deep-dive-title", "children"),
     Output("scenario-export-btn", "children"),
     Output("scenario-artifacts-btn", "children"),
     Output("scenario-artifacts-progress", "children"),
@@ -253,6 +315,9 @@ def translate_workbench_page(language_value):
         tr("workbench.add_row", lang),
         tr("workbench.add_row", lang),
         tr("workbench.candidate_explorer", lang),
+        tr("workbench.selected_design.summary", lang),
+        tr("workbench.candidate_selection.helper", lang),
+        tr("workbench.deep_dive.title", lang),
         tr("workbench.export_scenario", lang),
         tr("common.export_artifacts", lang),
         tr("workbench.export_artifacts_running", lang),
@@ -708,8 +773,12 @@ def persist_selected_candidate(selected_rows, click_data, table_rows, session_pa
 @callback(
     Output("active-kpi-cards", "children"),
     Output("active-npv-graph", "figure"),
+    Output("selected-candidate-banner", "children"),
     Output("active-monthly-balance-graph", "figure"),
     Output("active-cash-flow-graph", "figure"),
+    Output("active-annual-coverage-graph", "figure"),
+    Output("active-battery-load-graph", "figure"),
+    Output("active-typical-day-graph", "figure"),
     Output("active-candidate-table", "data"),
     Output("active-candidate-table", "columns"),
     Output("active-candidate-table", "selected_rows"),
@@ -723,7 +792,7 @@ def populate_results(session_payload, language_value):
     _, state, active = _session_with_scan(session_payload, lang)
     empty = _empty_figure(tr("common.results", lang), tr("workbench.results.empty", lang))
     if active is None or active.scan_result is None:
-        return [], empty, empty, empty, [], [], [], [], {}
+        return [], empty, [], empty, empty, empty, empty, empty, [], [], [], [], {}
 
     scan = active.scan_result
     selected_key = resolve_selected_candidate_key_for_scenario(scan, active.selected_candidate_key)
@@ -755,27 +824,22 @@ def populate_results(session_payload, language_value):
     )
     selected_index = table.index[table["candidate_key"] == selected_key].tolist()
     best_key = scan.best_candidate_key
-    styles = [
-        {
-            "if": {"filter_query": f'{{candidate_key}} = "{best_key}"'},
-            "backgroundColor": "#dcfce7",
-            "fontWeight": "bold",
-        },
-        {
-            "if": {"filter_query": "{best_battery_for_kwp} = true"},
-            "backgroundColor": "#eff6ff",
-        },
-    ]
+    styles = _candidate_table_styles(selected_key, best_key)
+    module_power_w = float(active.config_bundle.config.get("P_mod_W", 0.0) or 0.0)
     return (
         render_kpi_cards(kpis, lang),
         build_npv_figure(
             table,
             selected_key=selected_key,
             lang=lang,
-            module_power_w=float(active.config_bundle.config.get("P_mod_W", 0.0) or 0.0),
+            module_power_w=module_power_w,
         ),
+        _selected_candidate_banner(detail, lang=lang),
         build_monthly_balance_figure(monthly_balance, lang=lang),
-        build_cash_flow_figure(cash_flow, lang=lang),
+        build_cash_flow_figure(cash_flow, lang=lang, k_wp=float(detail["kWp"]), module_power_w=module_power_w),
+        build_annual_coverage_figure(detail, active.config_bundle.config, lang=lang),
+        build_battery_load_figure(detail, active.config_bundle.config, lang=lang),
+        build_typical_day_figure(detail, active, lang=lang),
         table.to_dict("records"),
         columns,
         [selected_index[0]] if selected_index else [],

@@ -15,8 +15,10 @@ from components.scenario_controls import scenario_sidebar
 from components.risk_charts import build_histogram_figure
 from components.assumption_editor import render_assumption_sections
 from components.candidate_explorer import candidate_explorer_section
+from components.selected_candidate_deep_dive import selected_candidate_deep_dive_section
 from components.profile_editor import profile_editor_section
 from components.catalog_editor import catalog_editor_section
+from pages import workbench as workbench_page
 from services import (
     ScenarioSessionState,
     add_scenario,
@@ -34,10 +36,17 @@ from services import (
     load_example_config,
     rebuild_bundle_from_ui,
     run_monte_carlo,
+    run_scan,
     run_scenario_scan,
     tr,
 )
-from services.result_views import build_npv_figure
+from services.result_views import (
+    build_annual_coverage_figure,
+    build_battery_load_figure,
+    build_npv_figure,
+    build_pv_destination_figure,
+    build_typical_day_figure,
+)
 from services.result_views import build_cash_flow, build_cash_flow_figure
 from services.ui_schema import field_help, field_label, metric_label
 from services.workbench_ui import demand_profile_visibility, frame_from_rows
@@ -217,6 +226,53 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
     assert catalog_table.tooltip_duration is None
 
 
+def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
+    section = candidate_explorer_section()
+    assert section.id == "candidate-selection-section"
+    assert _find_component(section, "active-kpi-cards") is not None
+    assert _find_component(section, "active-npv-graph") is not None
+    assert _find_component(section, "candidate-selection-helper") is not None
+    assert _find_component(section, "selected-candidate-banner") is not None
+    assert _find_component(section, "active-candidate-table") is not None
+    assert _find_component(section, "active-monthly-balance-graph") is None
+    assert _find_component(section, "active-cash-flow-graph") is None
+
+    deep_dive = selected_candidate_deep_dive_section()
+    assert deep_dive.id == "selected-candidate-deep-dive-section"
+    assert _find_component(deep_dive, "active-monthly-balance-graph") is not None
+    assert _find_component(deep_dive, "active-cash-flow-graph") is not None
+    assert _find_component(deep_dive, "unifilar-diagram-shell") is not None
+    assert _find_component(deep_dive, "active-annual-coverage-graph") is not None
+    assert _find_component(deep_dive, "active-battery-load-graph") is not None
+    assert _find_component(deep_dive, "active-pv-destination-graph") is None
+    assert _find_component(deep_dive, "active-typical-day-graph") is not None
+
+    results_area = _find_component(workbench_page.layout, "deterministic-results-area")
+    assert results_area is not None
+    assert [child.id for child in results_area.children] == [
+        "candidate-selection-section",
+        "selected-candidate-deep-dive-section",
+    ]
+
+
+def test_candidate_selection_affordances_and_styles_use_stable_candidate_keys() -> None:
+    section = candidate_explorer_section()
+    assert _find_component(section, "selected-candidate-kpi-title").children == tr("workbench.selected_design.summary", "es")
+    assert _find_component(section, "candidate-selection-helper").children == tr("workbench.candidate_selection.helper", "es")
+
+    styles = workbench_page._candidate_table_styles("18.000::BAT-10", "12.000::None")
+    assert styles[-1]["if"]["filter_query"] == '{candidate_key} = "18.000::BAT-10"'
+    assert styles[-1]["backgroundColor"] == "#fee2e2"
+
+
+def test_selected_candidate_banner_tolerates_partial_detail_payload() -> None:
+    children = workbench_page._selected_candidate_banner({"kWp": 12.0, "summary": {}}, lang="es")
+
+    assert len(children) == 4
+    assert any("12.000 kWp" in str(child.to_plotly_json()) for child in children)
+    assert any("—" in str(child.to_plotly_json()) for child in children)
+
+
 def test_assumption_editor_uses_inline_help_instead_of_native_title() -> None:
     field = {
         "field": "E_month_kWh",
@@ -331,6 +387,30 @@ def test_npv_chart_omits_top_axis_without_valid_module_power() -> None:
     assert "xaxis2" not in figure.layout
 
 
+def test_deep_dive_figure_builders_return_non_empty_plotly_figures() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    detail = scenario.scan_result.candidate_details[scenario.selected_candidate_key or scenario.scan_result.best_candidate_key]
+
+    annual = build_annual_coverage_figure(detail, scenario.config_bundle.config, lang="es")
+    battery_load = build_battery_load_figure(detail, scenario.config_bundle.config, lang="es")
+    pv_destination = build_pv_destination_figure(detail, scenario.config_bundle.config, lang="es")
+    typical_day = build_typical_day_figure(detail, scenario, lang="es")
+
+    assert annual.data and all(trace.type == "bar" for trace in annual.data)
+    assert annual.layout.barmode == "stack"
+    assert battery_load.data and all(trace.type == "bar" for trace in battery_load.data)
+    assert battery_load.layout.barmode == "stack"
+    assert pv_destination.data and all(trace.type == "bar" for trace in pv_destination.data)
+    assert pv_destination.layout.barmode == "stack"
+    assert typical_day.data
+    assert typical_day.data[0].type == "bar"
+    assert typical_day.data[1].type == "bar"
+    assert typical_day.data[2].type == "scatter"
+
+
 def test_cash_flow_timeline_starts_next_calendar_year_and_uses_dual_x_axis() -> None:
     monthly = pd.DataFrame(
         {
@@ -349,10 +429,28 @@ def test_cash_flow_timeline_starts_next_calendar_year_and_uses_dual_x_axis() -> 
     assert cash_flow.loc[12, "calendar_year"] == 2028
     assert cash_flow.loc[0, "project_year"] == 1
     assert cash_flow.loc[12, "project_year"] == 2
+    assert figure.data[0].type == "bar"
     assert figure.layout.xaxis.title.text == "Año calendario"
     assert figure.layout.xaxis.ticktext[0] == "2027"
     assert figure.layout.xaxis2.title.text == "Horizonte del proyecto"
     assert figure.layout.xaxis2.ticktext[0] == "Año 1"
+
+
+def test_cash_flow_figure_uses_sign_aware_bars_and_crossing_marker() -> None:
+    monthly = pd.DataFrame(
+        {
+            "Año_mes": ["01-01", "01-02", "01-03", "01-04"],
+            "NPV_COP": [-2_000.0, -1_000.0, 1_000.0, 2_000.0],
+            "Ahorro_COP": [500.0, 500.0, 500.0, 500.0],
+        }
+    )
+
+    cash_flow = build_cash_flow(monthly, base_year=2026)
+    figure = build_cash_flow_figure(cash_flow, lang="es", base_year=2026)
+
+    assert figure.data[0].type == "bar"
+    assert list(figure.data[0].marker.color) == ["red", "red", "green", "green"]
+    assert len(figure.layout.shapes) >= 2
 
 
 def test_artifact_exports_write_into_resultados_without_deleting_existing_files(tmp_path) -> None:

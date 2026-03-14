@@ -16,7 +16,7 @@ from pv_product.simulator import calculate_capex_client
 from pv_product.utils import build_7x24_from_excel
 from services import ensure_template, load_config_from_excel, load_example_config, run_scan, run_scenario
 from services.io_excel import WorkbookContractError
-from services.result_views import build_kpis, resolve_selected_candidate_key
+from services.result_views import build_kpis, resolve_selected_candidate_key, resolve_selected_candidate_key_for_scenario
 from services.validation import validate_config
 
 
@@ -207,6 +207,40 @@ def test_selected_candidate_helper_uses_selected_row_over_best() -> None:
     best_detail = scan.candidate_details[scan.best_candidate_key]
     assert selected_detail["candidate_key"] != best_detail["candidate_key"]
     assert build_kpis(selected_detail)["best_kWp"] == selected_detail["kWp"]
+
+
+def test_selected_candidate_helper_for_scenario_prefers_click_then_row_then_stored_key() -> None:
+    scan = run_scan(_fast_bundle())
+    table_rows = scan.candidates.to_dict("records")
+    non_best_index = next(index for index, row in enumerate(table_rows) if row["candidate_key"] != scan.best_candidate_key)
+    row_selected_key = table_rows[non_best_index]["candidate_key"]
+
+    click_selected_key = resolve_selected_candidate_key_for_scenario(
+        scan,
+        scan.best_candidate_key,
+        table_rows=table_rows,
+        selected_rows=[non_best_index],
+        click_data={"points": [{"customdata": [scan.best_candidate_key]}]},
+    )
+    assert click_selected_key == scan.best_candidate_key
+
+    row_only_key = resolve_selected_candidate_key_for_scenario(
+        scan,
+        scan.best_candidate_key,
+        table_rows=table_rows,
+        selected_rows=[non_best_index],
+        click_data=None,
+    )
+    assert row_only_key == row_selected_key
+
+    stored_key = resolve_selected_candidate_key_for_scenario(
+        scan,
+        row_selected_key,
+        table_rows=table_rows,
+        selected_rows=None,
+        click_data=None,
+    )
+    assert stored_key == row_selected_key
 
 
 def test_capex_semantics_variable_mode() -> None:
