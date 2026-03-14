@@ -119,6 +119,9 @@ def _resolve_worker_decision(
     max_workers: int | None,
 ) -> WorkerDecision:
     requested_workers, worker_source = _resolve_requested_workers(max_workers)
+    # print(f"Worker decision: allow_parallel={allow_parallel}, "
+    #       f"task_count={task_count}, requested_workers={requested_workers} (source: {worker_source})", 
+    #       file=sys.stderr)
     serial_reason: str | None = None
     if not allow_parallel:
         serial_reason = "allow_parallel_false"
@@ -127,6 +130,7 @@ def _resolve_worker_decision(
     elif task_count <= 1:
         serial_reason = "single_task"
     elif _is_frozen_runtime():
+        print("Advertencia: Se ha detectado un entorno de ejecución congelado. Se usará ejecución serial.", file=sys.stderr)
         serial_reason = "frozen_runtime"
 
     execution_mode = "serial" if serial_reason else "parallel"
