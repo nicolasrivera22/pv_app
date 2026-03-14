@@ -11,6 +11,23 @@ from services.types import MonteCarloRunResult
 from services.ui_schema import format_metric
 
 
+def _risk_chart_card(*, graph_id: str, description_id: str, description_key: str) -> html.Div:
+    return html.Div(
+        id=f"{graph_id}-card",
+        className="subpanel",
+        style={
+            "boxSizing": "border-box",
+            "minWidth": 0,
+            "maxWidth": "100%",
+            "overflow": "hidden",
+        },
+        children=[
+            html.P(tr(description_key, "es"), id=description_id, className="scenario-meta", style={"margin": 0}),
+            dcc.Graph(id=graph_id, responsive=False, style={"minWidth": 0, "height": "420px"}),
+        ],
+    )
+
+
 def risk_charts_section() -> html.Div:
     return html.Div(
         className="panel",
@@ -19,12 +36,29 @@ def risk_charts_section() -> html.Div:
             html.Div(id="risk-summary-cards", className="kpi-grid"),
             html.H3(tr("risk.distributions.title", "es"), id="risk-distributions-title"),
             html.Div(
-                className="chart-grid",
+                id="risk-chart-stack",
+                style={"display": "grid", "gap": "1rem", "width": "100%", "minWidth": 0},
                 children=[
-                    dcc.Graph(id="risk-npv-histogram"),
-                    dcc.Graph(id="risk-npv-ecdf"),
-                    dcc.Graph(id="risk-payback-histogram"),
-                    dcc.Graph(id="risk-payback-ecdf"),
+                    _risk_chart_card(
+                        graph_id="risk-payback-histogram",
+                        description_id="risk-payback-histogram-description",
+                        description_key="risk.chart.payback_hist.description",
+                    ),
+                    _risk_chart_card(
+                        graph_id="risk-npv-histogram",
+                        description_id="risk-npv-histogram-description",
+                        description_key="risk.chart.npv_hist.description",
+                    ),
+                    _risk_chart_card(
+                        graph_id="risk-payback-ecdf",
+                        description_id="risk-payback-ecdf-description",
+                        description_key="risk.chart.payback_ecdf.description",
+                    ),
+                    _risk_chart_card(
+                        graph_id="risk-npv-ecdf",
+                        description_id="risk-npv-ecdf-description",
+                        description_key="risk.chart.npv_ecdf.description",
+                    ),
                 ],
             ),
         ],

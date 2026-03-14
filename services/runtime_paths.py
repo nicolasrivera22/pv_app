@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKBOOK_NAME = "PV_inputs.xlsx"
+PROJECTS_DIRNAME = "proyectos"
+RUNTIME_CACHE_DIRNAME = ".pv_runtime_cache"
 
 
 def is_frozen_runtime() -> bool:
@@ -44,3 +47,39 @@ def default_results_root() -> Path:
     root = user_root() / "Resultados"
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve()
+
+
+def projects_root() -> Path:
+    root = user_root() / PROJECTS_DIRNAME
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
+def project_root(slug: str) -> Path:
+    root = (projects_root() / str(slug)).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def project_inputs_root(slug: str) -> Path:
+    root = project_root(slug) / "inputs"
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
+def project_exports_root(slug: str) -> Path:
+    root = project_root(slug) / "exports" / "Resultados"
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
+def runtime_cache_root() -> Path:
+    root = user_root() / RUNTIME_CACHE_DIRNAME
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
+def configure_runtime_environment() -> None:
+    matplotlib_root = runtime_cache_root() / "matplotlib"
+    matplotlib_root.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("MPLCONFIGDIR", str(matplotlib_root))

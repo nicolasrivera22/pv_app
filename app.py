@@ -3,7 +3,11 @@ from __future__ import annotations
 from dash import Dash, Input, Output, callback, dcc, html, page_container
 
 from services.i18n import tr
-from services.runtime_paths import assets_dir, pages_dir
+from services.runtime_paths import assets_dir, configure_runtime_environment, pages_dir
+from services.session_state import bootstrap_client_session
+
+
+configure_runtime_environment()
 
 
 def create_app() -> Dash:
@@ -20,53 +24,61 @@ def create_app() -> Dash:
     def healthz():
         return {"status": "ok"}, 200
 
-    app.layout = html.Div(
-        className="app-shell",
-        children=[
-            dcc.Store(id="scenario-session-store", storage_type="memory"),
-            html.Header(
-                className="app-header",
-                children=[
-                    html.Div(
-                        children=[
-                            html.H1(tr("app.title", "es"), id="app-title"),
-                            html.P(tr("app.subtitle", "es"), id="app-subtitle"),
-                        ]
-                    ),
-                    html.Div(
-                        className="header-tools",
-                        children=[
-                            html.Div(
-                                className="language-box",
-                                children=[
-                                    html.Label(tr("app.language", "es"), id="language-label", htmlFor="language-selector", className="input-label"),
-                                    dcc.Dropdown(
-                                        id="language-selector",
-                                        options=[
-                                            {"label": "English", "value": "en"},
-                                            {"label": "Español", "value": "es"},
-                                        ],
-                                        value="es",
-                                        clearable=False,
-                                        className="language-select",
-                                    ),
-                                ],
-                            ),
-                            html.Nav(
-                                className="top-nav",
-                                children=[
-                                    dcc.Link(html.Span(tr("nav.workbench", "es"), id="nav-workbench-label"), href="/", className="nav-link"),
-                                    dcc.Link(html.Span(tr("nav.compare", "es"), id="nav-compare-label"), href="/compare", className="nav-link"),
-                                    dcc.Link(html.Span(tr("nav.risk", "es"), id="nav-risk-label"), href="/risk", className="nav-link"),
-                                ],
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-            page_container,
-        ],
-    )
+    def _layout():
+        client_state = bootstrap_client_session(language="es")
+        return html.Div(
+            className="app-shell",
+            children=[
+                dcc.Store(
+                    id="scenario-session-store",
+                    storage_type="session",
+                    data=client_state.to_payload(),
+                ),
+                html.Header(
+                    className="app-header",
+                    children=[
+                        html.Div(
+                            children=[
+                                html.H1(tr("app.title", "es"), id="app-title"),
+                                html.P(tr("app.subtitle", "es"), id="app-subtitle"),
+                            ]
+                        ),
+                        html.Div(
+                            className="header-tools",
+                            children=[
+                                html.Div(
+                                    className="language-box",
+                                    children=[
+                                        html.Label(tr("app.language", "es"), id="language-label", htmlFor="language-selector", className="input-label"),
+                                        dcc.Dropdown(
+                                            id="language-selector",
+                                            options=[
+                                                {"label": "English", "value": "en"},
+                                                {"label": "Español", "value": "es"},
+                                            ],
+                                            value="es",
+                                            clearable=False,
+                                            className="language-select",
+                                        ),
+                                    ],
+                                ),
+                                html.Nav(
+                                    className="top-nav",
+                                    children=[
+                                        dcc.Link(html.Span(tr("nav.workbench", "es"), id="nav-workbench-label"), href="/", className="nav-link"),
+                                        dcc.Link(html.Span(tr("nav.compare", "es"), id="nav-compare-label"), href="/compare", className="nav-link"),
+                                        dcc.Link(html.Span(tr("nav.risk", "es"), id="nav-risk-label"), href="/risk", className="nav-link"),
+                                    ],
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                page_container,
+            ],
+        )
+
+    app.layout = _layout
 
     app.index_string = """
     <!DOCTYPE html>

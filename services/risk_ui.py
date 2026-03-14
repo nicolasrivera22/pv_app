@@ -12,7 +12,7 @@ RATIO_METRICS = {"self_consumption_ratio", "self_sufficiency_ratio"}
 
 
 def ready_risk_scenarios(state: ScenarioSessionState) -> list[ScenarioRecord]:
-    return [scenario for scenario in state.scenarios if scenario.scan_result is not None and not scenario.dirty]
+    return [scenario for scenario in state.scenarios if not scenario.dirty]
 
 
 def resolve_default_risk_scenario(state: ScenarioSessionState, preferred_id: str | None = None) -> str | None:

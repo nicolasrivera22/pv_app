@@ -1,6 +1,13 @@
 """Service layer for deterministic PV scenario execution and Dash integration."""
 
+from .cache import (
+    DETERMINISTIC_CACHE_SCHEMA_VERSION,
+    MAX_DETERMINISTIC_CACHE_ENTRIES,
+    fingerprint_deterministic_input,
+    get_deterministic_cache,
+)
 from .config_metadata import extract_config_metadata, update_config_table_values
+from .deterministic_executor import run_deterministic_scan_tasks
 from .design_compare import (
     MAX_COMPARE_DESIGNS,
     append_design_selection,
@@ -21,8 +28,23 @@ from .export_artifacts import (
     legacy_risk_export_manifest,
 )
 from .export_excel import export_comparison_workbook, export_design_comparison_workbook, export_scenario_workbook
-from .io_excel import ensure_template, load_config_from_excel, load_example_config, rebuild_config_bundle
-from .runtime_paths import assets_dir, bundled_workbook_path, default_results_root, pages_dir, resource_root, user_root, user_workbook_path
+from .io_excel import TABLE_FILE_MAP, ensure_template, load_bundle_from_tables, load_config_from_excel, load_example_config, rebuild_config_bundle
+from .project_io import list_projects, load_project_bundle_from_tables, open_project, read_project_manifest, save_project, save_project_as
+from .runtime_paths import (
+    assets_dir,
+    bundled_workbook_path,
+    configure_runtime_environment,
+    default_results_root,
+    pages_dir,
+    project_exports_root,
+    project_inputs_root,
+    project_root,
+    projects_root,
+    resource_root,
+    runtime_cache_root,
+    user_root,
+    user_workbook_path,
+)
 from .result_views import (
     build_comparison_figures,
     build_comparison_table,
@@ -53,11 +75,12 @@ from .risk_ui import (
     resolve_default_risk_scenario,
     validate_risk_run_inputs,
 )
-from .scenario_runner import run_scan, run_scenario
+from .scenario_runner import resolve_deterministic_scan, run_scan, run_scenario
 from .scenario_session import (
     add_scenario,
     create_scenario_record,
     default_scenario_name,
+    hydrate_scenario_scan,
     delete_scenario,
     duplicate_scenario,
     rename_scenario,
@@ -68,14 +91,29 @@ from .scenario_session import (
     update_scenario_bundle,
     update_selected_candidate,
 )
+from .session_state import (
+    MAX_SESSION_STATES,
+    SESSION_IDLE_TTL_SECONDS,
+    bootstrap_client_session,
+    clear_session_states,
+    commit_client_session,
+    get_session_state,
+    prune_session_states,
+    resolve_client_session,
+    resolve_scenario_session,
+    set_session_state,
+)
 from .stochastic_runner import MONTE_CARLO_WARNING_THRESHOLD, run_monte_carlo, summarize_monte_carlo
 from .types import (
+    ClientSessionState,
     LoadedConfigBundle,
     MetricDistributionSummary,
     MonteCarloRunRequest,
     MonteCarloRunResult,
     MonteCarloSummary,
     PercentileSummary,
+    ProjectManifest,
+    ProjectScenarioManifest,
     RiskMetricSummary,
     RiskViewBundle,
     ScanRunResult,
@@ -107,16 +145,23 @@ from .workbench_ui import (
 )
 
 __all__ = [
+    "ClientSessionState",
+    "DETERMINISTIC_CACHE_SCHEMA_VERSION",
     "LoadedConfigBundle",
     "MAX_COMPARE_DESIGNS",
+    "MAX_DETERMINISTIC_CACHE_ENTRIES",
+    "MAX_SESSION_STATES",
     "MetricDistributionSummary",
     "MONTE_CARLO_WARNING_THRESHOLD",
     "MonteCarloRunRequest",
     "MonteCarloRunResult",
     "MonteCarloSummary",
     "PercentileSummary",
+    "ProjectManifest",
+    "ProjectScenarioManifest",
     "RiskMetricSummary",
     "RiskViewBundle",
+    "SESSION_IDLE_TTL_SECONDS",
     "ScanRunResult",
     "ScenarioRecord",
     "ScenarioRunResult",
@@ -136,13 +181,17 @@ __all__ = [
     "build_display_columns",
     "build_table_display_columns",
     "build_monthly_pv_destination_frame",
+    "bootstrap_client_session",
     "build_risk_candidate_options",
     "build_risk_metadata_rows",
     "build_risk_result_store_payload",
     "clear_missing_risk_result_payload",
+    "clear_session_states",
     "build_session_comparison_rows",
     "clear_expired_risk_results",
     "clear_risk_results",
+    "commit_client_session",
+    "configure_runtime_environment",
     "create_scenario_record",
     "default_scenario_name",
     "default_results_root",
@@ -161,19 +210,33 @@ __all__ = [
     "legacy_risk_export_manifest",
     "extract_config_metadata",
     "format_metric",
+    "fingerprint_deterministic_input",
     "frame_from_rows",
+    "get_deterministic_cache",
     "get_risk_result",
+    "get_session_state",
     "bundled_workbook_path",
+    "hydrate_scenario_scan",
     "load_config_from_excel",
+    "load_bundle_from_tables",
     "load_example_config",
+    "load_project_bundle_from_tables",
+    "list_projects",
     "build_unifilar_model",
     "metric_help",
     "metric_label",
+    "open_project",
     "normalize_battery_catalog_rows",
     "normalize_inverter_catalog_rows",
     "pages_dir",
+    "project_exports_root",
+    "project_inputs_root",
+    "project_root",
+    "projects_root",
+    "prune_session_states",
     "prepare_percentile_table_for_display",
     "prepare_risk_views",
+    "read_project_manifest",
     "ready_risk_scenarios",
     "rebuild_bundle_from_ui",
     "rebuild_config_bundle",
@@ -184,8 +247,12 @@ __all__ = [
     "resolve_schematic_focus",
     "resolve_schematic_icon_url",
     "resolve_design_selection",
+    "resolve_deterministic_scan",
     "resolve_default_risk_candidate",
     "resolve_default_risk_scenario",
+    "resolve_client_session",
+    "resolve_scenario_session",
+    "run_deterministic_scan_tasks",
     "resolve_selected_candidate_key_for_scenario",
     "resource_root",
     "run_monte_carlo",
@@ -195,6 +262,11 @@ __all__ = [
     "set_active_scenario",
     "set_comparison_scenarios",
     "set_design_comparison_candidates",
+    "runtime_cache_root",
+    "save_project",
+    "save_project_as",
+    "set_session_state",
+    "TABLE_FILE_MAP",
     "sanitize_design_selection",
     "store_risk_result",
     "summarize_monte_carlo",

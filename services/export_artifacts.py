@@ -3,6 +3,10 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+from .runtime_paths import configure_runtime_environment, user_root
+
+configure_runtime_environment()
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -18,7 +22,6 @@ from pv_product.utils import (
     plot_npv_scan,
 )
 
-from .runtime_paths import user_root
 from .types import MonteCarloRunResult, ScenarioRecord
 
 LEGACY_DETERMINISTIC_TOP_LEVEL = (

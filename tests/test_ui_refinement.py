@@ -8,6 +8,8 @@ import pandas as pd
 
 from app import create_app
 from components.risk_controls import risk_controls_section
+from components.risk_charts import risk_charts_section
+from components.risk_tables import risk_tables_section
 from components.scenario_controls import scenario_sidebar
 from components.risk_charts import build_histogram_figure
 from components.assumption_editor import render_assumption_sections
@@ -70,7 +72,8 @@ def _find_component(node, component_id: str):
 
 def test_app_defaults_to_spanish() -> None:
     app = create_app()
-    selector = _find_component(app.layout, "language-selector")
+    layout = app.layout() if callable(app.layout) else app.layout
+    selector = _find_component(layout, "language-selector")
     assert isinstance(selector, dcc.Dropdown)
     assert selector.value == "es"
 
@@ -89,11 +92,60 @@ def test_first_render_placeholders_are_spanish_first() -> None:
     assert risk_candidate_dropdown.placeholder == "Selecciona un candidato factible"
 
 
+def test_risk_chart_section_stacks_full_width_cards_with_descriptions() -> None:
+    chart_section = risk_charts_section()
+    chart_stack = _find_component(chart_section, "risk-chart-stack")
+    assert chart_stack is not None
+    assert chart_stack.style["display"] == "grid"
+    assert chart_stack.style["width"] == "100%"
+    assert chart_stack.style["minWidth"] == 0
+    assert [child.id for child in chart_stack.children] == [
+        "risk-payback-histogram-card",
+        "risk-npv-histogram-card",
+        "risk-payback-ecdf-card",
+        "risk-npv-ecdf-card",
+    ]
+
+    for card_id in [
+        "risk-payback-histogram-card",
+        "risk-npv-histogram-card",
+        "risk-payback-ecdf-card",
+        "risk-npv-ecdf-card",
+    ]:
+        card = _find_component(chart_section, card_id)
+        assert card.style["boxSizing"] == "border-box"
+        assert card.style["minWidth"] == 0
+        assert card.style["maxWidth"] == "100%"
+        assert card.style["overflow"] == "hidden"
+
+    for graph_id in [
+        "risk-payback-histogram",
+        "risk-npv-histogram",
+        "risk-payback-ecdf",
+        "risk-npv-ecdf",
+    ]:
+        graph = _find_component(chart_section, graph_id)
+        assert graph.responsive is False
+        assert "width" not in graph.style
+        assert graph.style["minWidth"] == 0
+        assert graph.style["height"] == "420px"
+
+    assert _find_component(chart_section, "risk-payback-histogram-description").children == tr("risk.chart.payback_hist.description", "es")
+    assert _find_component(chart_section, "risk-npv-histogram-description").children == tr("risk.chart.npv_hist.description", "es")
+    assert _find_component(chart_section, "risk-payback-ecdf-description").children == tr("risk.chart.payback_ecdf.description", "es")
+    assert _find_component(chart_section, "risk-npv-ecdf-description").children == tr("risk.chart.npv_ecdf.description", "es")
+
+    tables_section = risk_tables_section()
+    assert _find_component(tables_section, "risk-payback-note") is None
+    assert _find_component(tables_section, "risk-payback-band-note") is None
+
+
 def test_translation_helper_prefers_spanish_fallback_for_workbench_labels() -> None:
     assert tr("workbench.sidebar.title", "es") == "Escenarios"
     assert tr("workbench.run_scan", "fr") == "Ejecutar escaneo determinístico"
     assert tr("nav.compare", "fr") == "Comparar"
     assert tr("risk.placeholder.scenario", "fr") == "Selecciona un escenario completado"
+    assert tr("risk.chart.payback_hist.description", "fr").startswith("Muestra con qué frecuencia")
 
 
 def test_extract_config_metadata_preserves_workbook_order_and_groups() -> None:

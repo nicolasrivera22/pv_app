@@ -181,6 +181,7 @@ class ScenarioRecord:
     source_name: str
     config_bundle: LoadedConfigBundle
     scan_result: ScanRunResult | None = None
+    scan_fingerprint: str | None = None
     selected_candidate_key: str | None = None
     dirty: bool = True
     last_run_at: str | None = None
@@ -192,6 +193,7 @@ class ScenarioRecord:
             "source_name": self.source_name,
             "config_bundle": self.config_bundle.to_payload(),
             "scan_result": None if self.scan_result is None else self.scan_result.to_payload(),
+            "scan_fingerprint": self.scan_fingerprint,
             "selected_candidate_key": self.selected_candidate_key,
             "dirty": self.dirty,
             "last_run_at": self.last_run_at,
@@ -206,6 +208,7 @@ class ScenarioRecord:
             source_name=payload.get("source_name", "config.xlsx"),
             config_bundle=LoadedConfigBundle.from_payload(payload["config_bundle"]),
             scan_result=None if scan_payload is None else ScanRunResult.from_payload(scan_payload),
+            scan_fingerprint=payload.get("scan_fingerprint"),
             selected_candidate_key=payload.get("selected_candidate_key"),
             dirty=bool(payload.get("dirty", True)),
             last_run_at=payload.get("last_run_at"),
@@ -218,6 +221,9 @@ class ScenarioSessionState:
     active_scenario_id: str | None = None
     comparison_scenario_ids: tuple[str, ...] = ()
     design_comparison_candidate_keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    project_slug: str | None = None
+    project_name: str | None = None
+    project_dirty: bool = False
 
     @classmethod
     def empty(cls) -> "ScenarioSessionState":
@@ -232,6 +238,9 @@ class ScenarioSessionState:
                 scenario_id: list(candidate_keys)
                 for scenario_id, candidate_keys in self.design_comparison_candidate_keys.items()
             },
+            "project_slug": self.project_slug,
+            "project_name": self.project_name,
+            "project_dirty": self.project_dirty,
         }
 
     @classmethod
@@ -246,6 +255,9 @@ class ScenarioSessionState:
                 str(scenario_id): tuple(candidate_keys)
                 for scenario_id, candidate_keys in payload.get("design_comparison_candidate_keys", {}).items()
             },
+            project_slug=payload.get("project_slug"),
+            project_name=payload.get("project_name"),
+            project_dirty=bool(payload.get("project_dirty", False)),
         )
 
     def get_scenario(self, scenario_id: str | None = None) -> ScenarioRecord | None:
@@ -256,6 +268,137 @@ class ScenarioSessionState:
             if scenario.scenario_id == target_id:
                 return scenario
         return None
+
+
+@dataclass(frozen=True)
+class ClientSessionState:
+    session_id: str
+    active_scenario_id: str | None = None
+    comparison_scenario_ids: tuple[str, ...] = ()
+    design_comparison_candidate_keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    selected_candidate_keys: dict[str, str | None] = field(default_factory=dict)
+    project_slug: str | None = None
+    project_name: str | None = None
+    project_dirty: bool = False
+    language: str = "es"
+    revision: int = 0
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "active_scenario_id": self.active_scenario_id,
+            "comparison_scenario_ids": list(self.comparison_scenario_ids),
+            "design_comparison_candidate_keys": {
+                scenario_id: list(candidate_keys)
+                for scenario_id, candidate_keys in self.design_comparison_candidate_keys.items()
+            },
+            "selected_candidate_keys": self.selected_candidate_keys,
+            "project_slug": self.project_slug,
+            "project_name": self.project_name,
+            "project_dirty": self.project_dirty,
+            "language": self.language,
+            "revision": self.revision,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any] | None) -> "ClientSessionState | None":
+        if not payload or not payload.get("session_id"):
+            return None
+        return cls(
+            session_id=str(payload["session_id"]),
+            active_scenario_id=payload.get("active_scenario_id"),
+            comparison_scenario_ids=tuple(payload.get("comparison_scenario_ids", [])),
+            design_comparison_candidate_keys={
+                str(scenario_id): tuple(candidate_keys)
+                for scenario_id, candidate_keys in payload.get("design_comparison_candidate_keys", {}).items()
+            },
+            selected_candidate_keys={
+                str(scenario_id): None if candidate_key in (None, "") else str(candidate_key)
+                for scenario_id, candidate_key in payload.get("selected_candidate_keys", {}).items()
+            },
+            project_slug=payload.get("project_slug"),
+            project_name=payload.get("project_name"),
+            project_dirty=bool(payload.get("project_dirty", False)),
+            language=str(payload.get("language", "es")),
+            revision=int(payload.get("revision", 0) or 0),
+        )
+
+
+@dataclass(frozen=True)
+class ProjectScenarioManifest:
+    scenario_id: str
+    name: str
+    source_name: str
+    selected_candidate_key: str | None = None
+    dirty: bool = True
+    last_run_at: str | None = None
+    scan_fingerprint: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "scenario_id": self.scenario_id,
+            "name": self.name,
+            "source_name": self.source_name,
+            "selected_candidate_key": self.selected_candidate_key,
+            "dirty": self.dirty,
+            "last_run_at": self.last_run_at,
+            "scan_fingerprint": self.scan_fingerprint,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "ProjectScenarioManifest":
+        return cls(
+            scenario_id=str(payload["scenario_id"]),
+            name=str(payload["name"]),
+            source_name=str(payload.get("source_name", "config.xlsx")),
+            selected_candidate_key=payload.get("selected_candidate_key"),
+            dirty=bool(payload.get("dirty", True)),
+            last_run_at=payload.get("last_run_at"),
+            scan_fingerprint=payload.get("scan_fingerprint"),
+        )
+
+
+@dataclass(frozen=True)
+class ProjectManifest:
+    format_version: int
+    name: str
+    slug: str
+    active_scenario_id: str | None = None
+    comparison_scenario_ids: tuple[str, ...] = ()
+    design_comparison_candidate_keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    scenarios: tuple[ProjectScenarioManifest, ...] = ()
+    ui_prefs: dict[str, Any] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "format_version": self.format_version,
+            "name": self.name,
+            "slug": self.slug,
+            "active_scenario_id": self.active_scenario_id,
+            "comparison_scenario_ids": list(self.comparison_scenario_ids),
+            "design_comparison_candidate_keys": {
+                scenario_id: list(candidate_keys)
+                for scenario_id, candidate_keys in self.design_comparison_candidate_keys.items()
+            },
+            "scenarios": [scenario.to_payload() for scenario in self.scenarios],
+            "ui_prefs": self.ui_prefs,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "ProjectManifest":
+        return cls(
+            format_version=int(payload["format_version"]),
+            name=str(payload["name"]),
+            slug=str(payload["slug"]),
+            active_scenario_id=payload.get("active_scenario_id"),
+            comparison_scenario_ids=tuple(payload.get("comparison_scenario_ids", [])),
+            design_comparison_candidate_keys={
+                str(scenario_id): tuple(candidate_keys)
+                for scenario_id, candidate_keys in payload.get("design_comparison_candidate_keys", {}).items()
+            },
+            scenarios=tuple(ProjectScenarioManifest.from_payload(item) for item in payload.get("scenarios", [])),
+            ui_prefs=dict(payload.get("ui_prefs", {})),
+        )
 
 
 @dataclass(frozen=True)

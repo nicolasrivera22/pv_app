@@ -37,6 +37,18 @@ TABLE_COLUMNS = {
     "Inversor_Catalog": ["name", "AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max", "Imax_mppt", "n_mppt", "price_COP"],
     "Battery_Catalog": ["name", "nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"],
 }
+TABLE_FILE_MAP = {
+    "Config": "Config.csv",
+    "Demand_Profile": "Demand_Profile.csv",
+    "Demand_Profile_General": "Demand_Profile_General.csv",
+    "Demand_Profile_Weights": "Demand_Profile_Weights.csv",
+    "Month_Demand_Profile": "Month_Demand_Profile.csv",
+    "SUN_HSP_PROFILE": "SUN_HSP_PROFILE.csv",
+    "Precios_kWp_relativos": "Precios_kWp_relativos.csv",
+    "Precios_kWp_relativos_Otros": "Precios_kWp_relativos_Otros.csv",
+    "Inversor_Catalog": "Inversor_Catalog.csv",
+    "Battery_Catalog": "Battery_Catalog.csv",
+}
 
 CONFIG_KEY_ALIASES = {
     "coupling": "bat_coupling",
@@ -465,6 +477,52 @@ def rebuild_config_bundle(
         cop_kwp_table=cop_kwp_table if cop_kwp_table is not None else base_bundle.cop_kwp_table,
         cop_kwp_table_others=cop_kwp_table_others if cop_kwp_table_others is not None else base_bundle.cop_kwp_table_others,
         source_name=base_bundle.source_name,
+    )
+
+
+def load_bundle_from_tables(table_root: str | Path, *, source_name: str = "project") -> LoadedConfigBundle:
+    root = Path(table_root)
+
+    def _read_csv(table_name: str, *, optional: bool = False) -> pd.DataFrame | None:
+        path = root / TABLE_FILE_MAP[table_name]
+        if not path.exists():
+            if optional:
+                return None
+            raise FileNotFoundError(f"Falta la tabla canónica '{path.name}' en '{root}'.")
+        return pd.read_csv(path)
+
+    config_table = _read_csv("Config")
+    month_profile = _read_csv("Month_Demand_Profile")
+    demand_profile = _read_csv("Demand_Profile")
+    demand_profile_weights = _read_csv("Demand_Profile_Weights")
+    demand_profile_general = _read_csv("Demand_Profile_General")
+    cop_kwp_table = _read_csv("Precios_kWp_relativos")
+    cop_kwp_table_others = _read_csv("Precios_kWp_relativos_Otros")
+    inverter_catalog = _read_csv("Inversor_Catalog")
+    battery_catalog = _read_csv("Battery_Catalog")
+    sun_profile = _read_csv("SUN_HSP_PROFILE", optional=True)
+
+    config: dict[str, Any] = {}
+    assert config_table is not None
+    for _, row in config_table.iterrows():
+        item = str(row.get("Item", "")).strip()
+        if not item:
+            continue
+        config[item] = row.get("Valor")
+
+    return _bundle_from_frames(
+        config=config,
+        config_table=config_table,
+        inverter_catalog=inverter_catalog,
+        battery_catalog=battery_catalog,
+        demand_profile=demand_profile,
+        demand_profile_weights=demand_profile_weights,
+        demand_profile_general=demand_profile_general,
+        month_profile=month_profile,
+        sun_profile=sun_profile,
+        cop_kwp_table=cop_kwp_table,
+        cop_kwp_table_others=cop_kwp_table_others,
+        source_name=source_name,
     )
 
 

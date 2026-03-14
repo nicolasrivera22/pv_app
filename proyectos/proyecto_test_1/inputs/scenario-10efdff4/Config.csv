@@ -1,0 +1,53 @@
+Grupo,Descripción,Item,Valor,Unidad
+Demanda y Perfil,Consumo eléctrico mensual objetivo del sitio (kWh/mes).,E_month_kWh,2000,kWh
+,Tipo de perfil de demanda,profile_type,Mixta,
+,Porcentaje de participación del taller en el horario diurno,alpha_mix,0.8,
+,¿Cuál perfil de demanda usar?,use_excel_profile,Perfil Horario Relativo,
+Sol y módulos,Tasa de desempeño solar,PR,0.8,
+,Temperatura mínima ambiente de diseño (°C) para chequeo de Voc en frío.,Tmin_C,22,°C
+,Potencia de cada módulo solar,P_mod_W,600,Wp
+,Tensión de circuito abierto del módulo a 25 °C (V).,Voc25,50,V
+,Tensión en punto de máxima potencia a 25 °C (V).,Vmp25,41,V
+,Corriente de cortocircuito del módulo (A).,Isc,14,A
+,Coeficiente térmico de Voc (% por °C).,a_Voc_pct,-0.29,/°C
+Inversor,Límite inferior de relación DC/AC (kWp/kWac).,ILR_min,1.1,
+,Límite superior de relación DC/AC (kWp/kWac).,ILR_max,1.4,
+Economía,Tarifa de compra de energía (COP/kWh).,buy_tariff_COP_kWh,900,$/kWh
+,Tarifa de venta / remuneración por exportar (COP/kWh).,sell_tariff_COP_kWh,120,$/kWh
+,Crecimiento anual de la tarifa de compra (fracción/año).,g_tar_buy,0.05,/año
+,Crecimiento anual de la tarifa de venta (fracción/año).,g_tar_sell,0.05,/año
+,Degradación anual de los paneles (fracción/año).,deg_rate,0.005,/año
+,Tasa de descuento anual para el Valor Presente Neto (fracción/año). (Depreciación),discount_rate,0.05,/año
+,Horizonte de análisis (años).,years,30,años
+Precios,Modalidad de precio: **variable** (COP/kWp) o **total** (COP).,pricing_mode,Variable,
+,Precio total del proyecto (COP).,price_total_COP,58000000,COP
+,Incluir Costo Bateria e Inversor en el precio,include_hw_in_price,No,
+,Incluir Otros Variables en el Precio,include_var_others,Sí,
+,Precio Otros Fijos (Totales),price_others_total,0,COP
+,Precio del proyecto por kWp instalado (COP/kWp).,price_per_kWp_COP,3500000,$/kWh
+Monte Carlo,Desviación estándar mensual del PR (fracción).,mc_PR_std,0.07,
+,Desv. estándar mensual de la tarifa de compra (fracción).,mc_buy_std,0.06,
+,Desv. estándar mensual de la tarifa de venta (fracción).,mc_sell_std,0.1,
+,Desviación estándar de demanda en simulación Montecarlo,mc_demand_std,0.04,
+,Desviación estándar de los kWp instalados en simulación Montecarlo,mc_use_manual_kWp,No,
+,kWp manual para Monte Carlo (si `mc_use_manual_kWp=Sí),mc_manual_kWp,15,kWp
+,Número de Escenarios en la simulación Monte Carlo,mc_n_simulations,200,simulaciones
+,Batería a usar en MC (si quieres fijar otra distinta).,mc_battery_name,,
+Restricción de Proporción Pico,Activar el filtro por pico FV vs. pico de carga,limit_peak_ratio_enable,Sí,
+,Límite del **ratio** = (pico FV) / (pico carga).,limit_peak_ratio,2.5,
+,Año para aplicar degradación al calcular el pico (0 = Año 1).,limit_peak_year,0,
+,Mes para chequear picos: max (mes con mayor HSP estacional) o fijo.,limit_peak_month_mode,maximo,
+,"Cómo agregar el pico de carga 7×24: weighted\_mean, max, dia_semana, p95",limit_peak_basis,weighted_mean,
+,Mes fijo (1–12) para el chequeo de picos.,limit_peak_month_fixed,1,
+Semilla,Cómo definir la semilla de kWp: **auto** (por energía) o **manual**.,kWp_seed_mode,Auto,
+,"Semilla manual de kWp (si `kWp_seed_mode=""manual""`).",kWp_seed_manual_kWp,15,kWp
+,Alcance de búsqueda en **número de módulos** a cada lado de la semilla.,modules_span_each_side,60,
+,Potencia DC mínima del barrido (kWp),kWp_min,4,kWp
+,Potencia DC máxima del barrido (kWp),kWp_max,30,kWp
+Controles de Batería y Exporte,¿Permitir Exportación de Energía excedente?,export_allowed,Sí,
+,Incluir Batería en cálculo,include_battery,Sí,
+,Nombre de batería tal cual aparece en el catálogo (dejar vacio para optimizar),battery_name,,
+,¿Optimizar la batería?,optimize_battery,Sí,
+,Profundidad de descarga utilizable - DoD de la batería (0-1),bat_DoD,0.9,
+,Acoplamiento de la batería,coupling,DC,
+,Eficiencia de la batería,bat_eta_rt,0.9,

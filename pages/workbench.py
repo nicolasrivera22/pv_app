@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import replace
 from pathlib import Path
-
-import pandas as pd
 from dash import ALL, Input, Output, State, callback, ctx, dcc, html, register_page
 from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
@@ -23,12 +20,13 @@ from components import (
     scenario_sidebar,
 )
 from services import (
-    ScenarioSessionState,
+    add_scenario,
     build_assumption_sections,
     build_display_columns,
     build_schematic_legend,
     build_table_display_columns,
     build_unifilar_model,
+    commit_client_session,
     collect_config_updates,
     create_scenario_record,
     default_schematic_inspector,
@@ -41,15 +39,23 @@ from services import (
     frame_from_rows,
     load_config_from_excel,
     load_example_config,
+    list_projects,
     normalize_battery_catalog_rows,
     normalize_inverter_catalog_rows,
+    open_project,
+    project_exports_root,
+    project_root,
     rebuild_bundle_from_ui,
     refresh_bundle_issues,
     rename_scenario,
+    resolve_client_session,
     resolve_schematic_focus,
     resolve_schematic_inspector,
+    resolve_scenario_session,
     resolve_selected_candidate_key_for_scenario,
     run_scenario_scan,
+    save_project,
+    save_project_as,
     set_active_scenario,
     to_cytoscape_elements,
     tr,
@@ -82,8 +88,13 @@ def _empty_figure(title: str, message: str) -> go.Figure:
     return figure
 
 
-def _state(payload) -> ScenarioSessionState:
-    return ScenarioSessionState.from_payload(payload)
+def _session(payload, language_value: str | None):
+    return resolve_client_session(payload, language=_lang(language_value))
+
+
+def _session_with_scan(payload, language_value: str | None):
+    client_state, session_state = resolve_scenario_session(payload, ensure_scan=True, language=_lang(language_value))
+    return client_state, session_state, session_state.get_scenario()
 
 
 def _download_payload(content: bytes, filename: str) -> dict:
@@ -96,6 +107,10 @@ def _scenario_name_from_filename(filename: str | None, fallback: str) -> str:
         if stem:
             return stem
     return fallback
+
+
+def _project_options():
+    return [{"label": manifest.name, "value": manifest.slug} for manifest in list_projects()]
 
 
 layout = html.Div(
@@ -149,6 +164,14 @@ layout = html.Div(
 
 @callback(
     Output("scenario-sidebar-title", "children"),
+    Output("project-toolbar-title", "children"),
+    Output("project-name-label", "children"),
+    Output("project-name-input", "placeholder"),
+    Output("project-dropdown-label", "children"),
+    Output("project-dropdown", "placeholder"),
+    Output("save-project-btn", "children"),
+    Output("save-project-as-btn", "children"),
+    Output("open-project-btn", "children"),
     Output("scenario-upload-prefix", "children"),
     Output("scenario-upload-link", "children"),
     Output("load-example-btn", "children"),
@@ -190,6 +213,14 @@ def translate_workbench_page(language_value):
     lang = _lang(language_value)
     return (
         tr("workbench.sidebar.title", lang),
+        tr("workbench.project.title", lang),
+        tr("workbench.project.name", lang),
+        tr("workbench.project.name_placeholder", lang),
+        tr("workbench.project.open_label", lang),
+        tr("workbench.project.none", lang),
+        tr("workbench.project.save", lang),
+        tr("workbench.project.save_as", lang),
+        tr("workbench.project.open", lang),
         tr("workbench.upload.prefix", lang),
         tr("workbench.upload.link", lang),
         tr("workbench.load_example", lang),
@@ -229,6 +260,10 @@ def translate_workbench_page(language_value):
 
 
 @callback(
+    Output("project-dropdown", "options"),
+    Output("project-dropdown", "value"),
+    Output("project-name-input", "value"),
+    Output("project-status", "children"),
     Output("scenario-dropdown", "options"),
     Output("scenario-dropdown", "value"),
     Output("rename-scenario-input", "value"),
@@ -244,7 +279,13 @@ def translate_workbench_page(language_value):
 )
 def populate_scenario_shell(session_payload, language_value):
     lang = _lang(language_value)
-    state = _state(session_payload)
+    _, state = _session(session_payload, lang)
+    project_options = _project_options()
+    project_status = (
+        tr("workbench.project.bound", lang, name=state.project_name or state.project_slug)
+        if state.project_slug
+        else tr("workbench.project.unbound", lang)
+    )
     options = [{"label": scenario.name, "value": scenario.scenario_id} for scenario in state.scenarios]
     active = state.get_scenario()
     pills = []
@@ -265,6 +306,10 @@ def populate_scenario_shell(session_payload, language_value):
 
     if active is None:
         return (
+            project_options,
+            state.project_slug,
+            state.project_name or "",
+            project_status,
             options,
             None,
             "",
@@ -283,8 +328,12 @@ def populate_scenario_shell(session_payload, language_value):
         run_status = tr("workbench.run_not_executed", lang)
     validation_children = render_validation_panel(active.config_bundle.issues, lang=lang)
     has_errors = any(issue.level == "error" for issue in active.config_bundle.issues)
-    export_disabled = active.scan_result is None or active.dirty
+    export_disabled = active.dirty
     return (
+        project_options,
+        state.project_slug,
+        state.project_name or "",
+        project_status,
         options,
         active.scenario_id,
         active.name,
@@ -306,7 +355,7 @@ def populate_scenario_shell(session_payload, language_value):
 )
 def populate_assumptions(session_payload, show_all_values, language_value):
     lang = _lang(language_value)
-    state = _state(session_payload)
+    _, state = _session(session_payload, lang)
     active = state.get_scenario()
     if active is None:
         return render_assumption_sections(
@@ -361,7 +410,7 @@ def populate_assumptions(session_payload, show_all_values, language_value):
 )
 def populate_editors(session_payload, language_value):
     lang = _lang(language_value)
-    state = _state(session_payload)
+    _, state = _session(session_payload, lang)
     active = state.get_scenario()
     if active is None:
         empty = ([], [], {})
@@ -465,9 +514,14 @@ def add_battery_row(n_clicks, table_rows):
     Input("apply-edits-btn", "n_clicks"),
     Input("run-active-scan-btn", "n_clicks"),
     Input("set-active-scenario-btn", "n_clicks"),
+    Input("save-project-btn", "n_clicks"),
+    Input("save-project-as-btn", "n_clicks"),
+    Input("open-project-btn", "n_clicks"),
     State("scenario-upload", "filename"),
     State("rename-scenario-input", "value"),
     State("scenario-dropdown", "value"),
+    State("project-name-input", "value"),
+    State("project-dropdown", "value"),
     State("scenario-session-store", "data"),
     State({"type": "assumption-input", "field": ALL}, "id"),
     State({"type": "assumption-input", "field": ALL}, "value"),
@@ -496,9 +550,14 @@ def mutate_session_state(
     _apply_clicks,
     _run_clicks,
     _set_active_clicks,
+    _save_project_clicks,
+    _save_project_as_clicks,
+    _open_project_clicks,
     upload_filename,
     rename_value,
     scenario_dropdown_value,
+    project_name_value,
+    project_dropdown_value,
     session_payload,
     assumption_input_ids,
     assumption_values,
@@ -515,7 +574,7 @@ def mutate_session_state(
 ):
     lang = _lang(language_value)
     trigger = ctx.triggered_id
-    state = _state(session_payload)
+    client_state, state = _session(session_payload, lang)
 
     try:
         if trigger == "scenario-upload":
@@ -525,15 +584,35 @@ def mutate_session_state(
             bundle = load_config_from_excel(base64.b64decode(encoded))
             scenario_name = _scenario_name_from_filename(upload_filename, default_scenario_name(state, prefix="Escenario" if lang == "es" else "Scenario"))
             record = create_scenario_record(scenario_name, bundle, source_name=upload_filename or bundle.source_name)
-            state = replace(state, scenarios=(*state.scenarios, record), active_scenario_id=record.scenario_id)
-            return state.to_payload(), tr("workbench.loaded_workbook", lang, name=record.name)
+            state = add_scenario(state, record, make_active=True)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.loaded_workbook", lang, name=record.name)
 
         if trigger == "load-example-btn":
             bundle = load_example_config()
             name = default_scenario_name(state, prefix="Escenario" if lang == "es" else "Scenario")
             record = create_scenario_record(name, bundle, source_name=bundle.source_name)
-            state = replace(state, scenarios=(*state.scenarios, record), active_scenario_id=record.scenario_id)
-            return state.to_payload(), tr("workbench.loaded_example", lang, name=record.name)
+            state = add_scenario(state, record, make_active=True)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.loaded_example", lang, name=record.name)
+
+        if trigger == "open-project-btn":
+            if not project_dropdown_value:
+                raise ValueError(tr("workbench.project.select_required", lang))
+            state = open_project(project_dropdown_value)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.project.opened", lang, name=state.project_name, path=str(project_root(state.project_slug)))
+
+        if trigger in {"save-project-btn", "save-project-as-btn"}:
+            resolved_name = (project_name_value or state.project_name or "").strip()
+            if not resolved_name:
+                raise ValueError(tr("workbench.project.name_required", lang))
+            if trigger == "save-project-btn":
+                state = save_project(state, project_name=resolved_name, language=lang)
+            else:
+                state = save_project_as(state, project_name=resolved_name, language=lang)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.project.saved", lang, name=state.project_name, path=str(project_root(state.project_slug)))
 
         active = state.get_scenario()
         if active is None:
@@ -541,22 +620,26 @@ def mutate_session_state(
 
         if trigger == "duplicate-scenario-btn":
             state = duplicate_scenario(state, active.scenario_id)
-            return state.to_payload(), tr("workbench.duplicated", lang)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.duplicated", lang)
 
         if trigger == "rename-scenario-btn":
             state = rename_scenario(state, active.scenario_id, rename_value or active.name)
-            return state.to_payload(), tr("workbench.renamed", lang)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.renamed", lang)
 
         if trigger == "delete-scenario-btn":
             state = delete_scenario(state, active.scenario_id)
-            return state.to_payload(), tr("workbench.deleted", lang)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.deleted", lang)
 
         if trigger == "set-active-scenario-btn":
             if scenario_dropdown_value == state.active_scenario_id:
                 raise PreventUpdate
             state = set_active_scenario(state, scenario_dropdown_value)
             selected = state.get_scenario()
-            return state.to_payload(), tr("workbench.set_active_status", lang, name=selected.name) if selected else tr("workbench.no_active_scenario", lang)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.set_active_status", lang, name=selected.name) if selected else tr("workbench.no_active_scenario", lang)
 
         if trigger == "apply-edits-btn":
             config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
@@ -578,17 +661,20 @@ def mutate_session_state(
             )
             bundle = refresh_bundle_issues(bundle, extra_issues=[*inverter_issues, *battery_issues])
             state = update_scenario_bundle(state, active.scenario_id, bundle)
-            return state.to_payload(), tr("workbench.applied_edits", lang)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.applied_edits", lang)
 
         if trigger == "run-active-scan-btn":
             state = run_scenario_scan(state, active.scenario_id)
             updated = state.get_scenario(active.scenario_id)
-            return state.to_payload(), tr("workbench.scan_completed", lang, name=updated.name)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.scan_completed", lang, name=updated.name)
 
     except PreventUpdate:
         raise
     except Exception as exc:
-        return state.to_payload(), tr("common.action_failed", lang, error=exc)
+        client_state = commit_client_session(client_state, state, bump_revision=False)
+        return client_state.to_payload(), tr("common.action_failed", lang, error=exc)
 
     raise PreventUpdate
 
@@ -602,8 +688,7 @@ def mutate_session_state(
     prevent_initial_call=True,
 )
 def persist_selected_candidate(selected_rows, click_data, table_rows, session_payload):
-    state = _state(session_payload)
-    active = state.get_scenario()
+    client_state, state, active = _session_with_scan(session_payload, None)
     if active is None or active.scan_result is None:
         raise PreventUpdate
     selected_key = resolve_selected_candidate_key_for_scenario(
@@ -616,7 +701,8 @@ def persist_selected_candidate(selected_rows, click_data, table_rows, session_pa
     if selected_key == active.selected_candidate_key:
         raise PreventUpdate
     state = update_selected_candidate(state, active.scenario_id, selected_key)
-    return state.to_payload()
+    client_state = commit_client_session(client_state, state)
+    return client_state.to_payload()
 
 
 @callback(
@@ -634,8 +720,7 @@ def persist_selected_candidate(selected_rows, click_data, table_rows, session_pa
 )
 def populate_results(session_payload, language_value):
     lang = _lang(language_value)
-    state = _state(session_payload)
-    active = state.get_scenario()
+    _, state, active = _session_with_scan(session_payload, lang)
     empty = _empty_figure(tr("common.results", lang), tr("workbench.results.empty", lang))
     if active is None or active.scan_result is None:
         return [], empty, empty, empty, [], [], [], [], {}
@@ -716,8 +801,7 @@ def populate_results(session_payload, language_value):
 )
 def populate_unifilar_diagram(session_payload, language_value):
     lang = _lang(language_value)
-    state = _state(session_payload)
-    active = state.get_scenario()
+    _, state, active = _session_with_scan(session_payload, lang)
     title = tr("workbench.schematic.title", lang)
     empty_message = tr("workbench.schematic.empty", lang)
     legend_title = tr("workbench.schematic.legend.title", lang)
@@ -778,8 +862,7 @@ def sync_unifilar_inspector_lock(tap_node, session_payload):
 )
 def populate_unifilar_inspector(inspector_lock, session_payload, language_value):
     lang = _lang(language_value)
-    state = _state(session_payload)
-    active = state.get_scenario()
+    _, state, active = _session_with_scan(session_payload, lang)
     if active is None or active.scan_result is None:
         return render_schematic_inspector(
             default_schematic_inspector(
@@ -805,8 +888,7 @@ def populate_unifilar_inspector(inspector_lock, session_payload, language_value)
 def export_active_scenario(n_clicks, session_payload):
     if not n_clicks:
         raise PreventUpdate
-    state = _state(session_payload)
-    active = state.get_scenario()
+    _, state, active = _session_with_scan(session_payload, None)
     if active is None or active.scan_result is None or active.dirty:
         raise PreventUpdate
     content = export_scenario_workbook(active)
@@ -829,9 +911,9 @@ def export_active_artifacts(n_clicks, session_payload, language_value):
     if not n_clicks:
         raise PreventUpdate
     lang = _lang(language_value)
-    state = _state(session_payload)
-    active = state.get_scenario()
+    _, state, active = _session_with_scan(session_payload, lang)
     if active is None or active.scan_result is None or active.dirty:
         raise PreventUpdate
-    paths = export_deterministic_artifacts(active)
+    output_root = project_exports_root(state.project_slug) if state.project_slug else Path("Resultados")
+    paths = export_deterministic_artifacts(active, output_root=output_root)
     return tr("workbench.export_artifacts_done", lang, path=str(paths[0].parent.resolve()))

@@ -7,15 +7,16 @@ from dash.exceptions import PreventUpdate
 
 from services import (
     MAX_COMPARE_DESIGNS,
-    ScenarioSessionState,
     append_design_selection,
     build_available_design_rows,
     build_design_compare_state,
     build_design_comparison_figures,
     build_design_comparison_rows,
     build_display_columns,
+    commit_client_session,
     export_design_comparison_workbook,
     remove_design_selection,
+    resolve_scenario_session,
     resolve_design_selection,
     set_design_comparison_candidates,
     tr,
@@ -62,10 +63,6 @@ SUMMARY_VISIBLE_COLUMNS = [
     "annual_export_kwh",
     "peak_ratio",
 ]
-
-
-def _state(payload) -> ScenarioSessionState:
-    return ScenarioSessionState.from_payload(payload)
 
 
 def _lang(value: str | None) -> str:
@@ -261,7 +258,7 @@ def mutate_design_comparison_selection(
     session_payload,
 ):
     trigger = ctx.triggered_id
-    state = _state(session_payload)
+    client_state, state = resolve_scenario_session(session_payload, ensure_scan=True, language="es")
     active = state.get_scenario()
     if active is None or active.scan_result is None or active.dirty:
         raise PreventUpdate
@@ -296,7 +293,8 @@ def mutate_design_comparison_selection(
     if updated == current and trigger != "compare-clear-btn":
         raise PreventUpdate
     next_state = set_design_comparison_candidates(state, active.scenario_id, updated)
-    return next_state.to_payload(), []
+    client_state = commit_client_session(client_state, next_state)
+    return client_state.to_payload(), []
 
 
 @callback(
@@ -327,7 +325,7 @@ def mutate_design_comparison_selection(
 )
 def populate_design_comparison(session_payload, language_value):
     lang = _lang(language_value)
-    state = _state(session_payload)
+    _, state = resolve_scenario_session(session_payload, ensure_scan=True, language=lang)
     active = state.get_scenario()
     selected_keys = resolve_design_selection(state, active) if active is not None else ()
     page_state = build_design_compare_state(active, selected_keys, lang=lang)
@@ -435,7 +433,7 @@ def export_design_comparison(n_clicks, session_payload, language_value):
     if not n_clicks:
         raise PreventUpdate
     lang = _lang(language_value)
-    state = _state(session_payload)
+    _, state = resolve_scenario_session(session_payload, ensure_scan=True, language=lang)
     active = state.get_scenario()
     if active is None or active.scan_result is None or active.dirty:
         raise PreventUpdate

@@ -162,8 +162,8 @@ def test_registry_stores_server_side_results_and_prunes() -> None:
     assert get_risk_result(first_id).samples is not None
 
     clear_expired_risk_results(max_entries=1)
-    assert get_risk_result(second_id) is second
-    assert get_risk_result(first_id) is None
+    assert get_risk_result(first_id) is first
+    assert get_risk_result(second_id) is None
 
 
 def test_risk_display_helpers_build_metadata_tables_and_figures() -> None:

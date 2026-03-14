@@ -28,7 +28,11 @@ def store_risk_result(result: MonteCarloRunResult) -> str:
 
 def get_risk_result(result_id: str) -> MonteCarloRunResult | None:
     with _LOCK:
-        return _RESULTS.get(result_id)
+        result = _RESULTS.get(result_id)
+        if result is None:
+            return None
+        _RESULTS.move_to_end(result_id)
+        return result
 
 
 def clear_expired_risk_results(max_entries: int = MAX_RISK_RESULTS) -> None:

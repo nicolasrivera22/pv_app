@@ -16,8 +16,6 @@ def risk_tables_section() -> html.Div:
                     html.H3(tr("risk.metadata.title", "es"), id="risk-metadata-title"),
                     html.Div(id="risk-metadata-table"),
                     html.Div(id="risk-warnings"),
-                    html.P(tr("risk.payback_note", "es"), id="risk-payback-note", className="scenario-meta"),
-                    html.P(tr("risk.payback_band_note", "es"), id="risk-payback-band-note", className="scenario-meta"),
                 ],
             ),
             html.Div(
