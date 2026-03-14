@@ -13,6 +13,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import range_boundaries
 
 from pv_product.simulator import calculate_capex_client
+from pv_product.utils import build_7x24_from_excel
 from services import ensure_template, load_config_from_excel, load_example_config, run_scan, run_scenario
 from services.io_excel import WorkbookContractError
 from services.result_views import build_kpis, resolve_selected_candidate_key
@@ -256,6 +257,20 @@ def test_missing_required_table_raises_friendly_contract_error(tmp_path) -> None
 
     with pytest.raises(WorkbookContractError, match="Falta la tabla 'Demand_Profile'"):
         load_config_from_excel(workbook)
+
+
+def test_build_7x24_from_excel_validation_message_matches_total_mode() -> None:
+    df = pd.DataFrame({"DOW": [1], "HOUR": [0]})
+
+    with pytest.raises(ValueError, match=r"Profiles\.LoadProfile debe tener: DOW, HOUR, TOTAL"):
+        build_7x24_from_excel(df, total=True)
+
+
+def test_build_7x24_from_excel_validation_message_matches_split_mode() -> None:
+    df = pd.DataFrame({"DOW": [1], "HOUR": [0], "TOTAL": [1.0]})
+
+    with pytest.raises(ValueError, match=r"Profiles\.LoadProfile debe tener: DOW, HOUR, RES, IND, TOTAL"):
+        build_7x24_from_excel(df, total=False)
 
 
 def test_missing_required_column_raises_friendly_contract_error(tmp_path) -> None:

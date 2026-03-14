@@ -153,7 +153,35 @@ def test_resolve_deterministic_scan_reuses_cache(monkeypatch) -> None:
     second = resolve_deterministic_scan(bundle, allow_parallel=False)
 
     assert call_count["count"] == 1
-    assert first is second
+    assert first is not second
+    assert first.best_candidate_key == second.best_candidate_key
+    pdt.assert_frame_equal(first.candidates.reset_index(drop=True), second.candidates.reset_index(drop=True))
+
+
+def test_deterministic_cache_get_returns_isolated_scan_result_copy() -> None:
+    bundle = _fast_bundle()
+    fingerprint = fingerprint_deterministic_input(bundle)
+    original = resolve_deterministic_scan(bundle, allow_parallel=False)
+    cached = get_deterministic_cache().get(fingerprint)
+
+    assert cached is not None
+    candidate_key = cached.best_candidate_key
+    original_npv = float(cached.candidates.loc[0, "NPV_COP"])
+    original_summary_npv = float(cached.candidate_details[candidate_key]["summary"]["cum_disc_final"])
+    original_monthly_value = cached.candidate_details[candidate_key]["monthly"].iloc[0, 0]
+
+    cached.candidates.loc[0, "NPV_COP"] = -1.0
+    cached.candidate_details[candidate_key]["summary"]["cum_disc_final"] = -2.0
+    cached.candidate_details[candidate_key]["monthly"].iloc[0, 0] = "MUTATED"
+
+    fresh = get_deterministic_cache().get(fingerprint)
+
+    assert fresh is not None
+    assert fresh is not cached
+    assert original is not fresh
+    assert float(fresh.candidates.loc[0, "NPV_COP"]) == original_npv
+    assert float(fresh.candidate_details[candidate_key]["summary"]["cum_disc_final"]) == original_summary_npv
+    assert fresh.candidate_details[candidate_key]["monthly"].iloc[0, 0] == original_monthly_value
 
 
 def test_project_round_trip_uses_canonical_csv_tables_and_restores_workspace(tmp_path, monkeypatch) -> None:

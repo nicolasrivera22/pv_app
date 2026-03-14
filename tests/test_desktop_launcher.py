@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app import create_app
 import desktop_launcher
+import pytest
 from services import io_excel
 from services.runtime_paths import assets_dir, bundled_workbook_path, default_results_root, pages_dir, resource_root, user_root
 
@@ -75,6 +76,21 @@ def test_create_local_server_skips_busy_ports(monkeypatch) -> None:
     assert server is fake_server
     assert port == 8051
     assert attempted_ports == [8050, 8051]
+
+
+def test_create_local_server_raises_when_all_candidate_ports_are_busy(monkeypatch) -> None:
+    attempted_ports: list[int] = []
+
+    def fake_make_server(host, port, app, threaded=True):
+        attempted_ports.append(port)
+        raise OSError("busy")
+
+    monkeypatch.setattr(desktop_launcher, "make_server", fake_make_server)
+
+    with pytest.raises(RuntimeError, match=r"No se encontró un puerto libre entre 8050 y 8052\."):
+        desktop_launcher.create_local_server(object(), start_port=8050, max_attempts=3)
+
+    assert attempted_ports == [8050, 8051, 8052]
 
 
 def test_browser_opens_only_after_ready(monkeypatch) -> None:

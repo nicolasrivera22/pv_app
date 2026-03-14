@@ -80,16 +80,21 @@ def solar_profile_24(shift=0, exponent=1.0):
 
 def build_7x24_from_excel(df_load: pd.DataFrame, total: bool = False):
     """
-    Convierte una tabla de carga (DOW, HOUR, RES/IND/TOTAL) en:
+    Convierte una tabla de carga en:
       - dow24: ndarray (7,24) con formas horarias por día (cada fila suma 1).
       - day_w: ndarray (7,) con pesos de energía semanal (suman 1).
+
+    Columnas requeridas:
+      - total=True: DOW, HOUR, TOTAL
+      - total=False: DOW, HOUR, RES, IND, TOTAL
     """
     if total:
         req = {"DOW", "HOUR", "TOTAL"}
     else:
         req = {"DOW", "HOUR", "RES", "IND", "TOTAL"}
     if not req.issubset(set(df_load.columns)):
-        raise ValueError("Profiles.LoadProfile debe tener: DOW, HOUR, RES, IND, TOTAL")
+        expected = "DOW, HOUR, TOTAL" if total else "DOW, HOUR, RES, IND, TOTAL"
+        raise ValueError(f"Profiles.LoadProfile debe tener: {expected}")
 
     df = df_load.copy()
     if not total:

@@ -189,6 +189,33 @@ def build_npv_curve(candidate_table: pd.DataFrame) -> pd.DataFrame:
     return grouped.sort_values("kWp").reset_index(drop=True)
 
 
+def _build_panel_count_axis(curve: pd.DataFrame, module_power_w: float | None, *, max_ticks: int = 6) -> tuple[list[float], list[str]] | None:
+    if not module_power_w or float(module_power_w) <= 0 or curve.empty or "panel_count" not in curve.columns:
+        return None
+    module_kw = float(module_power_w) / 1000.0
+    if module_kw <= 0:
+        return None
+    panel_counts = sorted({int(value) for value in curve["panel_count"].dropna().tolist()})
+    if not panel_counts:
+        return None
+    if len(panel_counts) <= max_ticks:
+        selected_counts = panel_counts
+    else:
+        selected_counts = []
+        last_index = len(panel_counts) - 1
+        for step in range(max_ticks):
+            index = round((last_index * step) / (max_ticks - 1))
+            selected_counts.append(panel_counts[index])
+        selected_counts = list(dict.fromkeys(selected_counts))
+        if selected_counts[0] != panel_counts[0]:
+            selected_counts.insert(0, panel_counts[0])
+        if selected_counts[-1] != panel_counts[-1]:
+            selected_counts.append(panel_counts[-1])
+    tickvals = [float(panel_count) * module_kw for panel_count in selected_counts]
+    ticktext = [f"{panel_count:,}" for panel_count in selected_counts]
+    return tickvals, ticktext
+
+
 def build_npv_figure(
     candidate_table: pd.DataFrame,
     selected_key: str | None = None,
@@ -245,23 +272,17 @@ def build_npv_figure(
                     + ": %{customdata[1]}<extra></extra>"
                 ),
             )
-    figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified")
+    figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified", margin={"t": 88})
     figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f")
     figure.update_xaxes(title="kWp instalado" if lang == "es" else "Installed kWp")
-    if module_power_w and float(module_power_w) > 0 and not curve.empty:
-        min_kwp = float(curve["kWp"].min())
-        max_kwp = float(curve["kWp"].max())
-        if min_kwp == max_kwp:
-            tickvals = [min_kwp]
-        else:
-            step_count = min(6, max(2, len(curve)))
-            tickvals = [min_kwp + ((max_kwp - min_kwp) * index / (step_count - 1)) for index in range(step_count)]
-        ticktext = [f"{int(round(value / (float(module_power_w) / 1000.0))):,}" for value in tickvals]
+    panel_axis = _build_panel_count_axis(curve, module_power_w)
+    if panel_axis is not None:
+        tickvals, ticktext = panel_axis
         figure.update_layout(
             xaxis2={
                 "overlaying": "x",
                 "side": "top",
-                "title": ("Número de paneles" if lang == "es" else "Panel count"),
+                "title": {"text": ("Número de paneles" if lang == "es" else "Panel count"), "standoff": 8},
                 "tickvals": tickvals,
                 "ticktext": ticktext,
                 "showgrid": False,

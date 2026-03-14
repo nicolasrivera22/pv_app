@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dash import dcc
 import pandas as pd
+import pytest
 
 from app import create_app
 from components.risk_controls import risk_controls_section
@@ -293,8 +294,41 @@ def test_npv_chart_adds_top_axis_for_panel_count() -> None:
 
     assert figure.layout.xaxis.title.text == "kWp instalado"
     assert figure.layout.xaxis2.title.text == "Número de paneles"
+    assert list(figure.layout.xaxis2.ticktext) == ["20", "30"]
+    assert list(figure.layout.xaxis2.tickvals) == pytest.approx([12.0, 18.0])
     assert list(figure.data[0].customdata[0][:2]) == ["12.000::None", 20]
     assert any(trace.name == "Candidato seleccionado" for trace in figure.data)
+
+
+def test_npv_chart_omits_top_axis_without_valid_module_power() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery": "None",
+                "NPV_COP": 10_000_000,
+                "payback_years": 5.5,
+                "self_consumption_ratio": 0.45,
+                "peak_ratio": 1.1,
+                "scan_order": 0,
+            },
+            {
+                "candidate_key": "18.000::BAT-10",
+                "kWp": 18.0,
+                "battery": "BAT-10",
+                "NPV_COP": 16_000_000,
+                "payback_years": 6.2,
+                "self_consumption_ratio": 0.52,
+                "peak_ratio": 1.25,
+                "scan_order": 1,
+            },
+        ]
+    )
+
+    figure = build_npv_figure(table, lang="es", module_power_w=0.0)
+
+    assert "xaxis2" not in figure.layout
 
 
 def test_cash_flow_timeline_starts_next_calendar_year_and_uses_dual_x_axis() -> None:
