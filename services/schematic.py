@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from pv_product.hardware import string_checks
 
 from .i18n import tr
 from .types import ScenarioRecord
+
+ASSETS_ICON_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
+ICON_ROLE_MAP = {
+    "pv": "pv",
+    "inverter": "inverter",
+    "battery": "battery",
+    "load": "house",
+    "grid": "grid",
+}
 
 
 @dataclass(frozen=True)
@@ -39,6 +49,8 @@ class SchematicLegendItem:
     label: str
     connection_type: str | None
     style_class: str
+    icon_role: str | None = None
+    icon_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -47,15 +59,21 @@ class SchematicInspector:
     description: str
     details: tuple[SchematicDetailRow, ...]
     representative_note: str | None = None
+    kind_label: str | None = None
+    icon_role: str | None = None
+    icon_url: str | None = None
+    badge: str | None = None
+    status: str | None = None
 
 
 @dataclass(frozen=True)
 class SchematicNode:
     id: str
     role: str
-    label: str
+    display_label: str
     position: dict[str, float]
     metadata: dict[str, object]
+    icon_role: str | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +96,19 @@ class SchematicModel:
 
 def _lang(value: str | None) -> str:
     return value if value in {"en", "es"} else "es"
+
+
+def resolve_schematic_icon_url(icon_role: str | None) -> str | None:
+    if not icon_role:
+        return None
+    filename = f"{icon_role}.svg"
+    if not (ASSETS_ICON_DIR / filename).exists():
+        return None
+    return f"/assets/icons/{filename}"
+
+
+def _icon_role(component_kind: str) -> str | None:
+    return ICON_ROLE_MAP.get(component_kind, component_kind or None)
 
 
 def _module_data(bundle) -> dict[str, float]:
@@ -227,67 +258,49 @@ def _badge(component_kind: str, lang: str) -> str:
     return tr(f"workbench.schematic.badge.{component_kind}", lang)
 
 
-def _pv_node_label(group: StringGroupSummary, module_power_kw: float, *, exact: bool, lang: str) -> str:
-    kwp_group = group.total_modules * module_power_kw
-    lines = [
-        f"[{_badge('pv', lang)}]",
-        tr("workbench.schematic.pv_label", lang, mppt=group.mppt_index),
-    ]
-    if exact:
-        lines.extend(
-            [
-                tr(
-                    "workbench.schematic.group_exact_short",
-                    lang,
-                    strings=group.strings,
-                    modules=group.modules_per_string,
-                ),
-                tr("workbench.schematic.group_kwp", lang, kwp=kwp_group),
-            ]
-        )
-    else:
-        lines.extend(
-            [
-                tr(
-                    "workbench.schematic.group_representative_short",
-                    lang,
-                    strings=group.strings,
-                    modules=group.modules_per_string,
-                ),
-                tr("workbench.schematic.group_modules_total", lang, modules=group.total_modules),
-            ]
-        )
-    return "\n".join(lines)
+def _short_text(value: str, *, max_length: int = 18) -> str:
+    clean = " ".join(str(value).split())
+    if len(clean) <= max_length:
+        return clean
+    return clean[: max_length - 1].rstrip() + "…"
 
 
-def _inverter_label(detail: dict[str, Any], *, lang: str) -> str:
-    inverter = (detail.get("inv_sel") or {}).get("inverter") or {}
-    name = str(inverter.get("name", tr("workbench.schematic.inverter_node", lang)))
-    ac_kw = inverter.get("AC_kW")
-    lines = [f"[{_badge('inverter', lang)}]", name]
-    if ac_kw not in (None, ""):
-        lines.append(tr("workbench.schematic.inverter_power", lang, kw=float(ac_kw)))
-    return "\n".join(lines)
-
-
-def _battery_label(detail: dict[str, Any], config_bundle, *, lang: str) -> str:
-    battery = detail.get("battery") or {}
-    name = str(battery.get("name", detail.get("battery_name", tr("workbench.schematic.battery_node", lang))))
-    nom_kwh = float(battery.get("nom_kWh", 0.0) or 0.0)
-    usable = nom_kwh * float(config_bundle.config.get("bat_DoD", 1.0) or 1.0)
-    coupling = str(config_bundle.config.get("bat_coupling", "ac") or "ac").lower()
+def _pv_display_label(group: StringGroupSummary, *, exact: bool, lang: str) -> str:
+    summary = f"{group.strings}×{group.modules_per_string}"
+    if not exact:
+        summary = f"~{summary}"
     return "\n".join(
         [
-            f"[{_badge('battery', lang)}]",
-            name,
-            tr("workbench.schematic.battery_energy_short", lang, nominal=nom_kwh, usable=usable),
-            tr("workbench.schematic.battery_coupling_short", lang, coupling=coupling.upper()),
+            tr("workbench.schematic.pv_short", lang, mppt=group.mppt_index),
+            summary,
         ]
     )
 
 
-def _simple_node_label(component_kind: str, title_key: str, *, lang: str) -> str:
-    return "\n".join([f"[{_badge(component_kind, lang)}]", tr(title_key, lang)])
+def _inverter_display_label(detail: dict[str, Any], *, lang: str) -> str:
+    inverter = (detail.get("inv_sel") or {}).get("inverter") or {}
+    name = str(inverter.get("name", tr("workbench.schematic.inverter_node", lang)))
+    ac_kw = inverter.get("AC_kW")
+    lines = [_short_text(name)]
+    if ac_kw not in (None, ""):
+        lines.append(tr("workbench.schematic.inverter_power_short", lang, kw=float(ac_kw)))
+    return "\n".join(lines)
+
+
+def _battery_display_label(detail: dict[str, Any], config_bundle, *, lang: str) -> str:
+    battery = detail.get("battery") or {}
+    name = str(battery.get("name", detail.get("battery_name", tr("workbench.schematic.battery_node", lang))))
+    nom_kwh = float(battery.get("nom_kWh", 0.0) or 0.0)
+    return "\n".join(
+        [
+            _short_text(name),
+            tr("workbench.schematic.battery_size_short", lang, nominal=nom_kwh),
+        ]
+    )
+
+
+def _simple_node_display_label(title_key: str, *, lang: str) -> str:
+    return tr(title_key, lang)
 
 
 def _detail_row(label_key: str, value: str, lang: str) -> SchematicDetailRow:
@@ -325,6 +338,7 @@ def _pv_metadata(
     ]
     return {
         "component_kind": "pv",
+        "component_kind_label": tr("workbench.schematic.kind.pv", lang),
         "title": tr("workbench.schematic.pv_label", lang, mppt=group.mppt_index),
         "description": tr("workbench.schematic.description.pv", lang),
         "details": [{"label": row.label, "value": row.value} for row in details],
@@ -335,6 +349,9 @@ def _pv_metadata(
             strings=group.strings,
             modules=group.modules_per_string,
         ),
+        "badge": _badge("pv", lang),
+        "icon_role": _icon_role("pv"),
+        "icon_url": resolve_schematic_icon_url(_icon_role("pv")),
         "representative": representative,
         "representative_note": layout_note if representative else None,
     }
@@ -354,10 +371,14 @@ def _inverter_metadata(detail: dict[str, Any], *, lang: str) -> dict[str, object
         details.append(_detail_row("workbench.schematic.detail.mppt_count", str(int(n_mppt)), lang))
     return {
         "component_kind": "inverter",
+        "component_kind_label": tr("workbench.schematic.kind.inverter", lang),
         "title": tr("workbench.schematic.inverter_node", lang),
         "description": tr("workbench.schematic.description.inverter", lang),
         "details": [{"label": row.label, "value": row.value} for row in details],
         "tooltip": tr("workbench.schematic.tooltip.inverter", lang, name=str(inverter.get("name", "-"))),
+        "badge": _badge("inverter", lang),
+        "icon_role": _icon_role("inverter"),
+        "icon_url": resolve_schematic_icon_url(_icon_role("inverter")),
         "representative": False,
         "representative_note": None,
     }
@@ -374,13 +395,25 @@ def _battery_metadata(detail: dict[str, Any], config_bundle, *, lang: str) -> di
         _detail_row("workbench.schematic.detail.nominal_energy", _format_kwh(nom_kwh), lang),
         _detail_row("workbench.schematic.detail.usable_energy", _format_kwh(usable), lang),
         _detail_row("workbench.schematic.detail.coupling", coupling, lang),
+        _detail_row(
+            "workbench.schematic.detail.connection_side",
+            tr(
+                "workbench.schematic.detail.connection_side.dc_bus" if coupling == "DC" else "workbench.schematic.detail.connection_side.ac_bus",
+                lang,
+            ),
+            lang,
+        ),
     ]
     return {
         "component_kind": "battery",
+        "component_kind_label": tr("workbench.schematic.kind.battery", lang),
         "title": tr("workbench.schematic.battery_node", lang),
         "description": tr("workbench.schematic.description.battery", lang),
         "details": [{"label": row.label, "value": row.value} for row in details],
         "tooltip": tr("workbench.schematic.tooltip.battery", lang, name=str(battery.get("name", "-"))),
+        "badge": _badge("battery", lang),
+        "icon_role": _icon_role("battery"),
+        "icon_url": resolve_schematic_icon_url(_icon_role("battery")),
         "representative": False,
         "representative_note": None,
     }
@@ -393,10 +426,14 @@ def _load_metadata(*, lang: str) -> dict[str, object]:
     ]
     return {
         "component_kind": "load",
+        "component_kind_label": tr("workbench.schematic.kind.load", lang),
         "title": tr("workbench.schematic.load_node", lang),
         "description": tr("workbench.schematic.description.load", lang),
         "details": [{"label": row.label, "value": row.value} for row in details],
         "tooltip": tr("workbench.schematic.tooltip.load", lang),
+        "badge": _badge("load", lang),
+        "icon_role": _icon_role("load"),
+        "icon_url": resolve_schematic_icon_url(_icon_role("load")),
         "representative": False,
         "representative_note": None,
     }
@@ -409,10 +446,14 @@ def _grid_metadata(*, lang: str) -> dict[str, object]:
     ]
     return {
         "component_kind": "grid",
+        "component_kind_label": tr("workbench.schematic.kind.grid", lang),
         "title": tr("workbench.schematic.grid_node", lang),
         "description": tr("workbench.schematic.description.grid", lang),
         "details": [{"label": row.label, "value": row.value} for row in details],
         "tooltip": tr("workbench.schematic.tooltip.grid", lang),
+        "badge": _badge("grid", lang),
+        "icon_role": _icon_role("grid"),
+        "icon_url": resolve_schematic_icon_url(_icon_role("grid")),
         "representative": False,
         "representative_note": None,
     }
@@ -421,11 +462,51 @@ def _grid_metadata(*, lang: str) -> dict[str, object]:
 def build_schematic_legend(lang: str = "es") -> tuple[SchematicLegendItem, ...]:
     lang = _lang(lang)
     return (
-        SchematicLegendItem(role="pv", badge=_badge("pv", lang), label=tr("workbench.schematic.legend.pv", lang), connection_type=None, style_class="legend-role-pv"),
-        SchematicLegendItem(role="inverter", badge=_badge("inverter", lang), label=tr("workbench.schematic.legend.inverter", lang), connection_type=None, style_class="legend-role-inverter"),
-        SchematicLegendItem(role="battery", badge=_badge("battery", lang), label=tr("workbench.schematic.legend.battery", lang), connection_type=None, style_class="legend-role-battery"),
-        SchematicLegendItem(role="load", badge=_badge("load", lang), label=tr("workbench.schematic.legend.load", lang), connection_type=None, style_class="legend-role-load"),
-        SchematicLegendItem(role="grid", badge=_badge("grid", lang), label=tr("workbench.schematic.legend.grid", lang), connection_type=None, style_class="legend-role-grid"),
+        SchematicLegendItem(
+            role="pv",
+            badge=_badge("pv", lang),
+            label=tr("workbench.schematic.legend.pv", lang),
+            connection_type=None,
+            style_class="legend-role-pv",
+            icon_role=_icon_role("pv"),
+            icon_url=resolve_schematic_icon_url(_icon_role("pv")),
+        ),
+        SchematicLegendItem(
+            role="inverter",
+            badge=_badge("inverter", lang),
+            label=tr("workbench.schematic.legend.inverter", lang),
+            connection_type=None,
+            style_class="legend-role-inverter",
+            icon_role=_icon_role("inverter"),
+            icon_url=resolve_schematic_icon_url(_icon_role("inverter")),
+        ),
+        SchematicLegendItem(
+            role="battery",
+            badge=_badge("battery", lang),
+            label=tr("workbench.schematic.legend.battery", lang),
+            connection_type=None,
+            style_class="legend-role-battery",
+            icon_role=_icon_role("battery"),
+            icon_url=resolve_schematic_icon_url(_icon_role("battery")),
+        ),
+        SchematicLegendItem(
+            role="load",
+            badge=_badge("load", lang),
+            label=tr("workbench.schematic.legend.load", lang),
+            connection_type=None,
+            style_class="legend-role-load",
+            icon_role=_icon_role("load"),
+            icon_url=resolve_schematic_icon_url(_icon_role("load")),
+        ),
+        SchematicLegendItem(
+            role="grid",
+            badge=_badge("grid", lang),
+            label=tr("workbench.schematic.legend.grid", lang),
+            connection_type=None,
+            style_class="legend-role-grid",
+            icon_role=_icon_role("grid"),
+            icon_url=resolve_schematic_icon_url(_icon_role("grid")),
+        ),
         SchematicLegendItem(role="ac", badge="AC", label=tr("workbench.schematic.legend.ac", lang), connection_type="ac", style_class="legend-connection-ac"),
         SchematicLegendItem(role="dc", badge="DC", label=tr("workbench.schematic.legend.dc", lang), connection_type="dc", style_class="legend-connection-dc"),
     )
@@ -448,10 +529,29 @@ def default_schematic_inspector(model: SchematicModel | None, lang: str = "es") 
         description=tr("workbench.schematic.inspector.default_description", lang),
         details=details,
         representative_note=representative_note,
+        status=tr("workbench.schematic.inspector.status_default", lang),
     )
 
 
-def resolve_schematic_inspector(node_data: dict[str, Any] | None, model: SchematicModel, lang: str = "es") -> SchematicInspector:
+def resolve_schematic_focus(
+    *,
+    locked_node_id: str | None,
+    hover_node_data: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, bool]:
+    if locked_node_id:
+        return {"id": locked_node_id}, True
+    if hover_node_data:
+        return hover_node_data, False
+    return None, False
+
+
+def resolve_schematic_inspector(
+    node_data: dict[str, Any] | None,
+    model: SchematicModel,
+    lang: str = "es",
+    *,
+    locked: bool = False,
+) -> SchematicInspector:
     lang = _lang(lang)
     if not node_data:
         return default_schematic_inspector(model, lang)
@@ -473,6 +573,11 @@ def resolve_schematic_inspector(node_data: dict[str, Any] | None, model: Schemat
         description=description,
         details=detail_rows,
         representative_note=str(representative_note) if representative_note else None,
+        kind_label=str(metadata.get("component_kind_label") or ""),
+        icon_role=str(metadata.get("icon_role") or "") or None,
+        icon_url=str(metadata.get("icon_url") or "") or None,
+        badge=str(metadata.get("badge") or "") or None,
+        status=tr("workbench.schematic.inspector.status_locked", lang) if locked else tr("workbench.schematic.inspector.status_preview", lang),
     )
 
 
@@ -503,7 +608,7 @@ def build_unifilar_model(
             SchematicNode(
                 id=f"pv-{group.mppt_index}",
                 role="pv",
-                label=_pv_node_label(group, module_power_kw, exact=layout.exact, lang=lang),
+                display_label=_pv_display_label(group, exact=layout.exact, lang=lang),
                 position={"x": 80.0, "y": y},
                 metadata=_pv_metadata(
                     group,
@@ -512,6 +617,7 @@ def build_unifilar_model(
                     layout_note=layout.note,
                     lang=lang,
                 ),
+                icon_role=_icon_role("pv"),
             )
         )
         edges.append(
@@ -528,27 +634,30 @@ def build_unifilar_model(
         SchematicNode(
             id="inverter",
             role="inverter",
-            label=_inverter_label(detail, lang=lang),
+            display_label=_inverter_display_label(detail, lang=lang),
             position={"x": 370.0, "y": center_y},
             metadata=_inverter_metadata(detail, lang=lang),
+            icon_role=_icon_role("inverter"),
         )
     )
     nodes.append(
         SchematicNode(
             id="load",
             role="load",
-            label=_simple_node_label("load", "workbench.schematic.load_node", lang=lang),
+            display_label=_simple_node_display_label("workbench.schematic.load_node", lang=lang),
             position={"x": 690.0, "y": center_y},
             metadata=_load_metadata(lang=lang),
+            icon_role=_icon_role("load"),
         )
     )
     nodes.append(
         SchematicNode(
             id="grid",
             role="grid",
-            label=_simple_node_label("grid", "workbench.schematic.grid_node", lang=lang),
+            display_label=_simple_node_display_label("workbench.schematic.grid_node", lang=lang),
             position={"x": 970.0, "y": center_y},
             metadata=_grid_metadata(lang=lang),
+            icon_role=_icon_role("grid"),
         )
     )
     edges.extend(
@@ -567,9 +676,10 @@ def build_unifilar_model(
             SchematicNode(
                 id="battery",
                 role="battery",
-                label=_battery_label(detail, scenario_record.config_bundle, lang=lang),
+                display_label=_battery_display_label(detail, scenario_record.config_bundle, lang=lang),
                 position={"x": battery_x, "y": battery_y},
                 metadata=_battery_metadata(detail, scenario_record.config_bundle, lang=lang),
+                icon_role=_icon_role("battery"),
             )
         )
         edges.append(
@@ -597,13 +707,22 @@ def build_unifilar_model(
 def to_cytoscape_elements(model: SchematicModel) -> list[dict[str, object]]:
     elements: list[dict[str, object]] = []
     for node in model.nodes:
-        data = {"id": node.id, "label": node.label}
+        icon_url = resolve_schematic_icon_url(node.icon_role)
+        data = {
+            "id": node.id,
+            "label": node.display_label,
+            "display_label": node.display_label,
+            "icon_role": node.icon_role or "",
+            "icon_url": icon_url or "",
+        }
         data.update(node.metadata)
+        data["icon_url"] = str(data.get("icon_url") or "")
+        data["icon_role"] = str(data.get("icon_role") or "")
         elements.append(
             {
                 "data": data,
                 "position": node.position,
-                "classes": f"role-{node.role}",
+                "classes": f"role-{node.role}" + (" has-icon" if icon_url else " no-icon"),
             }
         )
     for edge in model.edges:

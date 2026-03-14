@@ -114,22 +114,29 @@ def create_app() -> Dash:
                 .catalog-grid, .chart-grid, .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
                 .compare-grid > .panel { min-height: 100%; }
                 .schematic-summary-chip { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.8rem; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-weight: 600; width: fit-content; }
-                .schematic-layout { display: grid; grid-template-columns: minmax(0, 2.15fr) minmax(280px, 0.95fr); gap: 1rem; align-items: start; }
+                .schematic-layout { display: grid; grid-template-columns: minmax(0, 2.1fr) minmax(300px, 0.95fr); gap: 1rem; align-items: start; }
                 .schematic-main, .schematic-side { display: grid; gap: 0.75rem; }
                 .schematic-note { margin-bottom: 0; }
                 .legend-list { display: grid; gap: 0.65rem; }
                 .legend-item { display: flex; align-items: center; gap: 0.7rem; color: #334155; }
                 .legend-swatch { display: inline-flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em; }
-                .legend-node { width: 52px; height: 28px; border: 2px solid #cbd5e1; background: #fff; color: #0f172a; }
-                .legend-role-pv { clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); border-color: #f59e0b; background: #fef3c7; }
-                .legend-role-inverter { border-color: #2563eb; background: #dbeafe; border-radius: 12px; }
-                .legend-role-battery { border-color: #7c3aed; background: #ede9fe; border-radius: 999px; }
-                .legend-role-load { border-color: #16a34a; background: #dcfce7; border-radius: 12px; }
-                .legend-role-grid { border-color: #475569; background: #e2e8f0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+                .legend-node { width: 58px; height: 38px; border: 2px solid #cbd5e1; background-color: #fff; color: #0f172a; border-radius: 14px; background-repeat: no-repeat; background-position: center; background-size: 24px 24px; }
+                .legend-role-pv { border-color: #f59e0b; background-color: #fffbeb; }
+                .legend-role-inverter { border-color: #2563eb; background-color: #eff6ff; }
+                .legend-role-battery { border-color: #7c3aed; background-color: #f5f3ff; }
+                .legend-role-load { border-color: #16a34a; background-color: #f0fdf4; }
+                .legend-role-grid { border-color: #475569; background-color: #f8fafc; }
                 .legend-line { width: 54px; height: 0; border-top: 4px solid #64748b; color: transparent; overflow: hidden; }
                 .legend-connection-ac { border-top-color: #2563eb; }
-                .legend-connection-dc { border-top-color: #f59e0b; }
+                .legend-connection-dc { border-top-color: #7c3aed; }
                 .inspector-body { display: grid; gap: 0.75rem; }
+                .inspector-header { display: flex; align-items: center; gap: 0.8rem; }
+                .inspector-header-copy { min-width: 0; display: grid; gap: 0.25rem; }
+                .inspector-icon { width: 52px; height: 52px; border-radius: 16px; border: 1px solid rgba(148,163,184,0.4); background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(241,245,249,0.95)); background-repeat: no-repeat; background-position: center; background-size: 28px 28px; display: inline-flex; align-items: center; justify-content: center; color: #0f172a; font-weight: 700; flex-shrink: 0; }
+                .inspector-kind-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+                .inspector-kind, .inspector-status { display: inline-flex; align-items: center; padding: 0.18rem 0.5rem; border-radius: 999px; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.02em; }
+                .inspector-kind { background: #e2e8f0; color: #334155; }
+                .inspector-status { background: #ecfeff; color: #0f766e; }
                 .inspector-focus-title { font-size: 1rem; font-weight: 700; color: #0f172a; }
                 .inspector-description { margin: 0; color: #475569; line-height: 1.5; }
                 .inspector-list { display: grid; gap: 0.4rem; }

@@ -15,8 +15,16 @@ from .result_views import (
     build_session_comparison_rows,
     resolve_selected_candidate_key_for_scenario,
 )
-from .schematic import build_unifilar_model, infer_string_layout, to_cytoscape_elements
-from .schematic import build_schematic_legend, default_schematic_inspector, resolve_schematic_inspector
+from .schematic import (
+    build_schematic_legend,
+    build_unifilar_model,
+    default_schematic_inspector,
+    infer_string_layout,
+    resolve_schematic_focus,
+    resolve_schematic_inspector,
+    resolve_schematic_icon_url,
+    to_cytoscape_elements,
+)
 from .risk_views import prepare_risk_views
 from .i18n import tr
 from .risk_registry import clear_expired_risk_results, clear_risk_results, get_risk_result, store_risk_result
@@ -136,6 +144,8 @@ __all__ = [
     "refresh_bundle_issues",
     "rename_scenario",
     "resolve_schematic_inspector",
+    "resolve_schematic_focus",
+    "resolve_schematic_icon_url",
     "resolve_default_risk_candidate",
     "resolve_default_risk_scenario",
     "resolve_selected_candidate_key_for_scenario",
