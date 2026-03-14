@@ -15,7 +15,7 @@ from pv_product.simulator import Simulator
 
 from .types import LoadedConfigBundle
 
-DEFAULT_PARALLEL_WORKERS = 4
+DEFAULT_PARALLEL_WORKERS = 6
 
 
 @dataclass(frozen=True)
@@ -92,6 +92,7 @@ def _determine_max_workers(max_workers: int | None) -> int:
         except ValueError:
             return 1
     cpu_count = os.cpu_count() or 1
+    # print(f"CPU count detected: {cpu_count}. Setting max workers to {min(max(cpu_count - 1, 1), DEFAULT_PARALLEL_WORKERS)}.")
     return min(max(cpu_count - 1, 1), DEFAULT_PARALLEL_WORKERS)
 
 
@@ -235,6 +236,7 @@ def run_deterministic_scan_tasks(
 ) -> tuple[float, tuple[dict[str, Any], ...]]:
     seed_kwp, tasks = _build_tasks(config_bundle)
     worker_count = _determine_max_workers(max_workers)
+    # print(f"Ejecutando tareas de escaneo determinístico con {'paralelismo' if allow_parallel else 'ejecución serial'} y {worker_count} trabajadores.")
     if (
         not allow_parallel
         or worker_count <= 1
