@@ -15,6 +15,9 @@ def _profile_table(table_id: str) -> dash_table.DataTable:
         style_table={"overflowX": "auto"},
         style_cell={"padding": "0.4rem", "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif", "fontSize": 12},
         style_header={"backgroundColor": "#ede9fe", "fontWeight": "bold"},
+        tooltip_delay=0,
+        tooltip_duration=None,
+        tooltip_header={},
     )
 
 

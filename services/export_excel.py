@@ -4,6 +4,7 @@ from io import BytesIO
 
 import pandas as pd
 
+from .design_compare import build_design_comparison_export_frames
 from .result_views import build_comparison_table, build_kpis
 from .types import ScenarioRecord, ScenarioSessionState
 
@@ -87,3 +88,22 @@ def export_comparison_workbook(session_state: ScenarioSessionState, scenario_rec
             scenario.scan_result.candidates.to_excel(writer, sheet_name=sheet_name, index=False)
     return output.getvalue()
 
+
+def export_design_comparison_workbook(
+    scenario_record: ScenarioRecord,
+    selected_candidate_keys: list[str] | tuple[str, ...],
+    *,
+    lang: str = "es",
+) -> bytes:
+    if scenario_record.scan_result is None or scenario_record.dirty:
+        raise ValueError(f"El escenario '{scenario_record.name}' necesita un escaneo determinístico válido para exportar la comparación.")
+
+    frames = build_design_comparison_export_frames(scenario_record, selected_candidate_keys, lang=lang)
+    if frames["Design_Comparison_Summary"].empty:
+        raise ValueError("No hay diseños seleccionados para exportar.")
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        for sheet_name, frame in frames.items():
+            frame.to_excel(writer, sheet_name=_sheet_name(sheet_name), index=False)
+    return output.getvalue()

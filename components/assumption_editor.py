@@ -22,7 +22,13 @@ def _assumption_input(field: dict):
 
 
 def _field_card(field: dict) -> html.Div:
-    help_icon = html.Span(" ⓘ", title=field["help"], className="scenario-meta")
+    help_icon = html.Span(
+        className="field-help",
+        children=[
+            html.Span("ⓘ", className="field-help-trigger", tabIndex=0),
+            html.Span(field["help"], className="field-help-tooltip"),
+        ],
+    )
     unit = html.Div(field["unit"], className="scenario-meta") if field.get("unit") else None
     children = [
         html.Label([field["label"], help_icon], className="input-label"),

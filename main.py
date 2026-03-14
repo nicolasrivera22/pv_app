@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import os
-import sys
 
 from services import ensure_template, load_config_from_excel, run_scan
+from services.runtime_paths import user_workbook_path
 from services.result_views import build_kpis
 
 __version__ = "v8.0"
@@ -13,8 +13,7 @@ __status__ = "development"
 
 def main() -> None:
     """Legacy CLI entrypoint for the deterministic scan."""
-    exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    xlsx_path = os.path.join(exe_dir, "PV_inputs.xlsx")
+    xlsx_path = os.fspath(user_workbook_path())
 
     if not os.path.exists(xlsx_path):
         print("No se encontró 'PV_inputs.xlsx'. Generando plantilla compatible...")

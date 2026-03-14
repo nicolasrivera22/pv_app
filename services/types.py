@@ -217,6 +217,7 @@ class ScenarioSessionState:
     scenarios: tuple[ScenarioRecord, ...] = ()
     active_scenario_id: str | None = None
     comparison_scenario_ids: tuple[str, ...] = ()
+    design_comparison_candidate_keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     @classmethod
     def empty(cls) -> "ScenarioSessionState":
@@ -227,6 +228,10 @@ class ScenarioSessionState:
             "scenarios": [scenario.to_payload() for scenario in self.scenarios],
             "active_scenario_id": self.active_scenario_id,
             "comparison_scenario_ids": list(self.comparison_scenario_ids),
+            "design_comparison_candidate_keys": {
+                scenario_id: list(candidate_keys)
+                for scenario_id, candidate_keys in self.design_comparison_candidate_keys.items()
+            },
         }
 
     @classmethod
@@ -237,6 +242,10 @@ class ScenarioSessionState:
             scenarios=tuple(ScenarioRecord.from_payload(item) for item in payload.get("scenarios", [])),
             active_scenario_id=payload.get("active_scenario_id"),
             comparison_scenario_ids=tuple(payload.get("comparison_scenario_ids", [])),
+            design_comparison_candidate_keys={
+                str(scenario_id): tuple(candidate_keys)
+                for scenario_id, candidate_keys in payload.get("design_comparison_candidate_keys", {}).items()
+            },
         )
 
     def get_scenario(self, scenario_id: str | None = None) -> ScenarioRecord | None:

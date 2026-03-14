@@ -100,6 +100,7 @@ layout = html.Div(
     Output("risk-retain-samples-help", "children"),
     Output("risk-run-btn", "children"),
     Output("risk-export-artifacts-btn", "children"),
+    Output("risk-export-progress", "children"),
     Output("risk-summary-title", "children"),
     Output("risk-distributions-title", "children"),
     Output("risk-metadata-title", "children"),
@@ -124,6 +125,7 @@ def translate_risk_page(language_value):
         tr("risk.retain_samples.help", lang),
         tr("risk.run", lang),
         tr("risk.export_artifacts", lang),
+        tr("risk.export_artifacts_running", lang),
         tr("risk.summary.title", lang),
         tr("risk.distributions.title", lang),
         tr("risk.metadata.title", lang),
@@ -480,6 +482,10 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
     State("scenario-session-store", "data"),
     State("language-selector", "value"),
     prevent_initial_call=True,
+    running=[
+        (Output("risk-export-artifacts-btn", "disabled"), True, False),
+        (Output("risk-export-progress", "style"), {"display": "block"}, {"display": "none"}),
+    ],
 )
 def export_risk_result_artifacts(n_clicks, result_payload, session_payload, language_value):
     if not n_clicks:
@@ -497,4 +503,4 @@ def export_risk_result_artifacts(n_clicks, result_payload, session_payload, lang
     if scenario is None:
         return tr("risk.error.scenario_unavailable", lang)
     paths = export_risk_artifacts(scenario, result)
-    return tr("risk.export_done", lang, path=str(paths[0].parent))
+    return tr("risk.export_done", lang, path=str(paths[0].parent.resolve()))

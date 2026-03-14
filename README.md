@@ -153,10 +153,57 @@ This repository now provides a deterministic Dash workbench for PV sizing and fi
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python desktop_launcher.py
+```
+
+This launcher starts the local server and opens the default browser automatically when the app is ready.
+
+For development/debugging, the original Dash entrypoint remains available:
+
+```bash
 python app.py
 ```
 
-Open the local Dash URL shown in the terminal.
+## Desktop packaging
+
+Phase 10C adds a Windows-first local packaging path using PyInstaller and a dedicated desktop launcher.
+
+- Supported build target for this phase:
+  - one-folder distribution
+  - bundled `assets/`
+  - bundled `pages/`
+  - bundled `PV_inputs.xlsx`
+  - browser auto-open via `desktop_launcher.py`
+- Runtime path behavior:
+  - source mode writes explicit exports into `Resultados/` under the repo root
+  - packaged mode writes explicit exports into `Resultados/` beside the executable
+  - the bundled example workbook is loaded from the packaged resource directory
+- The app still creates `Resultados/` on demand; no precreated skeleton output folder is required.
+
+### Build the executable
+
+On Windows, from the repository root:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements.txt -r requirements-desktop.txt
+pyinstaller --clean --noconfirm pv_app.spec
+```
+
+The packaged app is produced under `dist/PVWorkbench/`.
+
+### Browser auto-open
+
+- The executable starts the local Dash server on `127.0.0.1`.
+- It prefers port `8050` and moves to the next free local port if needed.
+- The default browser opens only after the launcher confirms that `/healthz` is reachable.
+
+### Current limitations
+
+- This phase is Windows-first and one-folder only.
+- It does not yet add an installer, a one-file bundle, or tray/menu integration.
+- The packaged executable runs without a console window by default, so source runs remain the easier debugging path.
 
 ## Run the legacy CLI path
 
@@ -175,8 +222,9 @@ pytest
 ## App structure
 
 - `app.py`: Dash shell, navigation, shared stores
+- `desktop_launcher.py`: local desktop-style launcher with browser auto-open
 - `pages/workbench.py`: deterministic scenario load/edit/run/explore/export flow
-- `pages/compare.py`: deterministic scenario comparison flow
+- `pages/compare.py`: deterministic design comparison flow for the active scan
 - `pages/risk.py`: fixed-candidate Monte Carlo risk analysis flow
 - `components/`: reusable layout blocks for scenarios, assumptions, catalogs, validation, KPIs, and candidate exploration
 - `services/`: Excel I/O, config metadata extraction, validation, deterministic runner, scenario-session state, stochastic runner, server-side risk registry, display schema, exports, translation helper, and result shaping

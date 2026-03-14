@@ -194,9 +194,10 @@ def test_default_inspector_and_legend_are_spanish_first() -> None:
         "Red",
     ]
     assert inspector.title == "Cómo leer este esquema"
-    assert inspector.description.startswith("Pasa el cursor")
+    assert inspector.description.startswith("Haz clic o toca")
     assert inspector.status == "Guía rápida"
     assert legend[0].icon_url and legend[0].icon_url.endswith("/assets/icons/pv.svg")
+    assert legend[4].icon_url and legend[4].icon_url.endswith("/assets/icons/grid.svg")
 
 
 def test_resolve_schematic_inspector_returns_practical_rows() -> None:
@@ -233,6 +234,27 @@ def test_incomplete_hardware_data_and_component_defaults_are_graceful() -> None:
     assert section_title.children == "Esquema unifilar"
     assert legend_title.children == "Leyenda"
     assert inspector_title.children == "Detalle del componente"
+
+
+def test_unifilar_section_stacks_diagram_inspector_legend_and_note() -> None:
+    section = unifilar_diagram_section()
+    shell = _find_component(section, "unifilar-diagram-shell")
+    legend_items = _find_component(section, "unifilar-legend-items")
+    note = _find_component(section, "unifilar-diagram-note")
+
+    assert shell is not None
+    stack = shell.children[0]
+    assert stack.className == "schematic-stack"
+    assert stack.children[0].className == "schematic-diagram-card"
+    assert _find_component(stack.children[0], "active-unifilar-diagram") is not None
+    assert "schematic-detail-card" in stack.children[1].className
+    assert _find_component(stack.children[1], "unifilar-inspector-body") is not None
+    assert "schematic-legend-card" in stack.children[2].className
+    assert stack.children[3].id == "unifilar-diagram-note"
+    assert note is not None
+    assert legend_items is not None
+    assert "legend-list-inline" in legend_items.className
+    assert len(legend_items.children) == len(build_schematic_legend("es"))
 
 
 def test_resolve_schematic_focus_prioritizes_locked_selection() -> None:

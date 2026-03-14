@@ -20,6 +20,17 @@ class FieldUiSchema:
     options: tuple[tuple[str, Any], ...] = ()
 
 
+@dataclass(frozen=True)
+class TableColumnUiSchema:
+    label_es: str | None = None
+    label_en: str | None = None
+    help_es: str | None = None
+    help_en: str | None = None
+    format: str = "text"
+    precision: int = 0
+    type: str | None = None
+
+
 FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     "E_month_kWh": FieldUiSchema("number", "basic", "Demanda mensual", "Monthly demand"),
     "alpha_mix": FieldUiSchema("number", "advanced", "Mezcla de carga diurna", "Daytime load mix"),
@@ -291,12 +302,12 @@ METRIC_SCHEMA = {
         "precision": 0,
     },
     "peak_ratio": {
-        "label_es": "Relación pico",
-        "label_en": "Peak ratio",
-        "help_es": "Relación entre el pico FV y el pico de carga usado por la restricción.",
-        "help_en": "Ratio between PV peak and the load peak used by the constraint.",
-        "format": "number",
-        "precision": 3,
+        "label_es": "Pico FV / pico carga [%]",
+        "label_en": "PV peak / load peak [%]",
+        "help_es": "Relación entre el pico FV y el pico de carga usada por la restricción, mostrada como porcentaje.",
+        "help_en": "Ratio between PV peak and the load peak used by the constraint, shown as a percentage.",
+        "format": "percent",
+        "precision": 1,
     },
     "battery": {
         "label_es": "Batería",
@@ -314,6 +325,14 @@ METRIC_SCHEMA = {
         "format": "text",
         "precision": 0,
     },
+    "design_label": {
+        "label_es": "Diseño",
+        "label_en": "Design",
+        "help_es": "Etiqueta corta usada para comparar diseños seleccionados.",
+        "help_en": "Short label used to compare selected designs.",
+        "format": "text",
+        "precision": 0,
+    },
     "best_kWp": {
         "label_es": "kWp óptimo",
         "label_en": "Best kWp",
@@ -322,11 +341,27 @@ METRIC_SCHEMA = {
         "format": "number",
         "precision": 3,
     },
+    "panel_count": {
+        "label_es": "Paneles",
+        "label_en": "Panels",
+        "help_es": "Número estimado de módulos solares instalados para el diseño.",
+        "help_en": "Estimated number of installed solar modules for the design.",
+        "format": "integer",
+        "precision": 0,
+    },
     "selected_battery": {
         "label_es": "Batería seleccionada",
         "label_en": "Selected battery",
         "help_es": "Batería asociada al candidato seleccionado.",
         "help_en": "Battery associated with the selected candidate.",
+        "format": "text",
+        "precision": 0,
+    },
+    "inverter_name": {
+        "label_es": "Inversor",
+        "label_en": "Inverter",
+        "help_es": "Modelo de inversor asociado al diseño.",
+        "help_en": "Inverter model associated with the design.",
         "format": "text",
         "precision": 0,
     },
@@ -345,6 +380,68 @@ METRIC_SCHEMA = {
         "help_en": "Stable order in which the candidate was evaluated.",
         "format": "number",
         "precision": 0,
+    },
+}
+
+TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
+    "inverter_catalog": {
+        "name": TableColumnUiSchema("Nombre", "Name", "Modelo o referencia visible del inversor.", "Visible inverter model or reference."),
+        "AC_kW": TableColumnUiSchema("Potencia AC [kW]", "AC power [kW]", "Potencia AC nominal del inversor.", "Rated inverter AC power.", "kw", 1, "numeric"),
+        "Vmppt_min": TableColumnUiSchema("V MPPT mín [V]", "Min MPPT V [V]", "Voltaje mínimo de seguimiento MPPT.", "Minimum MPPT tracking voltage.", "volts", 0, "numeric"),
+        "Vmppt_max": TableColumnUiSchema("V MPPT máx [V]", "Max MPPT V [V]", "Voltaje máximo de seguimiento MPPT.", "Maximum MPPT tracking voltage.", "volts", 0, "numeric"),
+        "Vdc_max": TableColumnUiSchema("V DC máx [V]", "Max DC V [V]", "Voltaje DC máximo permitido en la entrada.", "Maximum allowed DC input voltage.", "volts", 0, "numeric"),
+        "Imax_mppt": TableColumnUiSchema("I MPPT máx [A]", "Max MPPT I [A]", "Corriente máxima por MPPT.", "Maximum current per MPPT.", "amps", 1, "numeric"),
+        "n_mppt": TableColumnUiSchema("Cantidad MPPT", "MPPT count", "Número de seguidores MPPT disponibles.", "Number of available MPPT trackers.", "integer", 0, "numeric"),
+        "price_COP": TableColumnUiSchema("Precio [COP]", "Price [COP]", "Costo del inversor.", "Inverter cost.", "currency_cop", 0, "numeric"),
+    },
+    "battery_catalog": {
+        "name": TableColumnUiSchema("Nombre", "Name", "Nombre o referencia visible de la batería.", "Visible battery name or reference."),
+        "nom_kWh": TableColumnUiSchema("Energía nominal [kWh]", "Nominal energy [kWh]", "Capacidad nominal de la batería.", "Battery nominal capacity.", "kwh", 1, "numeric"),
+        "max_kW": TableColumnUiSchema("Potencia máx [kW]", "Max power [kW]", "Potencia máxima general de la batería.", "Overall battery maximum power.", "kw", 1, "numeric"),
+        "max_ch_kW": TableColumnUiSchema("Carga máx [kW]", "Max charge [kW]", "Potencia máxima de carga.", "Maximum charge power.", "kw", 1, "numeric"),
+        "max_dis_kW": TableColumnUiSchema("Descarga máx [kW]", "Max discharge [kW]", "Potencia máxima de descarga.", "Maximum discharge power.", "kw", 1, "numeric"),
+        "price_COP": TableColumnUiSchema("Precio [COP]", "Price [COP]", "Costo de la batería.", "Battery cost.", "currency_cop", 0, "numeric"),
+    },
+    "month_profile": {
+        "MONTH": TableColumnUiSchema("Mes", "Month", "Mes del año.", "Month of the year.", "integer", 0, "numeric"),
+        "Demand_month": TableColumnUiSchema("Factor demanda", "Demand factor", "Multiplicador relativo de demanda mensual.", "Relative monthly demand multiplier.", "ratio", 3, "numeric"),
+        "HSP_month": TableColumnUiSchema("Factor HSP", "HSP factor", "Multiplicador relativo de HSP mensual.", "Relative monthly HSP multiplier.", "ratio", 3, "numeric"),
+    },
+    "sun_profile": {
+        "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del día.", "Hour of the day.", "integer", 0, "numeric"),
+        "SOL": TableColumnUiSchema("Participación solar [%]", "Solar share [%]", "Participación horaria relativa del recurso solar.", "Relative hourly share of the solar resource.", "percent", 1, "numeric"),
+    },
+    "cop_kwp": {
+        "MIN": TableColumnUiSchema("kWp mín", "Min kWp", "Límite inferior de la banda.", "Lower bound of the band.", "number", 3, "numeric"),
+        "MAX": TableColumnUiSchema("kWp máx", "Max kWp", "Límite superior de la banda.", "Upper bound of the band.", "number", 3, "numeric"),
+        "PRECIO_POR_KWP": TableColumnUiSchema("Precio por kWp [COP]", "Price per kWp [COP]", "Costo aplicado a esa banda de tamaño.", "Cost applied to that size band.", "currency_cop", 0, "numeric"),
+    },
+    "cop_kwp_others": {
+        "MIN": TableColumnUiSchema("kWp mín", "Min kWp", "Límite inferior de la banda.", "Lower bound of the band.", "number", 3, "numeric"),
+        "MAX": TableColumnUiSchema("kWp máx", "Max kWp", "Límite superior de la banda.", "Upper bound of the band.", "number", 3, "numeric"),
+        "PRECIO_POR_KWP": TableColumnUiSchema("Otros variables [COP/kWp]", "Other variable costs [COP/kWp]", "Otros costos variables aplicados por banda.", "Other variable costs applied by band.", "currency_cop", 0, "numeric"),
+    },
+    "demand_profile": {
+        "DOW": TableColumnUiSchema("Día semana", "Day of week", "Día de la semana en la tabla 7x24.", "Day of week in the 7x24 table.", "integer", 0, "numeric"),
+        "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del día.", "Hour of the day.", "integer", 0, "numeric"),
+        "RES": TableColumnUiSchema("Residencial [kWh]", "Residential [kWh]", "Demanda residencial de esa hora.", "Residential demand for that hour.", "kwh", 2, "numeric"),
+        "IND": TableColumnUiSchema("Industrial [kWh]", "Industrial [kWh]", "Demanda industrial de esa hora.", "Industrial demand for that hour.", "kwh", 2, "numeric"),
+        "TOTAL_kWh": TableColumnUiSchema("Total [kWh]", "Total [kWh]", "Demanda total de la hora.", "Total demand for that hour.", "kwh", 2, "numeric"),
+    },
+    "demand_profile_general": {
+        "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del día.", "Hour of the day.", "integer", 0, "numeric"),
+        "RES": TableColumnUiSchema("Residencial [kWh]", "Residential [kWh]", "Demanda residencial de esa hora.", "Residential demand for that hour.", "kwh", 2, "numeric"),
+        "IND": TableColumnUiSchema("Industrial [kWh]", "Industrial [kWh]", "Demanda industrial de esa hora.", "Industrial demand for that hour.", "kwh", 2, "numeric"),
+        "TOTAL_kWh": TableColumnUiSchema("Total [kWh]", "Total [kWh]", "Demanda total de la hora.", "Total demand for that hour.", "kwh", 2, "numeric"),
+    },
+    "demand_profile_weights": {
+        "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del día.", "Hour of the day.", "integer", 0, "numeric"),
+        "W_RES": TableColumnUiSchema("Peso res [%]", "Res weight [%]", "Peso relativo residencial.", "Relative residential weight.", "percent", 1, "numeric"),
+        "W_IND": TableColumnUiSchema("Peso ind [%]", "Ind weight [%]", "Peso relativo industrial.", "Relative industrial weight.", "percent", 1, "numeric"),
+        "W_RES_BASE": TableColumnUiSchema("Base res [%]", "Res base [%]", "Base residencial usada para normalizar.", "Residential base used for normalization.", "percent", 1, "numeric"),
+        "W_IND_BASE": TableColumnUiSchema("Base ind [%]", "Ind base [%]", "Base industrial usada para normalizar.", "Industrial base used for normalization.", "percent", 1, "numeric"),
+        "W_TOTAL": TableColumnUiSchema("Peso total [%]", "Total weight [%]", "Peso total combinado.", "Combined total weight.", "percent", 1, "numeric"),
+        "TOTAL_kWh": TableColumnUiSchema("Total [kWh]", "Total [kWh]", "Demanda total resultante.", "Resulting total demand.", "kwh", 2, "numeric"),
     },
 }
 
@@ -481,15 +578,51 @@ def _numeric_format(format_type: str, precision: int) -> Format:
     return Format(group=Group.yes, precision=precision, scheme=Scheme.fixed)
 
 
+def _format_kind(format_type: str, precision: int) -> Format | None:
+    if format_type in {"currency_cop", "kwh", "kw", "volts", "amps", "percent", "years", "number", "ratio", "integer"}:
+        if format_type == "integer":
+            return Format(group=Group.yes, precision=0, scheme=Scheme.fixed)
+        return _numeric_format(format_type, precision)
+    return None
+
+
+def _prettify_column(column_key: str) -> str:
+    return column_key.replace("_", " ").replace("kWh", "kWh").strip().capitalize()
+
+
+def build_table_display_columns(
+    table_kind: str,
+    column_keys: list[str],
+    lang: str = "es",
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    schema_map = TABLE_COLUMN_SCHEMAS.get(table_kind, {})
+    columns: list[dict[str, Any]] = []
+    tooltip_header: dict[str, str] = {}
+    for key in column_keys:
+        schema = schema_map.get(key, TableColumnUiSchema(label_es=_prettify_column(key), label_en=_prettify_column(key)))
+        label = schema.label_en if lang == "en" and schema.label_en else schema.label_es or schema.label_en or _prettify_column(key)
+        help_text = schema.help_en if lang == "en" and schema.help_en else schema.help_es or schema.help_en or label
+        column: dict[str, Any] = {"name": label, "id": key}
+        if schema.type:
+            column["type"] = schema.type
+        data_format = _format_kind(schema.format, schema.precision)
+        if data_format is not None:
+            column["format"] = data_format
+        columns.append(column)
+        tooltip_header[key] = help_text
+    return columns, tooltip_header
+
+
 def build_display_columns(column_keys: list[str], lang: str = "es") -> tuple[list[dict[str, Any]], dict[str, str]]:
     columns: list[dict[str, Any]] = []
     tooltip_header: dict[str, str] = {}
     for key in column_keys:
         schema = METRIC_SCHEMA.get(key, {"format": "text", "precision": 0})
         column = {"name": metric_label(key, lang), "id": key}
-        if schema.get("format") in {"currency_cop", "kwh", "percent", "years", "number", "ratio"}:
+        data_format = _format_kind(str(schema.get("format")), int(schema.get("precision", 0)))
+        if data_format is not None:
             column["type"] = "numeric"
-            column["format"] = _numeric_format(schema["format"], int(schema.get("precision", 0)))
+            column["format"] = data_format
         columns.append(column)
         tooltip_header[key] = metric_help(key, lang)
     return columns, tooltip_header

@@ -41,6 +41,28 @@ def _replace_scenario(state: ScenarioSessionState, updated: ScenarioRecord) -> S
     return replace(state, scenarios=scenarios)
 
 
+def _sanitize_design_comparison_keys(
+    state: ScenarioSessionState,
+    scenario_id: str,
+    valid_candidate_keys: set[str] | None,
+) -> dict[str, tuple[str, ...]]:
+    selections = dict(state.design_comparison_candidate_keys)
+    if scenario_id not in selections:
+        return selections
+    if valid_candidate_keys is None:
+        return selections
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for candidate_key in selections.get(scenario_id, ()):
+        if candidate_key in valid_candidate_keys and candidate_key not in seen:
+            cleaned.append(candidate_key)
+            seen.add(candidate_key)
+        if len(cleaned) >= 10:
+            break
+    selections[scenario_id] = tuple(cleaned)
+    return selections
+
+
 def add_scenario(state: ScenarioSessionState, scenario: ScenarioRecord, make_active: bool = True) -> ScenarioSessionState:
     active_id = scenario.scenario_id if make_active else state.active_scenario_id
     return replace(state, scenarios=(*state.scenarios, scenario), active_scenario_id=active_id)
@@ -74,10 +96,18 @@ def rename_scenario(state: ScenarioSessionState, scenario_id: str, new_name: str
 def delete_scenario(state: ScenarioSessionState, scenario_id: str) -> ScenarioSessionState:
     remaining = tuple(item for item in state.scenarios if item.scenario_id != scenario_id)
     comparison = tuple(item for item in state.comparison_scenario_ids if item != scenario_id)
+    design_compare = dict(state.design_comparison_candidate_keys)
+    design_compare.pop(scenario_id, None)
     active_id = state.active_scenario_id
     if active_id == scenario_id:
         active_id = remaining[0].scenario_id if remaining else None
-    return replace(state, scenarios=remaining, active_scenario_id=active_id, comparison_scenario_ids=comparison)
+    return replace(
+        state,
+        scenarios=remaining,
+        active_scenario_id=active_id,
+        comparison_scenario_ids=comparison,
+        design_comparison_candidate_keys=design_compare,
+    )
 
 
 def set_active_scenario(state: ScenarioSessionState, scenario_id: str | None) -> ScenarioSessionState:
@@ -92,6 +122,27 @@ def set_comparison_scenarios(state: ScenarioSessionState, scenario_ids: list[str
     valid_ids = {scenario.scenario_id for scenario in state.scenarios if scenario.scan_result is not None and not scenario.dirty}
     selected = tuple(item for item in scenario_ids if item in valid_ids)
     return replace(state, comparison_scenario_ids=selected)
+
+
+def set_design_comparison_candidates(
+    state: ScenarioSessionState,
+    scenario_id: str,
+    candidate_keys: list[str] | tuple[str, ...],
+) -> ScenarioSessionState:
+    if state.get_scenario(scenario_id) is None:
+        raise KeyError(f"No existe el escenario '{scenario_id}'.")
+    selections = dict(state.design_comparison_candidate_keys)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate_key in candidate_keys:
+        key = str(candidate_key)
+        if key not in seen:
+            deduped.append(key)
+            seen.add(key)
+        if len(deduped) >= 10:
+            break
+    selections[scenario_id] = tuple(deduped)
+    return replace(state, design_comparison_candidate_keys=selections)
 
 
 def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle: LoadedConfigBundle) -> ScenarioSessionState:
@@ -124,7 +175,9 @@ def run_scenario_scan(state: ScenarioSessionState, scenario_id: str) -> Scenario
         dirty=False,
         last_run_at=datetime.now().isoformat(timespec="seconds"),
     )
-    return _replace_scenario(state, updated)
+    next_state = _replace_scenario(state, updated)
+    selections = _sanitize_design_comparison_keys(next_state, scenario_id, set(scan_result.candidate_details))
+    return replace(next_state, design_comparison_candidate_keys=selections)
 
 
 def update_selected_candidate(state: ScenarioSessionState, scenario_id: str, candidate_key: str | None) -> ScenarioSessionState:
@@ -135,4 +188,3 @@ def update_selected_candidate(state: ScenarioSessionState, scenario_id: str, can
         return state
     selected = candidate_key if candidate_key in scenario.scan_result.candidate_details else scenario.scan_result.best_candidate_key
     return _replace_scenario(state, replace(scenario, selected_candidate_key=selected))
-

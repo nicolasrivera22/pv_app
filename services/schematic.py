@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from pv_product.hardware import string_checks
 
 from .i18n import tr
+from .runtime_paths import assets_dir
 from .types import ScenarioRecord
 
-ASSETS_ICON_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
 ICON_ROLE_MAP = {
     "pv": "pv",
     "inverter": "inverter",
@@ -102,7 +101,7 @@ def resolve_schematic_icon_url(icon_role: str | None) -> str | None:
     if not icon_role:
         return None
     filename = f"{icon_role}.svg"
-    if not (ASSETS_ICON_DIR / filename).exists():
+    if not (assets_dir() / "icons" / filename).exists():
         return None
     return f"/assets/icons/{filename}"
 
@@ -645,7 +644,7 @@ def build_unifilar_model(
             id="load",
             role="load",
             display_label=_simple_node_display_label("workbench.schematic.load_node", lang=lang),
-            position={"x": 690.0, "y": center_y},
+            position={"x": 670.0, "y": center_y},
             metadata=_load_metadata(lang=lang),
             icon_role=_icon_role("load"),
         )
@@ -655,7 +654,7 @@ def build_unifilar_model(
             id="grid",
             role="grid",
             display_label=_simple_node_display_label("workbench.schematic.grid_node", lang=lang),
-            position={"x": 970.0, "y": center_y},
+            position={"x": 900.0, "y": center_y},
             metadata=_grid_metadata(lang=lang),
             icon_role=_icon_role("grid"),
         )
