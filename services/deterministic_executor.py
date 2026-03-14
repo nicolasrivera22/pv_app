@@ -15,7 +15,7 @@ from pv_product.simulator import Simulator
 
 from .types import LoadedConfigBundle
 
-DEFAULT_PARALLEL_WORKERS = 6
+DEFAULT_PARALLEL_WORKERS = 4
 
 
 @dataclass(frozen=True)
