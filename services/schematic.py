@@ -17,6 +17,14 @@ ICON_ROLE_MAP = {
     "grid": "grid",
 }
 
+NODE_WIDTH = 196.0
+NODE_HEIGHT = 138.0
+CANVAS_WIDTH = 1280.0
+HORIZONTAL_MARGIN = 40.0
+VERTICAL_MARGIN = 40.0
+MIN_VERTICAL_GAP = 56.0
+SCHEMATIC_COLUMNS = ("pv", "inverter", "load", "grid")
+
 
 @dataclass(frozen=True)
 class StringGroupSummary:
@@ -91,6 +99,17 @@ class SchematicModel:
     representative: bool
     note: str
     string_summary: str
+    diagram_height: int
+
+
+@dataclass(frozen=True)
+class _SchematicNodeDraft:
+    id: str
+    role: str
+    column: str
+    display_label: str
+    metadata: dict[str, object]
+    icon_role: str | None = None
 
 
 def _lang(value: str | None) -> str:
@@ -458,6 +477,60 @@ def _grid_metadata(*, lang: str) -> dict[str, object]:
     }
 
 
+def _linspace(start: float, end: float, count: int) -> tuple[float, ...]:
+    if count <= 0:
+        return ()
+    if count == 1:
+        return ((start + end) / 2.0,)
+    step = (end - start) / float(count - 1)
+    return tuple(start + step * index for index in range(count))
+
+
+def _column_x_centers() -> dict[str, float]:
+    left = HORIZONTAL_MARGIN + NODE_WIDTH / 2.0
+    right = CANVAS_WIDTH - HORIZONTAL_MARGIN - NODE_WIDTH / 2.0
+    return dict(zip(SCHEMATIC_COLUMNS, _linspace(left, right, len(SCHEMATIC_COLUMNS)), strict=True))
+
+
+def _diagram_height_for_columns(column_counts: dict[str, int]) -> int:
+    max_rows = max(column_counts.values(), default=1)
+    raw_height = 2.0 * VERTICAL_MARGIN + max_rows * NODE_HEIGHT + max(max_rows - 1, 0) * MIN_VERTICAL_GAP
+    return int(max(420.0, raw_height))
+
+
+def _column_y_centers(diagram_height: int, count: int) -> tuple[float, ...]:
+    if count <= 0:
+        return ()
+    if count == 1:
+        return (diagram_height / 2.0,)
+    top_center = VERTICAL_MARGIN + NODE_HEIGHT / 2.0
+    bottom_center = float(diagram_height) - VERTICAL_MARGIN - NODE_HEIGHT / 2.0
+    return _linspace(top_center, bottom_center, count)
+
+
+def _position_node_drafts(node_drafts: list[_SchematicNodeDraft], diagram_height: int) -> tuple[SchematicNode, ...]:
+    column_counts = {
+        column: sum(1 for draft in node_drafts if draft.column == column)
+        for column in SCHEMATIC_COLUMNS
+    }
+    x_centers = _column_x_centers()
+    y_iterators = {
+        column: iter(_column_y_centers(diagram_height, column_counts[column]))
+        for column in SCHEMATIC_COLUMNS
+    }
+    return tuple(
+        SchematicNode(
+            id=draft.id,
+            role=draft.role,
+            display_label=draft.display_label,
+            position={"x": x_centers[draft.column], "y": next(y_iterators[draft.column])},
+            metadata=draft.metadata,
+            icon_role=draft.icon_role,
+        )
+        for draft in node_drafts
+    )
+
+
 def build_schematic_legend(lang: str = "es") -> tuple[SchematicLegendItem, ...]:
     lang = _lang(lang)
     return (
@@ -595,20 +668,17 @@ def build_unifilar_model(
     detail = scenario_record.scan_result.candidate_details[selected_candidate_key]
     layout = infer_string_layout(detail, scenario_record.config_bundle, lang=lang)
     module_power_kw = float(scenario_record.config_bundle.config.get("P_mod_W", 0.0) or 0.0) / 1000.0
-    pv_count = max(1, len(layout.groups))
-    center_y = 80.0 + (pv_count - 1) * 55.0
 
-    nodes: list[SchematicNode] = []
+    node_drafts: list[_SchematicNodeDraft] = []
     edges: list[SchematicEdge] = []
 
-    for index, group in enumerate(layout.groups):
-        y = 80.0 + index * 110.0
-        nodes.append(
-            SchematicNode(
+    for group in layout.groups:
+        node_drafts.append(
+            _SchematicNodeDraft(
                 id=f"pv-{group.mppt_index}",
                 role="pv",
+                column="pv",
                 display_label=_pv_display_label(group, exact=layout.exact, lang=lang),
-                position={"x": 80.0, "y": y},
                 metadata=_pv_metadata(
                     group,
                     module_power_kw,
@@ -629,32 +699,32 @@ def build_unifilar_model(
             )
         )
 
-    nodes.append(
-        SchematicNode(
+    node_drafts.append(
+        _SchematicNodeDraft(
             id="inverter",
             role="inverter",
+            column="inverter",
             display_label=_inverter_display_label(detail, lang=lang),
-            position={"x": 370.0, "y": center_y},
             metadata=_inverter_metadata(detail, lang=lang),
             icon_role=_icon_role("inverter"),
         )
     )
-    nodes.append(
-        SchematicNode(
+    node_drafts.append(
+        _SchematicNodeDraft(
             id="load",
             role="load",
+            column="load",
             display_label=_simple_node_display_label("workbench.schematic.load_node", lang=lang),
-            position={"x": 670.0, "y": center_y},
             metadata=_load_metadata(lang=lang),
             icon_role=_icon_role("load"),
         )
     )
-    nodes.append(
-        SchematicNode(
+    node_drafts.append(
+        _SchematicNodeDraft(
             id="grid",
             role="grid",
+            column="grid",
             display_label=_simple_node_display_label("workbench.schematic.grid_node", lang=lang),
-            position={"x": 900.0, "y": center_y},
             metadata=_grid_metadata(lang=lang),
             icon_role=_icon_role("grid"),
         )
@@ -669,14 +739,12 @@ def build_unifilar_model(
     if _battery_present(detail):
         coupling = str(scenario_record.config_bundle.config.get("bat_coupling", "ac") or "ac").lower()
         battery_target = "inverter" if coupling == "dc" else "load"
-        battery_y = center_y + 165.0
-        battery_x = 370.0 if coupling == "dc" else 690.0
-        nodes.append(
-            SchematicNode(
+        node_drafts.append(
+            _SchematicNodeDraft(
                 id="battery",
                 role="battery",
+                column="inverter" if coupling == "dc" else "load",
                 display_label=_battery_display_label(detail, scenario_record.config_bundle, lang=lang),
-                position={"x": battery_x, "y": battery_y},
                 metadata=_battery_metadata(detail, scenario_record.config_bundle, lang=lang),
                 icon_role=_icon_role("battery"),
             )
@@ -691,15 +759,22 @@ def build_unifilar_model(
             )
         )
 
+    column_counts = {
+        column: sum(1 for draft in node_drafts if draft.column == column)
+        for column in SCHEMATIC_COLUMNS
+    }
+    diagram_height = _diagram_height_for_columns(column_counts)
+    nodes = _position_node_drafts(node_drafts, diagram_height)
     note_parts = [tr("workbench.schematic.note.base", lang)]
     if layout.note:
         note_parts.append(layout.note)
     return SchematicModel(
-        nodes=tuple(nodes),
+        nodes=nodes,
         edges=tuple(edges),
         representative=not layout.exact,
         note=" ".join(part for part in note_parts if part),
         string_summary=layout.summary_text,
+        diagram_height=diagram_height,
     )
 
 

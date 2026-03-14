@@ -824,9 +824,6 @@ def populate_unifilar_diagram(session_payload, language_value):
 
     selected_key = resolve_selected_candidate_key_for_scenario(active.scan_result, active.selected_candidate_key)
     model = build_unifilar_model(active, selected_key, lang=lang)
-    pv_nodes = sum(1 for node in model.nodes if node.role == "pv")
-    has_battery = any(node.role == "battery" for node in model.nodes)
-    height = max(360, 180 + pv_nodes * 110 + (90 if has_battery else 0))
     return (
         title,
         model.string_summary,
@@ -835,7 +832,7 @@ def populate_unifilar_diagram(session_payload, language_value):
         model.note,
         {"display": "block"},
         to_cytoscape_elements(model),
-        {"width": "100%", "height": f"{height}px"},
+        {"width": "100%", "height": f"{model.diagram_height}px"},
         legend_title,
         legend_children,
         inspector_title,
