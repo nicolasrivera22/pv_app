@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import replace
 
 import pandas as pd
+import pytest
 
-from components.unifilar_diagram import unifilar_diagram_section
+from app import create_app
+from components.unifilar_diagram import CYTOSCAPE_STYLESHEET, unifilar_diagram_section
 from services import (
     LoadedConfigBundle,
     ScanRunResult,
@@ -19,6 +22,7 @@ from services import (
     resolve_schematic_icon_url,
     to_cytoscape_elements,
 )
+from services.schematic import MIN_VERTICAL_GAP, NODE_HEIGHT, VERTICAL_MARGIN
 
 
 def _base_bundle(**config_updates) -> LoadedConfigBundle:
@@ -94,6 +98,10 @@ def _find_component(node, component_id: str):
     return _find_component(children, component_id)
 
 
+def _node(model, node_id: str):
+    return next(node for node in model.nodes if node.id == node_id)
+
+
 def test_unifilar_model_builds_required_core_nodes_without_battery() -> None:
     bundle = _base_bundle()
     inverter = {"name": "INV-10", "AC_kW": 10.0, "Vmppt_min": 150.0, "Vmppt_max": 800.0, "Vdc_max": 1000.0, "Imax_mppt": 20.0, "n_mppt": 2}
@@ -131,6 +139,63 @@ def test_battery_node_is_conditional_and_respects_coupling_target() -> None:
     assert any(node.role == "battery" for node in ac_model.nodes)
     assert any(edge.source == "battery" and edge.target == "load" and edge.label == "AC" for edge in ac_model.edges)
     assert any(edge.source == "battery" and edge.target == "inverter" and edge.label == "DC" for edge in dc_model.edges)
+
+
+def test_unifilar_layout_uses_even_horizontal_spacing_and_full_vertical_distribution() -> None:
+    bundle = _base_bundle()
+    inverter = {"name": "INV-15", "AC_kW": 15.0, "Vmppt_min": 200.0, "Vmppt_max": 850.0, "Vdc_max": 1000.0, "Imax_mppt": 26.0, "n_mppt": 3}
+    detail = _detail(candidate_key="18.000::None", k_wp=18.0, n_mod=36, ns=12, np_=3, inverter=inverter)
+    scenario = _scenario(bundle, {"18.000::None": detail}, "18.000::None")
+
+    model = build_unifilar_model(scenario, "18.000::None", lang="es")
+    pv_nodes = sorted((node for node in model.nodes if node.role == "pv"), key=lambda node: node.id)
+    inverter_node = _node(model, "inverter")
+    load_node = _node(model, "load")
+    grid_node = _node(model, "grid")
+
+    deltas = [
+        inverter_node.position["x"] - pv_nodes[0].position["x"],
+        load_node.position["x"] - inverter_node.position["x"],
+        grid_node.position["x"] - load_node.position["x"],
+    ]
+    assert all(delta > 0 for delta in deltas)
+    assert deltas[0] == pytest.approx(deltas[1])
+    assert deltas[1] == pytest.approx(deltas[2])
+
+    assert model.diagram_height == int(2 * VERTICAL_MARGIN + 3 * NODE_HEIGHT + 2 * MIN_VERTICAL_GAP)
+    top_center = VERTICAL_MARGIN + NODE_HEIGHT / 2.0
+    bottom_center = model.diagram_height - VERTICAL_MARGIN - NODE_HEIGHT / 2.0
+    pv_ys = [node.position["y"] for node in pv_nodes]
+    assert pv_ys[0] == pytest.approx(top_center)
+    assert pv_ys[-1] == pytest.approx(bottom_center)
+    assert pv_ys[1] - pv_ys[0] == pytest.approx(pv_ys[2] - pv_ys[1])
+    assert pv_ys[1] - pv_ys[0] >= NODE_HEIGHT + MIN_VERTICAL_GAP
+
+
+def test_battery_column_uses_same_vertical_spacing_rule_for_dc_and_ac_coupling() -> None:
+    inverter = {"name": "INV-10", "AC_kW": 10.0, "Vmppt_min": 150.0, "Vmppt_max": 800.0, "Vdc_max": 1000.0, "Imax_mppt": 20.0, "n_mppt": 2}
+    battery = {"name": "BAT-10", "nom_kWh": 10.0, "max_kW": 5.0, "max_ch_kW": 5.0, "max_dis_kW": 5.0, "price_COP": 1_000_000}
+    detail = _detail(candidate_key="12.000::BAT-10", k_wp=12.0, n_mod=24, ns=12, np_=2, inverter=inverter, battery=battery, battery_name="BAT-10")
+
+    ac_scenario = _scenario(_base_bundle(bat_coupling="ac"), {"12.000::BAT-10": detail}, "12.000::BAT-10")
+    dc_scenario = _scenario(_base_bundle(bat_coupling="dc"), {"12.000::BAT-10": detail}, "12.000::BAT-10")
+
+    ac_model = build_unifilar_model(ac_scenario, "12.000::BAT-10", lang="es")
+    dc_model = build_unifilar_model(dc_scenario, "12.000::BAT-10", lang="es")
+    expected_centers = [
+        VERTICAL_MARGIN + NODE_HEIGHT / 2.0,
+        ac_model.diagram_height - VERTICAL_MARGIN - NODE_HEIGHT / 2.0,
+    ]
+
+    ac_load = _node(ac_model, "load")
+    ac_battery = _node(ac_model, "battery")
+    assert ac_battery.position["x"] == pytest.approx(ac_load.position["x"])
+    assert sorted([ac_load.position["y"], ac_battery.position["y"]]) == pytest.approx(expected_centers)
+
+    dc_inverter = _node(dc_model, "inverter")
+    dc_battery = _node(dc_model, "battery")
+    assert dc_battery.position["x"] == pytest.approx(dc_inverter.position["x"])
+    assert sorted([dc_inverter.position["y"], dc_battery.position["y"]]) == pytest.approx(expected_centers)
 
 
 def test_exact_string_layout_distributes_evenly_across_mppts() -> None:
@@ -255,6 +320,24 @@ def test_unifilar_section_stacks_diagram_inspector_legend_and_note() -> None:
     assert legend_items is not None
     assert "legend-list-inline" in legend_items.className
     assert len(legend_items.children) == len(build_schematic_legend("es"))
+
+
+def test_unifilar_styles_shift_labels_and_callback_uses_model_height(monkeypatch) -> None:
+    node_style = next(rule["style"] for rule in CYTOSCAPE_STYLESHEET if rule["selector"] == "node")
+    assert node_style["text-margin-y"] == "-14px"
+
+    bundle = _base_bundle()
+    inverter = {"name": "INV-15", "AC_kW": 15.0, "Vmppt_min": 200.0, "Vmppt_max": 850.0, "Vdc_max": 1000.0, "Imax_mppt": 26.0, "n_mppt": 3}
+    detail = _detail(candidate_key="18.000::None", k_wp=18.0, n_mod=36, ns=12, np_=3, inverter=inverter)
+    scenario = _scenario(bundle, {"18.000::None": detail}, "18.000::None")
+    model = build_unifilar_model(scenario, "18.000::None", lang="es")
+
+    create_app()
+    workbench = importlib.import_module("pages.workbench")
+    monkeypatch.setattr(workbench, "_session_with_scan", lambda payload, language_value: (None, None, scenario))
+
+    outputs = workbench.populate_unifilar_diagram({}, "es")
+    assert outputs[7]["height"] == f"{model.diagram_height}px"
 
 
 def test_resolve_schematic_focus_prioritizes_locked_selection() -> None:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from pv_product.optimizer import Optimizer
-
+from .cache import fingerprint_deterministic_input, get_deterministic_cache
+from .deterministic_executor import run_deterministic_scan_tasks
 from .result_views import (
     battery_name_from_candidate,
     build_candidate_table,
@@ -25,10 +25,11 @@ def _deterministic_config(config: dict) -> dict:
     cfg["mc_buy_std"] = 0.0
     cfg["mc_sell_std"] = 0.0
     cfg["mc_demand_std"] = 0.0
+    cfg["mc_n_simulations"] = 0
     return cfg
 
 
-def run_scan(config_bundle: LoadedConfigBundle) -> ScanRunResult:
+def _build_scan_result(config_bundle: LoadedConfigBundle, *, allow_parallel: bool) -> ScanRunResult:
     combined_issues = {}
     for issue in [*config_bundle.issues, *validate_config(config_bundle)]:
         combined_issues[(issue.level, issue.field, issue.message)] = issue
@@ -38,21 +39,27 @@ def run_scan(config_bundle: LoadedConfigBundle) -> ScanRunResult:
         joined = "; ".join(f"{issue.field}: {issue.message}" for issue in error_issues)
         raise ValueError(f"La configuración no es ejecutable: {joined}")
 
-    cfg = _deterministic_config(config_bundle.config)
-    optimizer = Optimizer(
-        cfg=cfg,
-        inv_catalog=config_bundle.inverter_catalog,
-        bat_catalog=config_bundle.battery_catalog,
-        dow24=config_bundle.demand_profile_7x24,
-        day_w=config_bundle.day_weights,
-        s24=config_bundle.solar_profile,
+    effective_bundle = LoadedConfigBundle(
+        config=_deterministic_config(config_bundle.config),
+        inverter_catalog=config_bundle.inverter_catalog,
+        battery_catalog=config_bundle.battery_catalog,
+        solar_profile=config_bundle.solar_profile,
         hsp_month=config_bundle.hsp_month,
+        demand_profile_7x24=config_bundle.demand_profile_7x24,
+        day_weights=config_bundle.day_weights,
         demand_month_factor=config_bundle.demand_month_factor,
-        export_allowed=bool(cfg["export_allowed"]),
         cop_kwp_table=config_bundle.cop_kwp_table,
         cop_kwp_table_others=config_bundle.cop_kwp_table_others,
+        config_table=config_bundle.config_table,
+        demand_profile_table=config_bundle.demand_profile_table,
+        demand_profile_general_table=config_bundle.demand_profile_general_table,
+        demand_profile_weights_table=config_bundle.demand_profile_weights_table,
+        month_profile_table=config_bundle.month_profile_table,
+        sun_profile_table=config_bundle.sun_profile_table,
+        source_name=config_bundle.source_name,
+        issues=config_bundle.issues,
     )
-    _, _, seed_kwp, detail_rows = optimizer.run()
+    seed_kwp, detail_rows = run_deterministic_scan_tasks(effective_bundle, allow_parallel=allow_parallel)
     detail_map: dict[str, dict] = {}
     for scan_order, detail in enumerate(detail_rows):
         battery_name = battery_name_from_candidate(detail["battery"])
@@ -94,6 +101,21 @@ def run_scan(config_bundle: LoadedConfigBundle) -> ScanRunResult:
         seed_kwp=seed_kwp,
         issues=issues,
     )
+
+
+def resolve_deterministic_scan(config_bundle: LoadedConfigBundle, *, allow_parallel: bool = True) -> ScanRunResult:
+    fingerprint = fingerprint_deterministic_input(config_bundle)
+    cache = get_deterministic_cache()
+    cached = cache.get(fingerprint)
+    if cached is not None:
+        return cached
+    scan_result = _build_scan_result(config_bundle, allow_parallel=allow_parallel)
+    cache.put(fingerprint, scan_result)
+    return scan_result
+
+
+def run_scan(config_bundle: LoadedConfigBundle) -> ScanRunResult:
+    return resolve_deterministic_scan(config_bundle)
 
 
 def run_scenario(config_bundle: LoadedConfigBundle, candidate_key: str | None = None) -> ScenarioRunResult:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from dash import Input, Output, State, callback, dcc, html, register_page, ctx
@@ -17,10 +18,12 @@ from components import (
     risk_tables_section,
 )
 from services import (
-    ScenarioSessionState,
     clear_missing_risk_result_payload,
     export_risk_artifacts,
     get_risk_result,
+    project_exports_root,
+    resolve_client_session,
+    resolve_scenario_session,
     run_monte_carlo,
     store_risk_result,
 )
@@ -37,11 +40,6 @@ from services.risk_ui import (
 )
 
 register_page(__name__, path="/risk", name="Risk")
-
-
-def _state(payload) -> ScenarioSessionState:
-    return ScenarioSessionState.from_payload(payload)
-
 
 def _lang(value: str | None) -> str:
     return value if value in {"en", "es"} else "es"
@@ -105,8 +103,10 @@ layout = html.Div(
     Output("risk-distributions-title", "children"),
     Output("risk-metadata-title", "children"),
     Output("risk-percentiles-title", "children"),
-    Output("risk-payback-note", "children"),
-    Output("risk-payback-band-note", "children"),
+    Output("risk-payback-histogram-description", "children"),
+    Output("risk-npv-histogram-description", "children"),
+    Output("risk-payback-ecdf-description", "children"),
+    Output("risk-npv-ecdf-description", "children"),
     Input("language-selector", "value"),
 )
 def translate_risk_page(language_value):
@@ -130,8 +130,10 @@ def translate_risk_page(language_value):
         tr("risk.distributions.title", lang),
         tr("risk.metadata.title", lang),
         tr("risk.percentiles.title", lang),
-        tr("risk.payback_note", lang),
-        tr("risk.payback_band_note", lang),
+        tr("risk.chart.payback_hist.description", lang),
+        tr("risk.chart.npv_hist.description", lang),
+        tr("risk.chart.payback_ecdf.description", lang),
+        tr("risk.chart.npv_ecdf.description", lang),
     )
 
 
@@ -142,7 +144,7 @@ def translate_risk_page(language_value):
     State("risk-scenario-dropdown", "value"),
 )
 def populate_risk_scenarios(session_payload, current_value):
-    state = _state(session_payload)
+    _, state = resolve_client_session(session_payload, language="es")
     scenarios = ready_risk_scenarios(state)
     options = [{"label": scenario.name, "value": scenario.scenario_id} for scenario in scenarios]
     selected = resolve_default_risk_scenario(state, current_value)
@@ -161,7 +163,7 @@ def populate_risk_scenarios(session_payload, current_value):
 )
 def populate_risk_candidates(session_payload, scenario_id, language_value, current_candidate_key, current_n_simulations):
     lang = _lang(language_value)
-    state = _state(session_payload)
+    _, state = resolve_scenario_session(session_payload, scenario_id=scenario_id, ensure_scan=True, language=lang)
     scenario = state.get_scenario(scenario_id)
     if scenario is None or scenario.scan_result is None or scenario.dirty:
         return [], None, current_n_simulations
@@ -221,7 +223,7 @@ def run_risk_analysis(
         raise PreventUpdate
 
     lang = _lang(language_value)
-    state = _state(session_payload)
+    _, state = resolve_scenario_session(session_payload, scenario_id=scenario_id, ensure_scan=True, language=lang)
     scenario = state.get_scenario(scenario_id)
     retain_samples = _retain_samples(retain_samples_values)
     errors = validate_risk_run_inputs(scenario, candidate_key, n_simulations, seed, lang=lang)
@@ -321,10 +323,10 @@ def invalidate_risk_result(
     Output("risk-validation", "children"),
     Output("risk-status", "children"),
     Output("risk-summary-cards", "children"),
-    Output("risk-npv-histogram", "figure"),
-    Output("risk-npv-ecdf", "figure"),
     Output("risk-payback-histogram", "figure"),
+    Output("risk-npv-histogram", "figure"),
     Output("risk-payback-ecdf", "figure"),
+    Output("risk-npv-ecdf", "figure"),
     Output("risk-percentile-table", "data"),
     Output("risk-percentile-table", "columns"),
     Output("risk-metadata-table", "children"),
@@ -337,7 +339,7 @@ def invalidate_risk_result(
 )
 def render_risk_results(session_payload, result_payload, scenario_id, language_value):
     lang = _lang(language_value)
-    state = _state(session_payload)
+    _, state = resolve_scenario_session(session_payload, scenario_id=scenario_id, ensure_scan=True, language=lang)
     ready = ready_risk_scenarios(state)
     if not ready:
         message = tr("risk.empty.no_scenarios", lang)
@@ -346,10 +348,10 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             render_message_list([message]),
             tr("risk.status.ready", lang),
             [],
-            empty,
-            empty_risk_figure(tr("risk.chart.npv_ecdf", lang), message),
             empty_risk_figure(tr("risk.chart.payback_hist", lang), message),
+            empty,
             empty_risk_figure(tr("risk.chart.payback_ecdf", lang), message),
+            empty_risk_figure(tr("risk.chart.npv_ecdf", lang), message),
             [],
             [],
             render_message_list([], empty_message=message),
@@ -366,10 +368,10 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             render_message_list(errors, empty_message=tr("risk.validation.none", lang)),
             status,
             [],
-            empty_risk_figure(tr("risk.chart.npv_hist", lang), message),
-            empty_risk_figure(tr("risk.chart.npv_ecdf", lang), message),
             empty_risk_figure(tr("risk.chart.payback_hist", lang), message),
+            empty_risk_figure(tr("risk.chart.npv_hist", lang), message),
             empty_risk_figure(tr("risk.chart.payback_ecdf", lang), message),
+            empty_risk_figure(tr("risk.chart.npv_ecdf", lang), message),
             [],
             [],
             render_message_list([], empty_message=message),
@@ -384,10 +386,10 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             render_message_list([missing]),
             tr("risk.status.rerun_needed", lang),
             [],
-            empty_risk_figure(tr("risk.chart.npv_hist", lang), missing),
-            empty_risk_figure(tr("risk.chart.npv_ecdf", lang), missing),
             empty_risk_figure(tr("risk.chart.payback_hist", lang), missing),
+            empty_risk_figure(tr("risk.chart.npv_hist", lang), missing),
             empty_risk_figure(tr("risk.chart.payback_ecdf", lang), missing),
+            empty_risk_figure(tr("risk.chart.npv_ecdf", lang), missing),
             [],
             [],
             render_message_list([], empty_message=missing),
@@ -402,10 +404,10 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             render_message_list([unavailable]),
             tr("risk.status.failed", lang),
             [],
-            empty_risk_figure(tr("risk.chart.npv_hist", lang), unavailable),
-            empty_risk_figure(tr("risk.chart.npv_ecdf", lang), unavailable),
             empty_risk_figure(tr("risk.chart.payback_hist", lang), unavailable),
+            empty_risk_figure(tr("risk.chart.npv_hist", lang), unavailable),
             empty_risk_figure(tr("risk.chart.payback_ecdf", lang), unavailable),
+            empty_risk_figure(tr("risk.chart.npv_ecdf", lang), unavailable),
             [],
             [],
             render_message_list([], empty_message=unavailable),
@@ -435,19 +437,6 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
         status,
         render_risk_summary_cards(result, lang),
         build_histogram_figure(
-            result.views.histograms["NPV_COP"],
-            title=tr("risk.chart.npv_hist", lang),
-            x_title=tr("risk.axis.npv", lang),
-            lang=lang,
-            density_frame=result.views.densities.get("NPV_COP"),
-        ),
-        build_ecdf_figure(
-            result.views.ecdfs["NPV_COP"],
-            title=tr("risk.chart.npv_ecdf", lang),
-            x_title=tr("risk.axis.npv", lang),
-            lang=lang,
-        ),
-        build_histogram_figure(
             result.views.histograms["payback_years"],
             title=tr("risk.chart.payback_hist", lang),
             x_title=tr("risk.axis.payback", lang),
@@ -460,12 +449,25 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
             ),
             density_frame=result.views.densities.get("payback_years"),
         ),
+        build_histogram_figure(
+            result.views.histograms["NPV_COP"],
+            title=tr("risk.chart.npv_hist", lang),
+            x_title=tr("risk.axis.npv", lang),
+            lang=lang,
+            density_frame=result.views.densities.get("NPV_COP"),
+        ),
         build_ecdf_figure(
             result.views.ecdfs["payback_years"],
             title=tr("risk.chart.payback_ecdf", lang),
             x_title=tr("risk.axis.payback", lang),
             lang=lang,
             empty_message=tr("risk.empty.no_payback", lang),
+        ),
+        build_ecdf_figure(
+            result.views.ecdfs["NPV_COP"],
+            title=tr("risk.chart.npv_ecdf", lang),
+            x_title=tr("risk.axis.npv", lang),
+            lang=lang,
         ),
         percentile_table.to_dict("records"),
         columns,
@@ -498,9 +500,10 @@ def export_risk_result_artifacts(n_clicks, result_payload, session_payload, lang
     result = get_risk_result(str(result_id))
     if result is None:
         return tr("risk.error.result_missing", lang)
-    state = _state(session_payload)
+    _, state = resolve_client_session(session_payload, language=lang)
     scenario = state.get_scenario(payload.get("scenario_id"))
     if scenario is None:
         return tr("risk.error.scenario_unavailable", lang)
-    paths = export_risk_artifacts(scenario, result)
+    output_root = project_exports_root(state.project_slug) if state.project_slug else None
+    paths = export_risk_artifacts(scenario, result, output_root=output_root or Path("Resultados"))
     return tr("risk.export_done", lang, path=str(paths[0].parent.resolve()))

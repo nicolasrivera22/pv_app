@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import multiprocessing
 import time
 import urllib.error
 import urllib.request
@@ -7,6 +8,10 @@ import webbrowser
 from typing import Any
 
 from werkzeug.serving import BaseWSGIServer, make_server
+
+from services.runtime_paths import configure_runtime_environment
+
+configure_runtime_environment()
 
 from app import app as dash_app
 
@@ -69,6 +74,7 @@ def open_browser_when_ready(
 
 
 def main() -> None:
+    multiprocessing.freeze_support()
     server, port = create_local_server(dash_app, host=HOST, start_port=PREFERRED_PORT, max_attempts=PORT_ATTEMPTS)
     app_url = f"http://{HOST}:{port}/"
 

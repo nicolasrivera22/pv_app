@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import multiprocessing
 import os
 
+from services.runtime_paths import configure_runtime_environment, user_workbook_path
+
+configure_runtime_environment()
+
 from services import ensure_template, load_config_from_excel, run_scan
-from services.runtime_paths import user_workbook_path
 from services.result_views import build_kpis
 
 __version__ = "v8.0"
@@ -13,6 +17,7 @@ __status__ = "development"
 
 def main() -> None:
     """Legacy CLI entrypoint for the deterministic scan."""
+    multiprocessing.freeze_support()
     xlsx_path = os.fspath(user_workbook_path())
 
     if not os.path.exists(xlsx_path):

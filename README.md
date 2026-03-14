@@ -2,6 +2,33 @@
 
 This repository now provides a deterministic Dash workbench for PV sizing and financial analysis plus a usable Monte Carlo risk page. Phase 1 established the service layer and single-scenario MVP, phase 1.1 hardened validation and regression behavior, phase 2A turned the app into a multi-scenario deterministic analysis tool, phase 2B.1 added the reproducible Monte Carlo service layer, phase 2B.2 added the Dash risk UI, and phase 2B.3 refined the app into a Spanish-first, workbook-driven product.
 
+## What the current foundation adds
+
+- Thin browser session state:
+  - the Dash `scenario-session-store` now uses session storage
+  - the browser payload keeps only lightweight metadata such as `session_id`, active scenario id, comparison selections, selected candidate keys, project binding, dirty flag, language, and a revision counter
+  - full scenario bundles and heavy deterministic results are kept server-side in a bounded in-process registry
+- Session lifecycle behavior:
+  - a refresh keeps the current browser-tab session
+  - a new tab starts a new session
+  - if the browser still has a project-bound session id but the server registry has already pruned it, the app reopens that saved project into a replacement session automatically
+- Deterministic scan caching:
+  - deterministic scans are fingerprinted from effective deterministic inputs only
+  - the fingerprint includes an explicit `DETERMINISTIC_CACHE_SCHEMA_VERSION` salt so cache invalidation is clean when model logic changes
+  - repeated scans with the same effective inputs reuse cached deterministic results transparently
+- Project persistence under `proyectos/`:
+  - projects are whole-session workspaces, not single-scenario files
+  - workbook-style CSV tables are the canonical saved input source of truth
+  - `project.json` stores metadata only and does not compete with the saved tables as an authoritative input source
+- Runtime workspace and exports:
+  - each saved project gets its own `exports/Resultados/` folder
+  - unbound sessions still default to the legacy top-level `Resultados/` folder for source/dev compatibility
+  - runtime cache paths are prepared early and `MPLCONFIGDIR` is forced into a writable runtime cache folder for source runs, packaged runs, and worker processes
+- Controlled multiprocessing:
+  - only deterministic candidate evaluation uses multiprocessing
+  - the executor uses top-level picklable worker functions and a spawn-safe `ProcessPoolExecutor`
+  - serial execution remains the baseline and automatic fallback path
+
 ## What phase 2C adds
 
 - The Workbench now includes an interactive unifilar-style schematic for the currently selected deterministic candidate.
@@ -175,10 +202,11 @@ Phase 10C adds a Windows-first local packaging path using PyInstaller and a dedi
   - bundled `PV_inputs.xlsx`
   - browser auto-open via `desktop_launcher.py`
 - Runtime path behavior:
-  - source mode writes explicit exports into `Resultados/` under the repo root
-  - packaged mode writes explicit exports into `Resultados/` beside the executable
+  - source mode writes explicit exports into `Resultados/` under the repo root when no project is bound
+  - project-bound sessions write exports into `proyectos/<slug>/exports/Resultados/`
+  - packaged mode keeps the same project/runtime folder logic beside the executable root
   - the bundled example workbook is loaded from the packaged resource directory
-- The app still creates `Resultados/` on demand; no precreated skeleton output folder is required.
+- The app still creates `Resultados/` and project export folders on demand; no precreated skeleton output folder is required.
 
 ### Build the executable
 
@@ -227,7 +255,69 @@ pytest
 - `pages/compare.py`: deterministic design comparison flow for the active scan
 - `pages/risk.py`: fixed-candidate Monte Carlo risk analysis flow
 - `components/`: reusable layout blocks for scenarios, assumptions, catalogs, validation, KPIs, and candidate exploration
-- `services/`: Excel I/O, config metadata extraction, validation, deterministic runner, scenario-session state, stochastic runner, server-side risk registry, display schema, exports, translation helper, and result shaping
+- `services/`: Excel I/O, config metadata extraction, validation, deterministic runner/executor/cache, project persistence, scenario-session state, server-side session registry, stochastic runner, server-side risk registry, display schema, exports, translation helper, and result shaping
+
+## Foundation architecture notes
+
+### Server-side session state
+
+- Heavy deterministic objects no longer live in browser-side stores:
+  - no full `LoadedConfigBundle`
+  - no full deterministic `ScanRunResult`
+  - no candidate-detail tables or monthly traces
+- The server-side `ScenarioStateRegistry` keeps full session/scenario data in-process and prunes old sessions by both LRU access and idle age.
+- The browser session payload is intentionally lightweight and serializable so normal navigation, refresh, and project reopen flows remain responsive.
+
+### Deterministic cache behavior
+
+- The deterministic cache key includes:
+  - `DETERMINISTIC_CACHE_SCHEMA_VERSION`
+  - normalized deterministic config with Monte Carlo-only fields zeroed
+  - inverter and battery catalogs
+  - demand, solar, month-factor, and pricing tables that materially affect the deterministic scan
+- The cache excludes:
+  - UI preferences
+  - project metadata
+  - source labels such as `source_name`
+  - stochastic-only inputs
+- The cache is local/in-process, bounded, and LRU-pruned.
+- A scan result reopened from project inputs is resolved lazily through the same cache/executor path; the project does not persist giant runtime blobs by default.
+
+### Project workspace layout
+
+- Saved projects live under `proyectos/`:
+
+```text
+proyectos/<slug>/
+  project.json
+  inputs/<scenario_id>/
+    Config.csv
+    Demand_Profile.csv
+    Demand_Profile_General.csv
+    Demand_Profile_Weights.csv
+    Month_Demand_Profile.csv
+    SUN_HSP_PROFILE.csv
+    Precios_kWp_relativos.csv
+    Precios_kWp_relativos_Otros.csv
+    Inversor_Catalog.csv
+    Battery_Catalog.csv
+  exports/Resultados/
+```
+
+- The CSV tables above are the canonical saved project inputs.
+- `project.json` stores workspace metadata such as:
+  - display name and slug
+  - active scenario
+  - compare/design selections
+  - per-scenario names and selected candidate keys
+- Reopening a project rebuilds the editable bundles from the canonical CSV tables, restores metadata, and lazily rehydrates deterministic scans only when a page needs them.
+
+### Multiprocessing controls
+
+- Deterministic scans can evaluate candidate batches in multiple processes while preserving stable output ordering.
+- Worker functions are top-level and spawn-safe so the path remains compatible with Windows and future packaged execution.
+- `PV_SCAN_MAX_WORKERS=1` forces serial execution.
+- If process-pool startup or worker execution fails, the app falls back to the serial deterministic path automatically.
 
 ## Workbook-driven editing notes
 

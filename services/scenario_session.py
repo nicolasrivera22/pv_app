@@ -5,7 +5,8 @@ from dataclasses import replace
 from datetime import datetime
 from uuid import uuid4
 
-from .scenario_runner import run_scan
+from .cache import fingerprint_deterministic_input
+from .scenario_runner import resolve_deterministic_scan
 from .types import LoadedConfigBundle, ScenarioRecord, ScenarioSessionState
 from .validation import refresh_bundle_issues
 
@@ -22,6 +23,7 @@ def create_scenario_record(name: str, bundle: LoadedConfigBundle, source_name: s
         source_name=source_name or bundle.source_name,
         config_bundle=refreshed_bundle,
         scan_result=None,
+        scan_fingerprint=None,
         selected_candidate_key=None,
         dirty=True,
         last_run_at=None,
@@ -39,6 +41,10 @@ def default_scenario_name(state: ScenarioSessionState, prefix: str = "Scenario")
 def _replace_scenario(state: ScenarioSessionState, updated: ScenarioRecord) -> ScenarioSessionState:
     scenarios = tuple(updated if item.scenario_id == updated.scenario_id else item for item in state.scenarios)
     return replace(state, scenarios=scenarios)
+
+
+def _mark_project_dirty(state: ScenarioSessionState, *, dirty: bool = True) -> ScenarioSessionState:
+    return replace(state, project_dirty=dirty)
 
 
 def _sanitize_design_comparison_keys(
@@ -65,7 +71,7 @@ def _sanitize_design_comparison_keys(
 
 def add_scenario(state: ScenarioSessionState, scenario: ScenarioRecord, make_active: bool = True) -> ScenarioSessionState:
     active_id = scenario.scenario_id if make_active else state.active_scenario_id
-    return replace(state, scenarios=(*state.scenarios, scenario), active_scenario_id=active_id)
+    return replace(state, scenarios=(*state.scenarios, scenario), active_scenario_id=active_id, project_dirty=True)
 
 
 def duplicate_scenario(state: ScenarioSessionState, scenario_id: str, new_name: str | None = None) -> ScenarioSessionState:
@@ -79,6 +85,7 @@ def duplicate_scenario(state: ScenarioSessionState, scenario_id: str, new_name: 
         source_name=source.source_name,
         config_bundle=refresh_bundle_issues(replace(source.config_bundle)),
         scan_result=None if source.scan_result is None else replace(source.scan_result),
+        scan_fingerprint=source.scan_fingerprint,
         selected_candidate_key=source.selected_candidate_key,
         dirty=source.dirty,
         last_run_at=source.last_run_at,
@@ -90,7 +97,7 @@ def rename_scenario(state: ScenarioSessionState, scenario_id: str, new_name: str
     scenario = state.get_scenario(scenario_id)
     if scenario is None:
         raise KeyError(f"No existe el escenario '{scenario_id}'.")
-    return _replace_scenario(state, replace(scenario, name=new_name.strip() or scenario.name))
+    return _mark_project_dirty(_replace_scenario(state, replace(scenario, name=new_name.strip() or scenario.name)))
 
 
 def delete_scenario(state: ScenarioSessionState, scenario_id: str) -> ScenarioSessionState:
@@ -107,21 +114,22 @@ def delete_scenario(state: ScenarioSessionState, scenario_id: str) -> ScenarioSe
         active_scenario_id=active_id,
         comparison_scenario_ids=comparison,
         design_comparison_candidate_keys=design_compare,
+        project_dirty=True,
     )
 
 
 def set_active_scenario(state: ScenarioSessionState, scenario_id: str | None) -> ScenarioSessionState:
     if scenario_id is None:
-        return replace(state, active_scenario_id=None)
+        return replace(state, active_scenario_id=None, project_dirty=True)
     if state.get_scenario(scenario_id) is None:
         raise KeyError(f"No existe el escenario '{scenario_id}'.")
-    return replace(state, active_scenario_id=scenario_id)
+    return replace(state, active_scenario_id=scenario_id, project_dirty=True)
 
 
 def set_comparison_scenarios(state: ScenarioSessionState, scenario_ids: list[str] | tuple[str, ...]) -> ScenarioSessionState:
-    valid_ids = {scenario.scenario_id for scenario in state.scenarios if scenario.scan_result is not None and not scenario.dirty}
+    valid_ids = {scenario.scenario_id for scenario in state.scenarios if not scenario.dirty}
     selected = tuple(item for item in scenario_ids if item in valid_ids)
-    return replace(state, comparison_scenario_ids=selected)
+    return replace(state, comparison_scenario_ids=selected, project_dirty=True)
 
 
 def set_design_comparison_candidates(
@@ -142,7 +150,7 @@ def set_design_comparison_candidates(
         if len(deduped) >= 10:
             break
     selections[scenario_id] = tuple(deduped)
-    return replace(state, design_comparison_candidate_keys=selections)
+    return replace(state, design_comparison_candidate_keys=selections, project_dirty=True)
 
 
 def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle: LoadedConfigBundle) -> ScenarioSessionState:
@@ -155,29 +163,50 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
         config_bundle=refreshed_bundle,
         source_name=refreshed_bundle.source_name,
         scan_result=None,
+        scan_fingerprint=None,
         selected_candidate_key=None,
         dirty=True,
         last_run_at=None,
     )
-    return _replace_scenario(state, updated)
+    return _mark_project_dirty(_replace_scenario(state, updated))
 
 
-def run_scenario_scan(state: ScenarioSessionState, scenario_id: str) -> ScenarioSessionState:
+def _apply_scan_result(
+    state: ScenarioSessionState,
+    scenario_id: str,
+    *,
+    preserve_selection: bool,
+) -> ScenarioSessionState:
     scenario = state.get_scenario(scenario_id)
     if scenario is None:
         raise KeyError(f"No existe el escenario '{scenario_id}'.")
-
-    scan_result = run_scan(scenario.config_bundle)
+    scan_result = resolve_deterministic_scan(scenario.config_bundle)
+    if preserve_selection and scenario.selected_candidate_key in scan_result.candidate_details:
+        selected_candidate_key = scenario.selected_candidate_key
+    else:
+        selected_candidate_key = scan_result.best_candidate_key
     updated = replace(
         scenario,
         scan_result=scan_result,
-        selected_candidate_key=scan_result.best_candidate_key,
+        scan_fingerprint=fingerprint_deterministic_input(scenario.config_bundle),
+        selected_candidate_key=selected_candidate_key,
         dirty=False,
         last_run_at=datetime.now().isoformat(timespec="seconds"),
     )
     next_state = _replace_scenario(state, updated)
     selections = _sanitize_design_comparison_keys(next_state, scenario_id, set(scan_result.candidate_details))
     return replace(next_state, design_comparison_candidate_keys=selections)
+
+
+def run_scenario_scan(state: ScenarioSessionState, scenario_id: str) -> ScenarioSessionState:
+    return _apply_scan_result(state, scenario_id, preserve_selection=False)
+
+
+def hydrate_scenario_scan(state: ScenarioSessionState, scenario_id: str) -> ScenarioSessionState:
+    scenario = state.get_scenario(scenario_id)
+    if scenario is None or scenario.dirty or scenario.scan_result is not None:
+        return state
+    return _apply_scan_result(state, scenario_id, preserve_selection=True)
 
 
 def update_selected_candidate(state: ScenarioSessionState, scenario_id: str, candidate_key: str | None) -> ScenarioSessionState:
@@ -187,4 +216,4 @@ def update_selected_candidate(state: ScenarioSessionState, scenario_id: str, can
     if scenario.scan_result is None:
         return state
     selected = candidate_key if candidate_key in scenario.scan_result.candidate_details else scenario.scan_result.best_candidate_key
-    return _replace_scenario(state, replace(scenario, selected_candidate_key=selected))
+    return _mark_project_dirty(_replace_scenario(state, replace(scenario, selected_candidate_key=selected)))

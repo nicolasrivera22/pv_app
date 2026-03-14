@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "name": "Proyecto test 1",
+  "slug": "proyecto_test_1",
+  "active_scenario_id": "scenario-10efdff4",
+  "comparison_scenario_ids": [],
+  "design_comparison_candidate_keys": {},
+  "scenarios": [
+    {
+      "scenario_id": "scenario-10efdff4",
+      "name": "Escenario 1",
+      "source_name": "PV_inputs.xlsx",
+      "selected_candidate_key": "24.600::BAT-20",
+      "dirty": false,
+      "last_run_at": "2026-03-14T17:42:30",
+      "scan_fingerprint": "940cbff94ef4670739122ae21ba23de3c5ecb2d079ef19a1a31cc800fa8f2db0"
+    }
+  ],
+  "ui_prefs": {
+    "language": "es"
+  }
+}
