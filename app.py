@@ -3,11 +3,22 @@ from __future__ import annotations
 from dash import Dash, Input, Output, callback, dcc, html, page_container
 
 from services.i18n import tr
+from services.runtime_paths import assets_dir, pages_dir
 
 
 def create_app() -> Dash:
-    app = Dash(__name__, use_pages=True, suppress_callback_exceptions=True)
+    app = Dash(
+        __name__,
+        use_pages=True,
+        suppress_callback_exceptions=True,
+        assets_folder=str(assets_dir()),
+        pages_folder=str(pages_dir()),
+    )
     app.title = tr("app.title", "es")
+
+    @app.server.route("/healthz")
+    def healthz():
+        return {"status": "ok"}, 200
 
     app.layout = html.Div(
         className="app-shell",
@@ -118,11 +129,14 @@ def create_app() -> Dash:
                 .catalog-grid, .chart-grid, .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
                 .compare-grid > .panel { min-height: 100%; }
                 .schematic-summary-chip { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.8rem; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-weight: 600; width: fit-content; }
-                .schematic-layout { display: grid; grid-template-columns: minmax(0, 2.1fr) minmax(300px, 0.95fr); gap: 1rem; align-items: start; }
-                .schematic-main, .schematic-side { display: grid; gap: 0.75rem; }
-                .schematic-note { margin-bottom: 0; }
-                .legend-list { display: grid; gap: 0.65rem; }
-                .legend-item { display: flex; align-items: center; gap: 0.7rem; color: #334155; }
+                .schematic-stack { display: grid; gap: 1rem; }
+                .schematic-diagram-card, .schematic-detail-card, .schematic-legend-card { min-width: 0; width: 100%; }
+                .schematic-diagram-card { padding: 0.2rem 0 0.1rem; }
+                .schematic-detail-card, .schematic-legend-card { padding: 1rem 1.1rem; }
+                .schematic-note { margin: 0.15rem 0 0; max-width: none; }
+                .legend-list { display: flex; flex-wrap: wrap; gap: 0.75rem 0.9rem; align-items: stretch; }
+                .legend-list-inline { justify-content: flex-start; }
+                .legend-item { display: flex; align-items: center; gap: 0.7rem; color: #334155; padding: 0.55rem 0.8rem; border-radius: 14px; background: rgba(255,255,255,0.72); border: 1px solid rgba(203,213,225,0.82); flex: 1 1 220px; min-width: 220px; }
                 .legend-swatch { display: inline-flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em; }
                 .legend-node { width: 58px; height: 38px; border: 2px solid #cbd5e1; background-color: #fff; color: #0f172a; border-radius: 14px; background-repeat: no-repeat; background-position: center; background-size: 24px 24px; }
                 .legend-role-pv { border-color: #f59e0b; background-color: #fffbeb; }
@@ -149,7 +163,7 @@ def create_app() -> Dash:
                 .inspector-label { font-weight: 600; color: #334155; }
                 .inspector-value { color: #0f172a; text-align: right; }
                 .inspector-note { padding: 0.7rem 0.8rem; border-radius: 12px; background: #fffbeb; color: #92400e; border: 1px solid #fde68a; line-height: 1.45; }
-                @media (max-width: 1100px) { .schematic-layout { grid-template-columns: 1fr; } }
+                @media (max-width: 720px) { .legend-item { min-width: 100%; flex-basis: 100%; } }
                 @media (max-width: 980px) { .workbench-grid { grid-template-columns: 1fr; } .sidebar-panel { position: static; } .app-header { align-items: start; flex-direction: column; } .header-tools { width: 100%; align-items: start; } }
             </style>
         </head>

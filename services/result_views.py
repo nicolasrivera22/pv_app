@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -120,9 +121,62 @@ def build_monthly_balance(monthly: pd.DataFrame, lang: str = "en") -> pd.DataFra
     return frame
 
 
-def build_cash_flow(monthly: pd.DataFrame) -> pd.DataFrame:
+def build_project_timeline(month_count: int, *, base_year: int | None = None) -> pd.DataFrame:
+    if month_count <= 0:
+        return pd.DataFrame(columns=["month_index", "calendar_year", "project_year", "is_year_start"])
+    current_year = int(base_year) if base_year is not None else date.today().year
+    month_index = pd.Series(range(1, month_count + 1), dtype=int)
+    project_year = ((month_index - 1) // 12) + 1
+    calendar_year = (current_year + project_year).astype(int)
+    return pd.DataFrame(
+        {
+            "month_index": month_index.astype(int),
+            "calendar_year": calendar_year.astype(int),
+            "project_year": project_year.astype(int),
+            "is_year_start": ((month_index - 1) % 12 == 0),
+        }
+    )
+
+
+def _apply_project_time_axes(
+    figure: go.Figure,
+    timeline: pd.DataFrame,
+    *,
+    lang: str = "es",
+) -> go.Figure:
+    if timeline.empty:
+        return figure
+    tick_frame = timeline.loc[timeline["is_year_start"], ["month_index", "calendar_year", "project_year"]].copy()
+    tickvals = tick_frame["month_index"].tolist()
+    calendar_ticktext = tick_frame["calendar_year"].astype(str).tolist()
+    project_ticktext = [tr("timeline.project_year", lang, year=int(year)) for year in tick_frame["project_year"]]
+    figure.update_xaxes(
+        title_text=tr("timeline.axis.calendar_year", lang),
+        tickmode="array",
+        tickvals=tickvals,
+        ticktext=calendar_ticktext,
+        range=[0.5, float(timeline["month_index"].max()) + 0.5],
+    )
+    figure.update_layout(
+        xaxis2={
+            "overlaying": "x",
+            "side": "top",
+            "title": tr("timeline.axis.project_horizon", lang),
+            "tickmode": "array",
+            "tickvals": tickvals,
+            "ticktext": project_ticktext,
+            "showgrid": False,
+        }
+    )
+    return figure
+
+
+def build_cash_flow(monthly: pd.DataFrame, *, base_year: int | None = None) -> pd.DataFrame:
     frame = monthly[["Año_mes", "NPV_COP", "Ahorro_COP"]].copy()
     frame.rename(columns={"NPV_COP": "cumulative_npv", "Ahorro_COP": "monthly_savings"}, inplace=True)
+    timeline = build_project_timeline(len(frame), base_year=base_year)
+    if not timeline.empty:
+        frame = frame.reset_index(drop=True).join(timeline)
     return frame
 
 
@@ -243,17 +297,47 @@ def build_cash_flow_figure(
     *,
     lang: str = "es",
     title: str | None = None,
+    base_year: int | None = None,
 ) -> go.Figure:
     figure_title = title or ("Flujo acumulado descontado" if lang == "es" else "Cumulative cash flow")
-    figure = px.line(
-        cash_flow,
-        x="Año_mes",
-        y="cumulative_npv",
+    frame = cash_flow.copy()
+    if "month_index" not in frame.columns or "calendar_year" not in frame.columns or "project_year" not in frame.columns:
+        timeline = build_project_timeline(len(frame), base_year=base_year)
+        if not timeline.empty:
+            frame = frame.reset_index(drop=True).join(timeline)
+    figure = go.Figure()
+    if not frame.empty:
+        figure.add_trace(
+            go.Scatter(
+                x=frame["month_index"],
+                y=frame["cumulative_npv"],
+                mode="lines",
+                line={"color": "#2563eb", "width": 3},
+                name=figure_title,
+                customdata=frame[["month_index", "calendar_year", "project_year", "monthly_savings"]],
+                hovertemplate=(
+                    tr("timeline.hover.project_month", lang)
+                    + ": %{customdata[0]:.0f}<br>"
+                    + tr("timeline.hover.calendar_year", lang)
+                    + ": %{customdata[1]:.0f}<br>"
+                    + tr("timeline.hover.project_year", lang)
+                    + ": "
+                    + tr("timeline.project_year", lang, year="%{customdata[2]:.0f}")
+                    + "<br>"
+                    + ("VPN acumulado" if lang == "es" else "Cumulative NPV")
+                    + ": %{y:,.0f}<br>"
+                    + tr("timeline.hover.monthly_savings", lang)
+                    + ": %{customdata[3]:,.0f}<extra></extra>"
+                ),
+            )
+        )
+        _apply_project_time_axes(figure, frame[["month_index", "calendar_year", "project_year", "is_year_start"]], lang=lang)
+    figure.update_layout(
         template="plotly_white",
         title=figure_title,
+        hovermode="x unified",
     )
     figure.add_hline(y=0, line_dash="dash", line_color="#334155")
-    figure.update_xaxes(title="Mes" if lang == "es" else "Month")
     figure.update_yaxes(
         title="Flujo acumulado descontado [COP]" if lang == "es" else "Discounted cumulative cash flow (COP)",
         tickformat=",.0f",

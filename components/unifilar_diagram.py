@@ -171,10 +171,10 @@ def unifilar_diagram_section() -> html.Div:
                 style={"display": "none"},
                 children=[
                     html.Div(
-                        className="schematic-layout",
+                        className="schematic-stack",
                         children=[
                             html.Div(
-                                className="schematic-main",
+                                className="schematic-diagram-card",
                                 children=[
                                     cyto.Cytoscape(
                                         id="active-unifilar-diagram",
@@ -187,28 +187,23 @@ def unifilar_diagram_section() -> html.Div:
                                         boxSelectionEnabled=False,
                                         autoungrabify=True,
                                     ),
-                                    html.P("", id="unifilar-diagram-note", className="section-copy schematic-note"),
                                 ],
                             ),
                             html.Div(
-                                className="schematic-side",
+                                className="subpanel schematic-detail-card",
                                 children=[
-                                    html.Div(
-                                        className="subpanel",
-                                        children=[
-                                            html.H4(tr("workbench.schematic.inspector.title", "es"), id="unifilar-inspector-title"),
-                                            html.Div(id="unifilar-inspector-body", className="inspector-body", children=default_inspector),
-                                        ],
-                                    ),
-                                    html.Div(
-                                        className="subpanel secondary-panel",
-                                        children=[
-                                            html.H4(tr("workbench.schematic.legend.title", "es"), id="unifilar-legend-title"),
-                                            html.Div(id="unifilar-legend-items", className="legend-list", children=default_legend),
-                                        ],
-                                    ),
+                                    html.H4(tr("workbench.schematic.inspector.title", "es"), id="unifilar-inspector-title"),
+                                    html.Div(id="unifilar-inspector-body", className="inspector-body", children=default_inspector),
                                 ],
                             ),
+                            html.Div(
+                                className="subpanel secondary-panel schematic-legend-card",
+                                children=[
+                                    html.H4(tr("workbench.schematic.legend.title", "es"), id="unifilar-legend-title"),
+                                    html.Div(id="unifilar-legend-items", className="legend-list legend-list-inline", children=default_legend),
+                                ],
+                            ),
+                            html.P("", id="unifilar-diagram-note", className="section-copy schematic-note"),
                         ],
                     )
                 ],

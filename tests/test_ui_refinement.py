@@ -35,6 +35,7 @@ from services import (
     tr,
 )
 from services.result_views import build_npv_figure
+from services.result_views import build_cash_flow, build_cash_flow_figure
 from services.ui_schema import field_help, field_label, metric_label
 from services.workbench_ui import demand_profile_visibility, frame_from_rows
 
@@ -242,6 +243,30 @@ def test_npv_chart_adds_top_axis_for_panel_count() -> None:
     assert figure.layout.xaxis2.title.text == "Número de paneles"
     assert list(figure.data[0].customdata[0][:2]) == ["12.000::None", 20]
     assert any(trace.name == "Candidato seleccionado" for trace in figure.data)
+
+
+def test_cash_flow_timeline_starts_next_calendar_year_and_uses_dual_x_axis() -> None:
+    monthly = pd.DataFrame(
+        {
+            "Año_mes": list(range(1, 25)),
+            "NPV_COP": [-(24 - idx) * 1000 for idx in range(24)],
+            "Ahorro_COP": [1500.0] * 24,
+        }
+    )
+
+    cash_flow = build_cash_flow(monthly, base_year=2026)
+    figure = build_cash_flow_figure(cash_flow, lang="es", base_year=2026)
+
+    assert {"month_index", "calendar_year", "project_year"}.issubset(cash_flow.columns)
+    assert cash_flow.loc[0, "calendar_year"] == 2027
+    assert cash_flow.loc[11, "calendar_year"] == 2027
+    assert cash_flow.loc[12, "calendar_year"] == 2028
+    assert cash_flow.loc[0, "project_year"] == 1
+    assert cash_flow.loc[12, "project_year"] == 2
+    assert figure.layout.xaxis.title.text == "Año calendario"
+    assert figure.layout.xaxis.ticktext[0] == "2027"
+    assert figure.layout.xaxis2.title.text == "Horizonte del proyecto"
+    assert figure.layout.xaxis2.ticktext[0] == "Año 1"
 
 
 def test_artifact_exports_write_into_resultados_without_deleting_existing_files(tmp_path) -> None:

@@ -1,0 +1,10 @@
+Escenario: Base
+Fuente: PV_inputs.xlsx
+Candidato seleccionado: 15.600::BAT-32
+kWp seleccionado: 15.600
+Batería seleccionada: BAT-32
+Inversor: INV-12k (12.0 kW)
+VPN [COP]: 43,263,530
+Payback [años]: 3.0
+Relación pico: 1.604
+Monte Carlo: exporta los artefactos desde la página de Riesgo para incluir la distribución estocástica.

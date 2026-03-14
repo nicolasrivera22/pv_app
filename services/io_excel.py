@@ -15,6 +15,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from pv_product.utils import DEFAULT_CONFIG, build_7x24_from_excel, solar_profile_24
 
+from .runtime_paths import bundled_workbook_path
 from .types import LoadedConfigBundle
 from .types import ValidationIssue
 from .validation import validate_config
@@ -409,7 +410,7 @@ def load_config_from_excel(path_or_bytes: str | bytes | Path | BytesIO) -> Loade
 
 
 def load_example_config() -> LoadedConfigBundle:
-    example_path = Path(__file__).resolve().parent.parent / "PV_inputs.xlsx"
+    example_path = bundled_workbook_path()
     if example_path.exists():
         return load_config_from_excel(example_path)
 
@@ -517,7 +518,7 @@ def _build_template_workbook(path: Path) -> None:
 
 def ensure_template(path: str | Path) -> None:
     destination = Path(path)
-    example_path = Path(__file__).resolve().parent.parent / "PV_inputs.xlsx"
+    example_path = bundled_workbook_path()
     if example_path.exists() and example_path.resolve() != destination.resolve():
         shutil.copyfile(example_path, destination)
         return

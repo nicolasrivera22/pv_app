@@ -18,6 +18,7 @@ from pv_product.utils import (
     plot_npv_scan,
 )
 
+from .runtime_paths import user_root
 from .types import MonteCarloRunResult, ScenarioRecord
 
 LEGACY_DETERMINISTIC_TOP_LEVEL = (
@@ -47,7 +48,7 @@ def _safe_name(value: str) -> str:
 def _resolve_output_root(output_root: Path) -> Path:
     root = Path(output_root).expanduser()
     if not root.is_absolute():
-        root = Path.cwd() / root
+        root = user_root() / root
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve()
 

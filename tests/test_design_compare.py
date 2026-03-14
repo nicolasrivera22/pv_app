@@ -24,6 +24,8 @@ from services.design_compare import (
     build_design_comparison_rows,
     build_monthly_pv_destination_figure,
     build_monthly_pv_destination_frame,
+    build_npv_projection_figure,
+    build_npv_projection_frame,
     build_typical_day_figure,
     derive_panel_count,
     remove_design_selection,
@@ -199,3 +201,21 @@ def test_remove_design_selection_and_export_workbook() -> None:
         "Typical_Day",
         "NPV_Projection",
     ]
+
+
+def test_npv_projection_frame_and_figure_use_calendar_and_project_year_axes() -> None:
+    state = _run_ready_state()
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    keys = list(scenario.scan_result.candidate_details)[:2]
+
+    frame = build_npv_projection_frame(scenario, keys, lang="es", base_year=2026)
+    figure = build_npv_projection_figure(frame, lang="es", empty_message="vacío", base_year=2026)
+
+    assert {"month_index", "calendar_year", "project_year"}.issubset(frame.columns)
+    assert frame.iloc[0]["calendar_year"] == 2027
+    assert frame.iloc[0]["project_year"] == 1
+    assert figure.layout.xaxis.title.text == "Año calendario"
+    assert figure.layout.xaxis2.title.text == "Horizonte del proyecto"
+    assert figure.layout.xaxis2.ticktext[0] == "Año 1"
+    assert len(figure.data) == len(keys)

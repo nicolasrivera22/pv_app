@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from .i18n import tr
+from .result_views import build_project_timeline
 from .types import ScenarioRecord, ScenarioSessionState
 from .ui_schema import format_metric
 
@@ -39,6 +40,39 @@ def _empty_figure(title: str, message: str) -> go.Figure:
         title=title,
         template="plotly_white",
         annotations=[{"text": message, "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.5, "showarrow": False}],
+    )
+    return figure
+
+
+def _apply_project_time_axes(
+    figure: go.Figure,
+    timeline: pd.DataFrame,
+    *,
+    lang: str = "es",
+) -> go.Figure:
+    if timeline.empty:
+        return figure
+    tick_frame = timeline.loc[timeline["is_year_start"], ["month_index", "calendar_year", "project_year"]].copy()
+    tickvals = tick_frame["month_index"].tolist()
+    calendar_ticktext = tick_frame["calendar_year"].astype(str).tolist()
+    project_ticktext = [tr("timeline.project_year", lang, year=int(year)) for year in tick_frame["project_year"]]
+    figure.update_xaxes(
+        title_text=tr("timeline.axis.calendar_year", lang),
+        tickmode="array",
+        tickvals=tickvals,
+        ticktext=calendar_ticktext,
+        range=[0.5, float(timeline["month_index"].max()) + 0.5],
+    )
+    figure.update_layout(
+        xaxis2={
+            "overlaying": "x",
+            "side": "top",
+            "title": tr("timeline.axis.project_horizon", lang),
+            "tickmode": "array",
+            "tickvals": tickvals,
+            "ticktext": project_ticktext,
+            "showgrid": False,
+        }
     )
     return figure
 
@@ -436,22 +470,28 @@ def build_npv_projection_frame(
     selected_candidate_keys: list[str] | tuple[str, ...],
     *,
     lang: str = "es",
+    base_year: int | None = None,
 ) -> pd.DataFrame:
     if scenario_record.scan_result is None or scenario_record.dirty:
-        return pd.DataFrame(columns=["design_label", "candidate_key", "Año_mes", "NPV_COP"])
+        return pd.DataFrame(columns=["design_label", "candidate_key", "Año_mes", "NPV_COP", "month_index", "calendar_year", "project_year"])
     selected_frame = _selected_lookup_frame(scenario_record, selected_candidate_keys, lang=lang)
     rows: list[dict[str, Any]] = []
     for candidate_key in selected_candidate_keys:
         if candidate_key not in selected_frame.index:
             continue
         detail = scenario_record.scan_result.candidate_details[candidate_key]
-        monthly = detail["monthly"]
-        for _, row in monthly.iterrows():
+        monthly = detail["monthly"].reset_index(drop=True)
+        timeline = build_project_timeline(len(monthly), base_year=base_year)
+        for index, row in monthly.iterrows():
+            timeline_row = timeline.iloc[index] if not timeline.empty else None
             rows.append(
                 {
                     "design_label": selected_frame.loc[candidate_key, "design_label"],
                     "candidate_key": candidate_key,
                     "Año_mes": str(row["Año_mes"]),
+                    "month_index": int(timeline_row["month_index"]) if timeline_row is not None else (index + 1),
+                    "calendar_year": int(timeline_row["calendar_year"]) if timeline_row is not None else None,
+                    "project_year": int(timeline_row["project_year"]) if timeline_row is not None else None,
                     "NPV_COP": float(row["NPV_COP"]),
                     "kWp": float(detail["kWp"]),
                     "panel_count": int(selected_frame.loc[candidate_key, "panel_count"]),
@@ -647,17 +687,31 @@ def build_npv_projection_figure(
     *,
     lang: str = "es",
     empty_message: str,
+    base_year: int | None = None,
 ) -> go.Figure:
     if frame.empty:
         return _empty_figure(tr("compare.figure.npv_projection", lang), empty_message)
+    display = frame.copy()
+    if "month_index" not in display.columns or "calendar_year" not in display.columns or "project_year" not in display.columns:
+        month_numbers = pd.to_numeric(display.get("Año_mes"), errors="coerce")
+        horizon_months = int(month_numbers.max()) if month_numbers.notna().any() else 0
+        timeline = build_project_timeline(horizon_months, base_year=base_year)
+        if not timeline.empty and horizon_months > 0:
+            display = display.copy()
+            display["_month_number"] = month_numbers.astype("Int64")
+            timeline = timeline.rename(columns={"month_index": "_month_number"})
+            display = display.merge(timeline, on="_month_number", how="left").drop(columns="_month_number")
+        elif "month_index" not in display.columns:
+            display = display.copy()
+            display["month_index"] = month_numbers.fillna(pd.Series(range(1, len(display) + 1), index=display.index))
     figure = px.line(
-        frame,
-        x="Año_mes",
+        display,
+        x="month_index",
         y="NPV_COP",
         color="design_label",
         template="plotly_white",
         title=tr("compare.figure.npv_projection", lang),
-        custom_data=["candidate_key", "kWp", "panel_count", "battery", "inverter_name"],
+        custom_data=["candidate_key", "kWp", "panel_count", "battery", "inverter_name", "calendar_year", "project_year", "month_index"],
     )
     figure.update_traces(
         hovertemplate=(
@@ -672,11 +726,23 @@ def build_npv_projection_figure(
             + ": %{customdata[3]}<br>"
             + ("Inversor" if lang == "es" else "Inverter")
             + ": %{customdata[4]}<br>"
+            + tr("timeline.hover.calendar_year", lang)
+            + ": %{customdata[5]:.0f}<br>"
+            + tr("timeline.hover.project_year", lang)
+            + ": "
+            + tr("timeline.project_year", lang, year="%{customdata[6]:.0f}")
+            + "<br>"
+            + tr("timeline.hover.project_month", lang)
+            + ": %{customdata[7]:.0f}<br>"
             + "VPN: %{y:,.0f}<extra></extra>"
         )
     )
+    if {"month_index", "calendar_year", "project_year"}.issubset(display.columns):
+        timeline = display[["month_index", "calendar_year", "project_year"]].drop_duplicates().copy()
+        timeline["is_year_start"] = ((timeline["month_index"] - 1) % 12 == 0)
+        _apply_project_time_axes(figure, timeline, lang=lang)
     figure.update_yaxes(title_text="VPN [COP]" if lang == "es" else "NPV [COP]", tickformat=",.0f")
-    figure.update_xaxes(title_text=tr("compare.axis.month", lang))
+    figure.update_layout(hovermode="x unified")
     return figure
 
 

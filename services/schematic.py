@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from pv_product.hardware import string_checks
 
 from .i18n import tr
+from .runtime_paths import assets_dir
 from .types import ScenarioRecord
 
-ASSETS_ICON_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
 ICON_ROLE_MAP = {
     "pv": "pv",
     "inverter": "inverter",
@@ -102,7 +101,7 @@ def resolve_schematic_icon_url(icon_role: str | None) -> str | None:
     if not icon_role:
         return None
     filename = f"{icon_role}.svg"
-    if not (ASSETS_ICON_DIR / filename).exists():
+    if not (assets_dir() / "icons" / filename).exists():
         return None
     return f"/assets/icons/{filename}"
 
