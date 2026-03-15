@@ -2,8 +2,10 @@
 
 from pathlib import Path
 
+# spec_path = Path(SPECPATH).resolve()
+# project_root = spec_path.parent
+project_root = Path(SPECPATH).resolve()
 
-project_root = Path(__file__).resolve().parent
 
 datas = [
     (str(project_root / "assets"), "assets"),
