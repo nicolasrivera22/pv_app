@@ -10,7 +10,7 @@ from typing import Any
 import urllib.error
 import urllib.request
 
-from .runtime_paths import is_frozen_runtime, runtime_cache_root
+from .runtime_paths import internal_runtime_root
 
 
 APP_NAME = "PVWorkbench"
@@ -50,11 +50,7 @@ class StartupLock:
 
 
 def desktop_runtime_dir() -> Path:
-    local_appdata = os.environ.get("LOCALAPPDATA")
-    if is_frozen_runtime() and local_appdata:
-        root = Path(local_appdata) / APP_NAME
-    else:
-        root = runtime_cache_root() / "desktop"
+    root = internal_runtime_root()
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve()
 

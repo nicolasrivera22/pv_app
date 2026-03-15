@@ -15,8 +15,14 @@ from services.runtime_paths import (
     bundled_quick_guide_path,
     bundled_workbook_path,
     default_results_root,
+    internal_app_root,
+    internal_results_root,
+    internal_runtime_root,
+    legacy_packaged_root,
     pages_dir,
+    projects_root,
     resource_root,
+    runtime_cache_root,
     user_root,
 )
 
@@ -60,18 +66,27 @@ def test_runtime_paths_resolve_to_repo_root_in_source_mode() -> None:
 def test_runtime_paths_use_frozen_resource_and_user_roots(tmp_path, monkeypatch) -> None:
     resource_dir = tmp_path / "bundle"
     user_dir = tmp_path / "dist"
+    local_appdata = tmp_path / "LocalAppData"
     resource_dir.mkdir()
     user_dir.mkdir()
+    local_appdata.mkdir()
 
     monkeypatch.setattr("services.runtime_paths.sys.frozen", True, raising=False)
     monkeypatch.setattr("services.runtime_paths.sys._MEIPASS", str(resource_dir), raising=False)
     monkeypatch.setattr("services.runtime_paths.sys.executable", str(user_dir / "PVWorkbench.exe"), raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(local_appdata))
 
     assert resource_root() == resource_dir.resolve()
-    assert user_root() == user_dir.resolve()
+    assert legacy_packaged_root() == user_dir.resolve()
+    assert internal_app_root() == (local_appdata / "PVWorkbench").resolve()
+    assert user_root() == (local_appdata / "PVWorkbench").resolve()
+    assert projects_root() == (local_appdata / "PVWorkbench" / "projects").resolve()
+    assert runtime_cache_root() == (local_appdata / "PVWorkbench" / "cache").resolve()
+    assert internal_runtime_root() == (local_appdata / "PVWorkbench" / "runtime").resolve()
     assert bundled_workbook_path() == (resource_dir / "PV_inputs.xlsx").resolve()
     assert bundled_quick_guide_path() == (resource_dir / "PVWorkbench_Guia_Rapida.html").resolve()
-    assert default_results_root() == (user_dir / "Resultados").resolve()
+    assert internal_results_root() == (local_appdata / "PVWorkbench" / "results").resolve()
+    assert default_results_root() == (local_appdata / "PVWorkbench" / "results").resolve()
     assert default_results_root().exists()
 
 

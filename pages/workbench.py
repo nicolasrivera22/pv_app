@@ -30,6 +30,7 @@ from services import (
     collect_config_updates,
     create_scenario_record,
     default_schematic_inspector,
+    internal_results_root,
     default_scenario_name,
     delete_scenario,
     demand_profile_visibility,
@@ -989,7 +990,7 @@ def export_active_artifacts(n_clicks, session_payload, language_value):
     _, state, active = _session_with_scan(session_payload, lang)
     if active is None or active.scan_result is None or active.dirty:
         raise PreventUpdate
-    output_root = project_exports_root(state.project_slug) if state.project_slug else Path("Resultados")
+    output_root = project_exports_root(state.project_slug) if state.project_slug else internal_results_root()
     paths = export_deterministic_artifacts(active, output_root=output_root)
     publish_result = publish_export_artifacts(
         paths,

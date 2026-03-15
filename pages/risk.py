@@ -21,6 +21,7 @@ from services import (
     clear_missing_risk_result_payload,
     export_risk_artifacts,
     get_risk_result,
+    internal_results_root,
     open_export_folder,
     publish_export_artifacts,
     project_exports_root,
@@ -519,7 +520,7 @@ def export_risk_result_artifacts(n_clicks, result_payload, session_payload, lang
     if scenario is None:
         return tr("risk.error.scenario_unavailable", lang), ""
     output_root = project_exports_root(state.project_slug) if state.project_slug else None
-    paths = export_risk_artifacts(scenario, result, output_root=output_root or Path("Resultados"))
+    paths = export_risk_artifacts(scenario, result, output_root=output_root or internal_results_root())
     publish_result = publish_export_artifacts(
         paths,
         project_slug=state.project_slug,

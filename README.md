@@ -6,11 +6,11 @@ The app is built around a workbook-driven contract (`PV_inputs.xlsx`) and suppor
 
 - deterministic scenario analysis and candidate exploration
 - scenario editing from the UI
-- project save/open workflows under `proyectos/`
+- project save/open workflows under `proyectos/` in source mode and `%LOCALAPPDATA%/PVWorkbench/projects/` in packaged Windows mode
 - design comparison across deterministic scenarios
 - Monte Carlo risk analysis for a selected deterministic candidate
 - visual deep-dive outputs, including an interactive schematic/unifilar view
-- explicit artifact export to `Resultados/`
+- explicit internal artifact staging under `Resultados/` in source mode and `%LOCALAPPDATA%/PVWorkbench/results/` in packaged Windows mode
 
 This repository is currently optimized for **local use and desktop packaging**, not multi-user deployment.
 
@@ -48,6 +48,8 @@ From the Workbench you can:
 - reopen a previously saved project
 
 Each saved project stores canonical input tables per scenario plus project metadata.
+
+In packaged Windows mode, writable internal app state is stored under `%LOCALAPPDATA%/PVWorkbench/` while user-facing published exports remain under `%USERPROFILE%/Documents/PVWorkbench Exports/`.
 
 ### 2. Edit a scenario
 
@@ -89,8 +91,17 @@ The Risk page runs Monte Carlo analysis for a selected deterministic candidate u
 - `components/` — reusable UI blocks
 - `services/` — I/O, persistence, runtime paths, caching, deterministic execution, risk execution, view shaping, i18n, and exports
 - `pv_product/` — core deterministic engineering/financial model
-- `proyectos/` — saved local workspaces
-- `Resultados/` — explicit exports and legacy regression artifacts
+- `proyectos/` — saved local workspaces in source mode
+- `Resultados/` — explicit internal export staging and legacy regression artifacts in source mode
+
+For packaged Windows mode:
+
+- internal app state lives under `%LOCALAPPDATA%/PVWorkbench/`
+- projects live under `%LOCALAPPDATA%/PVWorkbench/projects/`
+- runtime files live under `%LOCALAPPDATA%/PVWorkbench/runtime/`
+- cache lives under `%LOCALAPPDATA%/PVWorkbench/cache/`
+- internal unbound export staging lives under `%LOCALAPPDATA%/PVWorkbench/results/`
+- user-facing published exports live under `%USERPROFILE%/Documents/PVWorkbench Exports/`
 
 ## Run from source
 

@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .io_excel import TABLE_FILE_MAP, load_bundle_from_tables
-from .runtime_paths import project_exports_root, project_inputs_root, project_root, projects_root
+from .runtime_paths import legacy_packaged_root, project_exports_root, project_inputs_root, project_root, projects_root
 from .scenario_session import create_scenario_record
 from .types import LoadedConfigBundle, ProjectManifest, ProjectScenarioManifest, ScenarioRecord, ScenarioSessionState
 
@@ -20,6 +20,32 @@ def _slugify(value: str) -> str:
 
 def _manifest_path(slug: str) -> Path:
     return project_root(slug) / "project.json"
+
+
+def _read_manifest(path: Path) -> ProjectManifest:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return ProjectManifest.from_payload(payload)
+
+
+def _current_manifest_path(slug: str) -> Path:
+    return (projects_root() / slug / "project.json").resolve()
+
+
+def _legacy_manifest_path(slug: str) -> Path | None:
+    legacy_root = legacy_packaged_root()
+    if legacy_root is None:
+        return None
+    return (legacy_root / "proyectos" / slug / "project.json").resolve()
+
+
+def _resolve_manifest_path_for_open(slug: str) -> Path:
+    current = _current_manifest_path(slug)
+    if current.exists():
+        return current
+    legacy = _legacy_manifest_path(slug)
+    if legacy is not None and legacy.exists():
+        return legacy
+    return current
 
 
 def _scenario_input_root(slug: str, scenario_id: str) -> Path:
@@ -110,15 +136,16 @@ def save_project_as(
 
 
 def read_project_manifest(slug: str) -> ProjectManifest:
-    payload = json.loads(_manifest_path(slug).read_text(encoding="utf-8"))
-    return ProjectManifest.from_payload(payload)
+    return _read_manifest(_manifest_path(slug))
 
 
 def open_project(slug: str) -> ScenarioSessionState:
-    manifest = read_project_manifest(slug)
+    manifest_path = _resolve_manifest_path_for_open(slug)
+    manifest = _read_manifest(manifest_path)
     scenarios: list[ScenarioRecord] = []
+    project_base = manifest_path.parent
     for item in manifest.scenarios:
-        table_root = project_inputs_root(slug) / item.scenario_id
+        table_root = project_base / "inputs" / item.scenario_id
         bundle = load_project_bundle_from_tables(table_root, source_name=item.source_name)
         record = create_scenario_record(item.name, bundle, source_name=item.source_name)
         scenarios.append(
