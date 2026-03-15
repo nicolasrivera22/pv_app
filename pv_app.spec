@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 # spec_path = Path(SPECPATH).resolve()
 # project_root = spec_path.parent
@@ -16,7 +17,7 @@ datas = [
     (str(project_root / "DEVELOPER_NOTES.md"), "."),
     (str(project_root / "GUIA_USUARIO.md"), "."),
     (str(project_root / "PVWorkbench_Guia_Rapida.html"), "."),
-]
+] + collect_data_files("dash_cytoscape")
 
 hiddenimports = [
     "pages.workbench",
