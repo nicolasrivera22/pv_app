@@ -7,7 +7,15 @@ from app import create_app
 import desktop_launcher
 import pytest
 from services import io_excel
-from services.runtime_paths import assets_dir, bundled_workbook_path, default_results_root, pages_dir, resource_root, user_root
+from services.runtime_paths import (
+    assets_dir,
+    bundled_quick_guide_path,
+    bundled_workbook_path,
+    default_results_root,
+    pages_dir,
+    resource_root,
+    user_root,
+)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,6 +27,7 @@ def test_runtime_paths_resolve_to_repo_root_in_source_mode() -> None:
     assert assets_dir() == ROOT / "assets"
     assert pages_dir() == ROOT / "pages"
     assert bundled_workbook_path() == ROOT / "PV_inputs.xlsx"
+    assert bundled_quick_guide_path() == ROOT / "PVWorkbench_Guia_Rapida.html"
 
 
 def test_runtime_paths_use_frozen_resource_and_user_roots(tmp_path, monkeypatch) -> None:
@@ -34,6 +43,7 @@ def test_runtime_paths_use_frozen_resource_and_user_roots(tmp_path, monkeypatch)
     assert resource_root() == resource_dir.resolve()
     assert user_root() == user_dir.resolve()
     assert bundled_workbook_path() == (resource_dir / "PV_inputs.xlsx").resolve()
+    assert bundled_quick_guide_path() == (resource_dir / "PVWorkbench_Guia_Rapida.html").resolve()
     assert default_results_root() == (user_dir / "Resultados").resolve()
     assert default_results_root().exists()
 
@@ -53,9 +63,12 @@ def test_create_app_uses_explicit_runtime_asset_and_pages_folders_and_healthz() 
     client = app.server.test_client()
 
     response = client.get("/healthz")
+    help_response = client.get("/help/guia-rapida")
 
     assert response.status_code == 200
     assert response.get_json() == {"status": "ok"}
+    assert help_response.status_code == 200
+    assert "PVWorkbench — Guía rápida" in help_response.get_data(as_text=True)
     assert Path(app.config.assets_folder) == assets_dir()
     assert Path(app.pages_folder) == pages_dir()
 
@@ -116,6 +129,8 @@ def test_pyinstaller_spec_includes_launcher_assets_pages_and_workbook() -> None:
     assert '"assets"' in spec
     assert '"pages"' in spec
     assert '"PV_inputs.xlsx"' in spec
+    assert '"PVWorkbench_Guia_Rapida.html"' in spec
     assert '"pages.workbench"' in spec
     assert '"pages.compare"' in spec
     assert '"pages.risk"' in spec
+    assert '"pages.help"' in spec

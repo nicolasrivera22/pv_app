@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dash import Dash, Input, Output, callback, dcc, html, page_container
+from flask import send_file
 
 from services.i18n import tr
-from services.runtime_paths import assets_dir, configure_runtime_environment, pages_dir
+from services.runtime_paths import assets_dir, bundled_quick_guide_path, configure_runtime_environment, pages_dir
 from services.session_state import bootstrap_client_session
 
 
@@ -23,6 +24,13 @@ def create_app() -> Dash:
     @app.server.route("/healthz")
     def healthz():
         return {"status": "ok"}, 200
+
+    @app.server.route("/help/guia-rapida")
+    def quick_guide():
+        guide_path = bundled_quick_guide_path()
+        if not guide_path.exists():
+            return tr("help.missing", "es"), 404
+        return send_file(guide_path, mimetype="text/html")
 
     def _layout():
         client_state = bootstrap_client_session(language="es")
@@ -68,6 +76,7 @@ def create_app() -> Dash:
                                         dcc.Link(html.Span(tr("nav.workbench", "es"), id="nav-workbench-label"), href="/", className="nav-link"),
                                         dcc.Link(html.Span(tr("nav.compare", "es"), id="nav-compare-label"), href="/compare", className="nav-link"),
                                         dcc.Link(html.Span(tr("nav.risk", "es"), id="nav-risk-label"), href="/risk", className="nav-link"),
+                                        dcc.Link(html.Span(tr("nav.help", "es"), id="nav-help-label"), href="/help", className="nav-link"),
                                     ],
                                 ),
                             ],
@@ -166,6 +175,8 @@ def create_app() -> Dash:
                 .legend-line { width: 54px; height: 0; border-top: 4px solid #64748b; color: transparent; overflow: hidden; }
                 .legend-connection-ac { border-top-color: #2563eb; }
                 .legend-connection-dc { border-top-color: #7c3aed; }
+                .help-frame { width: 100%; min-height: 72vh; height: 72vh; border: none; border-radius: 18px; background: white; }
+                .help-empty { padding: 1rem 1.1rem; border-radius: 16px; background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
                 .inspector-body { display: grid; gap: 0.75rem; }
                 .inspector-header { display: flex; align-items: center; gap: 0.8rem; }
                 .inspector-header-copy { min-width: 0; display: grid; gap: 0.25rem; }
@@ -210,6 +221,7 @@ server = app.server
     Output("nav-workbench-label", "children"),
     Output("nav-compare-label", "children"),
     Output("nav-risk-label", "children"),
+    Output("nav-help-label", "children"),
     Input("language-selector", "value"),
 )
 def translate_shell(language_value: str):
@@ -221,6 +233,7 @@ def translate_shell(language_value: str):
         tr("nav.workbench", lang),
         tr("nav.compare", lang),
         tr("nav.risk", lang),
+        tr("nav.help", lang),
     )
 
 

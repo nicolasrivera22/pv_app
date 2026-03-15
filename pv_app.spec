@@ -4,15 +4,23 @@ from pathlib import Path
 
 
 project_root = Path(__file__).resolve().parent
+
 datas = [
     (str(project_root / "assets"), "assets"),
     (str(project_root / "pages"), "pages"),
     (str(project_root / "PV_inputs.xlsx"), "."),
+    # Optional documentation bundle for trial distributions
+    (str(project_root / "README.md"), "."),
+    (str(project_root / "DEVELOPER_NOTES.md"), "."),
+    (str(project_root / "GUIA_USUARIO.md"), "."),
+    (str(project_root / "PVWorkbench_Guia_Rapida.html"), "."),
 ]
+
 hiddenimports = [
     "pages.workbench",
     "pages.compare",
     "pages.risk",
+    "pages.help",
 ]
 
 

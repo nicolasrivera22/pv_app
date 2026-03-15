@@ -1,180 +1,98 @@
-# PV Deterministic Workbench
+# PVWorkbench
 
-This repository now provides a deterministic Dash workbench for PV sizing and financial analysis plus a usable Monte Carlo risk page. Phase 1 established the service layer and single-scenario MVP, phase 1.1 hardened validation and regression behavior, phase 2A turned the app into a multi-scenario deterministic analysis tool, phase 2B.1 added the reproducible Monte Carlo service layer, phase 2B.2 added the Dash risk UI, and phase 2B.3 refined the app into a Spanish-first, workbook-driven product.
+PVWorkbench is a Spanish-first local desktop and browser-based application for photovoltaic sizing, deterministic design exploration, and project-level financial analysis.
 
-## What the current foundation adds
+The app is built around a workbook-driven contract (`PV_inputs.xlsx`) and supports:
 
-- Thin browser session state:
-  - the Dash `scenario-session-store` now uses session storage
-  - the browser payload keeps only lightweight metadata such as `session_id`, active scenario id, comparison selections, selected candidate keys, project binding, dirty flag, language, and a revision counter
-  - full scenario bundles and heavy deterministic results are kept server-side in a bounded in-process registry
-- Session lifecycle behavior:
-  - a refresh keeps the current browser-tab session
-  - a new tab starts a new session
-  - if the browser still has a project-bound session id but the server registry has already pruned it, the app reopens that saved project into a replacement session automatically
-- Deterministic scan caching:
-  - deterministic scans are fingerprinted from effective deterministic inputs only
-  - the fingerprint includes an explicit `DETERMINISTIC_CACHE_SCHEMA_VERSION` salt so cache invalidation is clean when model logic changes
-  - repeated scans with the same effective inputs reuse cached deterministic results transparently
-- Project persistence under `proyectos/`:
-  - projects are whole-session workspaces, not single-scenario files
-  - workbook-style CSV tables are the canonical saved input source of truth
-  - `project.json` stores metadata only and does not compete with the saved tables as an authoritative input source
-- Runtime workspace and exports:
-  - each saved project gets its own `exports/Resultados/` folder
-  - unbound sessions still default to the legacy top-level `Resultados/` folder for source/dev compatibility
-  - runtime cache paths are prepared early and `MPLCONFIGDIR` is forced into a writable runtime cache folder for source runs, packaged runs, and worker processes
-- Controlled multiprocessing:
-  - only deterministic candidate evaluation uses multiprocessing
-  - the executor uses top-level picklable worker functions and a spawn-safe `ProcessPoolExecutor`
-  - serial execution remains the baseline and automatic fallback path
+- deterministic scenario analysis and candidate exploration
+- scenario editing from the UI
+- project save/open workflows under `proyectos/`
+- design comparison across deterministic scenarios
+- Monte Carlo risk analysis for a selected deterministic candidate
+- visual deep-dive outputs, including an interactive schematic/unifilar view
+- explicit artifact export to `Resultados/`
 
-## What phase 2C adds
+This repository is currently optimized for **local use and desktop packaging**, not multi-user deployment.
 
-- The Workbench now includes an interactive unifilar-style schematic for the currently selected deterministic candidate.
-- The diagram is built from a dedicated service-layer helper in `services/schematic.py`, not from callback-local logic.
-- It shows, at minimum:
-  - inferred PV string groups / MPPT blocks
-  - inverter
-  - optional battery
-  - house / load
-  - grid
-- Stringing is inferred without any prime-number exclusion rule:
-  - the service first searches for an exact equal-length layout that uses all modules and respects the existing inverter/string constraints
-  - if no exact equal-length layout can be derived from the stored candidate data, the app falls back to a clearly labeled representative layout
-- The diagram is Spanish-first and explicitly labeled as schematic / representative:
-  - it is meant to explain the selected design visually
-  - it is not a certified installation drawing
-- Schematic export is intentionally deferred:
-  - the existing artifact export flow remains unchanged
-  - this phase focuses on the interactive Workbench visualization only
+## Current product status
 
-## What phase 2B.3 adds
+The current iteration is already suitable for a real-world Windows trial with a non-developer user, provided it is tested as a local one-folder build.
 
-- Spanish is now the default UI language.
-- The lightweight translation layer now covers the shell, workbench, comparison, validation, exports, and risk-page copy.
-- The assumptions editor is now driven by metadata from the workbook `Config` table:
-  - fields keep workbook order
-  - fields are grouped by `Grupo`
-  - help text comes from `Descripción`, with small curated overrides where needed
-  - units from `Unidad` are shown in the editor
-  - a curated basic view is shown first, with advanced parameters still available
-- The app now surfaces more workbook flexibility from `Perfiles`:
-  - `Month_Demand_Profile`
-  - `SUN_HSP_PROFILE`
-  - `Precios_kWp_relativos`
-  - `Precios_kWp_relativos_Otros`
-  - mode-aware demand-profile editing for:
-    - `Demand_Profile`
-    - `Demand_Profile_General`
-    - `Demand_Profile_Weights`
-- UI-facing metric aliases, formatting, and tooltips are centralized in `services/ui_schema.py`.
-- Deterministic runs now show explicit loading feedback in the workbench.
-- The risk payback histogram highlights the central 80% finite-payback band (`P10-P90`).
-- Explicit artifact export is available again:
-  - deterministic artifacts can be written into `Resultados/`
-  - risk artifacts can be written into `Resultados/`
-  - exports are additive only; the app never wipes output folders automatically
+What is already in place:
 
-## What phase 2A adds
+- server-side session/state architecture to keep browser payloads light
+- deterministic cache keyed by effective deterministic inputs
+- project persistence using canonical CSV input tables
+- explicit deterministic and risk exports
+- Spanish-first UI with lightweight i18n support
+- desktop launcher with browser auto-open and health-check handshake
+- PyInstaller one-folder packaging path
 
-- Session-scoped scenario management:
-  - load scenarios from Excel uploads
-  - load the bundled example
-  - duplicate, rename, delete, and switch active scenarios
-  - keep multiple deterministic scenarios available in one browser session
-- In-app deterministic editing:
-  - editable assumptions panel for key design and pricing controls
-  - editable inverter and battery catalogs with row add/delete support
-  - friendly validation messages carried through the service layer
-- Better deterministic exploration:
-  - selectable feasible-candidate table with filtering and sorting
-  - richer Plotly NPV hover data and linked candidate selection
-  - KPI cards, monthly energy balance, and cumulative cash flow for the selected candidate
-- Scenario comparison:
-  - compare completed deterministic scenarios side by side
-  - grouped KPI chart across scenarios
-  - overlaid NPV-vs-kWp curves
-- Explicit deterministic export:
-  - scenario workbook export from the workbench
-  - comparison workbook export from the comparison page
+What is intentionally *not* in scope yet:
 
-## What phase 2B.1 adds
+- multi-user web deployment
+- background job orchestration
+- installer / MSI packaging
+- one-file executable packaging
+- full enterprise-grade persistence or authentication
 
-- A dedicated stochastic service layer:
-  - `run_monte_carlo(...)`
-  - `summarize_monte_carlo(...)`
-  - `prepare_risk_views(...)`
-- Reproducible fixed-candidate Monte Carlo with explicit `seed=0` default behavior.
-- Structured stochastic result objects with:
-  - metadata
-  - compact distribution summaries
-  - risk probabilities
-  - histogram / ECDF / percentile-table view data
-  - optional raw per-draw samples
-- Monte Carlo perturbation of the existing supported uncertainty inputs only:
-  - `mc_PR_std`
-  - `mc_buy_std`
-  - `mc_sell_std`
-  - `mc_demand_std`
-- Payback semantics for stochastic runs:
-  - `payback_years` stays `NaN` when payback is not reached within the horizon
-  - payback percentiles are computed over finite cases only
-  - `probability_payback_within_horizon` is reported separately
-- A documented soft warning threshold for large runs:
-  - `MONTE_CARLO_WARNING_THRESHOLD = 5000`
-- large runs are allowed, but the result carries a warning
+## Main workflows
 
-## What phase 2B.2 adds
+### 1. Load or start a project
 
-- A dedicated `Risk` page in the Dash app for fixed-candidate Monte Carlo analysis.
-- Risk-page controls for:
-  - selecting a completed deterministic scenario
-  - selecting a feasible deterministic candidate
-  - choosing simulation count
-  - setting an explicit seed with default `0`
-  - optionally retaining raw samples in server memory only
-- Interactive Monte Carlo outputs built from compact stochastic summaries:
-  - summary KPI cards
-  - NPV histogram and ECDF
-  - payback histogram and ECDF
-  - percentile summary table
-  - run metadata and uncertainty-knob display
-- Lightweight server-side result handling:
-  - Monte Carlo results are kept in an in-process registry keyed by a lightweight `result_id`
-  - browser state stores only compact metadata and the `result_id`
-  - raw samples never go into browser-side `dcc.Store`
-- Lightweight bilingual UI support:
-  - English and Spanish translation dictionaries via `services/i18n.py`
-  - shared shell labels plus all new Risk page labels/messages use the translation helper
+From the Workbench you can:
 
-## Spanish-first UI notes
+- load the bundled example workbook
+- upload a workbook
+- save a project under `proyectos/`
+- reopen a previously saved project
 
-- The app now defaults to Spanish (`es`) in the shell language selector.
-- Translation fallback order is:
-  - selected language
-  - Spanish
-  - English
-  - raw key
-- This keeps new UI coverage maintainable without introducing a heavy i18n framework.
+Each saved project stores canonical input tables per scenario plus project metadata.
 
-## Risk UI notes
+### 2. Edit a scenario
 
-- Phase 2B.2 still supports `fixed_candidate` mode only. `optimal_per_draw` is not exposed in the UI yet.
-- The selected seed is visible in the UI and the same seed with the same inputs reproduces the same Monte Carlo result.
-- Payback values that are not reached within the project horizon remain `NaN`.
-  - Payback percentiles are computed over finite cases only.
-  - `probability_payback_within_horizon` is shown separately.
-- The server-side Monte Carlo registry is intentionally simple for this phase:
-  - it is in-process only
-  - it does not survive app restarts
-  - it is not shared across multiple workers
-  - it is bounded and prunes older results
-- The payback histogram highlight band represents the central 80% finite-payback range:
-  - left bound = `P10`
-  - right bound = `P90`
+You can adjust:
 
-## Run the app
+- assumptions / configuration inputs
+- inverter catalogue rows
+- battery catalogue rows
+- profile tables exposed through the workbook contract
+
+After editing, apply changes and rerun the deterministic scan.
+
+### 3. Run deterministic exploration
+
+The Workbench computes feasible candidates and surfaces:
+
+- NPV vs kWp exploration
+- candidate table
+- selected-candidate KPI summary
+- monthly balance and cumulative discounted cash flow
+- deep-dive visual outputs for the selected candidate
+
+### 4. Compare scenarios
+
+The Compare page lets you contrast completed deterministic scenarios side by side.
+
+### 5. Run risk analysis
+
+The Risk page runs Monte Carlo analysis for a selected deterministic candidate using the current scenario inputs.
+
+## Repository structure
+
+- `app.py` — Dash shell and shared stores
+- `desktop_launcher.py` — local launcher used by the packaged desktop app
+- `main.py` — legacy CLI path
+- `pages/workbench.py` — deterministic scenario workflow
+- `pages/compare.py` — deterministic comparison workflow
+- `pages/risk.py` — Monte Carlo risk workflow
+- `components/` — reusable UI blocks
+- `services/` — I/O, persistence, runtime paths, caching, deterministic execution, risk execution, view shaping, i18n, and exports
+- `pv_product/` — core deterministic engineering/financial model
+- `proyectos/` — saved local workspaces
+- `Resultados/` — explicit exports and legacy regression artifacts
+
+## Run from source
 
 ```bash
 python3 -m venv .venv
@@ -183,34 +101,17 @@ pip install -r requirements.txt
 python desktop_launcher.py
 ```
 
-This launcher starts the local server and opens the default browser automatically when the app is ready.
-
-For development/debugging, the original Dash entrypoint remains available:
+For direct Dash development:
 
 ```bash
 python app.py
 ```
 
-## Desktop packaging
+## Windows packaging
 
-Phase 2C adds a Windows-first local packaging path using PyInstaller and a dedicated desktop launcher.
+The current supported packaging target is a **Windows one-folder build**.
 
-- Supported build target for this phase:
-  - one-folder distribution
-  - bundled `assets/`
-  - bundled `pages/`
-  - bundled `PV_inputs.xlsx`
-  - browser auto-open via `desktop_launcher.py`
-- Runtime path behavior:
-  - source mode writes explicit exports into `Resultados/` under the repo root when no project is bound
-  - project-bound sessions write exports into `proyectos/<slug>/exports/Resultados/`
-  - packaged mode keeps the same project/runtime folder logic beside the executable root
-  - the bundled example workbook is loaded from the packaged resource directory
-- The app still creates `Resultados/` and project export folders on demand; no precreated skeleton output folder is required.
-
-### Build the executable
-
-On Windows, from the repository root:
+Compile it with:
 
 ```bash
 python -m venv .venv
@@ -219,176 +120,57 @@ python -m pip install -r requirements.txt -r requirements-desktop.txt
 pyinstaller --clean --noconfirm pv_app.spec
 ```
 
-The packaged app is produced under `dist/PVWorkbench/`.
+The packaged output is created under:
 
-### Browser auto-open
-
-- The executable starts the local Dash server on `127.0.0.1`.
-- It prefers port `8050` and moves to the next free local port if needed.
-- The default browser opens only after the launcher confirms that `/healthz` is reachable.
-
-### Current limitations
-
-- This phase is Windows-first and one-folder only.
-- It does not yet add an installer, a one-file bundle, or tray/menu integration.
-- The packaged executable runs without a console window by default, so source runs remain the easier debugging path.
-
-## Run the legacy CLI path
-
-```bash
-python main.py
+```text
+dist/PVWorkbench/
 ```
 
-This still loads `PV_inputs.xlsx`, validates it, runs the deterministic scan, and prints a concise summary.
+## What to send after compiling
 
-## Tests
+Send the entire `dist/PVWorkbench/` folder, ideally zipped without rearranging its contents.
+
+Do **not** send only `PVWorkbench.exe`. The one-folder build depends on the bundled support files that live next to the executable.
+
+## Packaging notes
+
+The current `pv_app.spec` is already suitable for a first Windows trial build because it bundles:
+
+- `assets/`
+- `pages/`
+- `PV_inputs.xlsx`
+- the desktop launcher entrypoint
+- `README.md`
+- `DEVELOPER_NOTES.md`
+- `GUIA_USUARIO.md`
+- `PVWorkbench_Guia_Rapida.html`
+
+## Testing
 
 ```bash
 pytest
 ```
 
-## App structure
+## Recommended documents to ship with the executable
 
-- `app.py`: Dash shell, navigation, shared stores
-- `desktop_launcher.py`: local desktop-style launcher with browser auto-open
-- `pages/workbench.py`: deterministic scenario load/edit/run/explore/export flow
-- `pages/compare.py`: deterministic design comparison flow for the active scan
-- `pages/risk.py`: fixed-candidate Monte Carlo risk analysis flow
-- `components/`: reusable layout blocks for scenarios, assumptions, catalogs, validation, KPIs, and candidate exploration
-- `services/`: Excel I/O, config metadata extraction, validation, deterministic runner/executor/cache, project persistence, scenario-session state, server-side session registry, stochastic runner, server-side risk registry, display schema, exports, translation helper, and result shaping
+For the Windows trial, do not rely on the repository README alone.
 
-## Foundation architecture notes
+Recommended shipping set:
 
-### Server-side session state
+- `README.md` — repository-oriented overview and packaging notes
+- `DEVELOPER_NOTES.md` — internal architecture and maintenance notes
+- `GUIA_USUARIO.md` — short user-facing guide for the person testing the `.exe`
+- `PVWorkbench_Guia_Rapida.html` — quick-start help document bundled in the distribution and also exposed inside the app Help page
 
-- Heavy deterministic objects no longer live in browser-side stores:
-  - no full `LoadedConfigBundle`
-  - no full deterministic `ScanRunResult`
-  - no candidate-detail tables or monthly traces
-- The server-side `ScenarioStateRegistry` keeps full session/scenario data in-process and prunes old sessions by both LRU access and idle age.
-- The browser session payload is intentionally lightweight and serializable so normal navigation, refresh, and project reopen flows remain responsive.
+For an end user, the most relevant bundled documents are `GUIA_USUARIO.md` and `PVWorkbench_Guia_Rapida.html`.
 
-### Deterministic cache behavior
+## Known limitations
 
-- The deterministic cache key includes:
-  - `DETERMINISTIC_CACHE_SCHEMA_VERSION`
-  - normalized deterministic config with Monte Carlo-only fields zeroed
-  - inverter and battery catalogs
-  - demand, solar, month-factor, and pricing tables that materially affect the deterministic scan
-- The cache excludes:
-  - UI preferences
-  - project metadata
-  - source labels such as `source_name`
-  - stochastic-only inputs
-- The cache is local/in-process, bounded, and LRU-pruned.
-- A scan result reopened from project inputs is resolved lazily through the same cache/executor path; the project does not persist giant runtime blobs by default.
+- optimized for local/single-user use
+- in-process registries do not survive full process restart
+- packaged debugging is harder than source runs because the desktop executable hides the console by default
+- the economics/model assumptions are still intentionally conservative relative to a broader future redesign
 
-### Project workspace layout
+## License / usage note
 
-- Saved projects live under `proyectos/`:
-
-```text
-proyectos/<slug>/
-  project.json
-  inputs/<scenario_id>/
-    Config.csv
-    Demand_Profile.csv
-    Demand_Profile_General.csv
-    Demand_Profile_Weights.csv
-    Month_Demand_Profile.csv
-    SUN_HSP_PROFILE.csv
-    Precios_kWp_relativos.csv
-    Precios_kWp_relativos_Otros.csv
-    Inversor_Catalog.csv
-    Battery_Catalog.csv
-  exports/Resultados/
-```
-
-- The CSV tables above are the canonical saved project inputs.
-- `project.json` stores workspace metadata such as:
-  - display name and slug
-  - active scenario
-  - compare/design selections
-  - per-scenario names and selected candidate keys
-- Reopening a project rebuilds the editable bundles from the canonical CSV tables, restores metadata, and lazily rehydrates deterministic scans only when a page needs them.
-
-### Multiprocessing controls
-
-- Deterministic scans can evaluate candidate batches in multiple processes while preserving stable output ordering.
-- Worker functions are top-level and spawn-safe so the path remains compatible with Windows and future packaged execution.
-- `PV_SCAN_MAX_WORKERS=1` forces serial execution.
-- If process-pool startup or worker execution fails, the app falls back to the serial deterministic path automatically.
-
-## Workbook-driven editing notes
-
-- The assumptions board now reads the workbook-facing `Config` metadata directly and no longer depends on a narrow hardcoded field list.
-- The UI schema still applies curated overrides for:
-  - widget type
-  - display label
-  - help text when the workbook description is too technical
-  - basic vs advanced visibility
-- Most workbook controls are now surfaced either as direct config fields or as editable `Perfiles` tables.
-- Controls that remain intentionally out of the UI are limited to fields that are currently:
-  - internal/legacy implementation knobs not meant for normal operators
-  - redundant with already exposed controls
-  - unsafe to present casually without deeper workflow design
-- At the moment, the main intentionally deferred controls are the legacy low-level island/SoC iteration knobs that are present in `DEFAULT_CONFIG` but not part of the shipped workbook contract.
-
-## Explicit artifact export
-
-- Workbook export remains available from the app as before.
-- In addition, explicit artifact export now writes charts/files into `Resultados/`:
-  - deterministic export writes scenario-specific PNG/CSV/TXT artifacts
-  - risk export writes scenario-specific risk PNG/CSV/TXT artifacts
-- The export path is service-driven and opt-in.
-- The app does not delete or wipe existing contents inside `Resultados/`.
-
-## Stochastic service notes
-
-- Phase 2B.1 supports `fixed_candidate` mode only.
-- The stochastic path starts from a validated deterministic scenario and a resolved deterministic candidate.
-- Deterministic scans remain deterministic; Monte Carlo perturbations are applied only inside the stochastic runner.
-- By default, stochastic runs return compact summaries and chart-ready tables, not full raw sample payloads.
-- If you need per-draw samples for debugging or offline analysis, use `return_samples=True`.
-
-## Notes on the Excel contract
-
-- The bundled `PV_inputs.xlsx` remains the authoritative workbook contract for the deterministic app.
-- The loader supports the current Spanish workbook names and table names:
-  - `Config`
-  - `Perfiles`
-  - `Catalogos`
-- The loader normalizes known mismatches such as:
-  - `coupling` -> `bat_coupling`
-  - `Sí` / `No` boolean values
-  - profile mode strings like `Perfil Horario Relativo`
-- Missing sheets, tables, or required columns raise workbook-contract errors with actionable messages.
-- Invalid booleans and enum-like config values surface as validation errors instead of silently defaulting.
-
-## Costing semantics
-
-- `pricing_mode="variable"` uses the variable `COP/kWp` table as the base project price.
-- `pricing_mode="total"` uses `price_total_COP` as the base project price.
-- `include_var_others=True` adds the separate variable “others” table on top of the base `kWp` table.
-- `price_others_total` always adds fixed “other” project costs.
-- `include_hw_in_price=True` adds inverter and selected battery prices on top of the base project price.
-- `include_hw_in_price=False` assumes those hardware costs are already embedded in the base project price.
-
-## What remains deferred
-
-- `optimal_per_draw` stochastic support in the backend and UI
-- richer stochastic comparison workflows across scenarios and candidates
-- background jobs and multi-user persistence
-- scenario rejection-reason tracing for infeasible candidates
-- broader economics-model redesign
-- full removal of old matplotlib cross-check helpers
-- full-app localization beyond the current lightweight English/Spanish foundation
-
-## Known technical debt
-
-- Peak-ratio logic is still intentionally legacy-compatible. Representative-week aggregation and the current demand-seasonality interaction were not redesigned in this pass because changing them would alter the deterministic regression baseline.
-- The browser-side scenario store is in-memory only. That avoids storage quota issues, but scenarios do not survive a full browser refresh.
-- The preserved `Resultados` artifacts still serve as the legacy regression oracle for the shipped workbook.
-- The stochastic backend reuses the current monthly perturbation assumptions and representative-week simulator. It is suitable for phase 2B.1 risk summaries, but it does not yet model uncertainty in feasibility, hardware failures, or broader commercial assumptions.
-- The risk registry in phase 2B.2 is intentionally single-process and in-memory. It is appropriate for local analysis, not for multi-worker deployment.
-- Display labels and help text are now centralized, but a few older deterministic/risk internals still carry technical column names beneath the UI layer. Those should keep shrinking rather than being copied into callbacks.
+This repository is currently best treated as a local product/workbench in active development.
