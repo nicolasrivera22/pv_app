@@ -8,7 +8,7 @@ from .config_metadata import update_config_table_values
 from .i18n import tr
 from .io_excel import rebuild_config_bundle
 from .types import LoadedConfigBundle
-from .ui_schema import coerce_config_value
+from .ui_schema import coerce_config_value, parse_assumption_input_value
 
 
 def frame_from_rows(rows: list[dict] | None, columns: list[str]) -> pd.DataFrame:
@@ -29,7 +29,7 @@ def collect_config_updates(
         field_key = str(component_id.get("field", "")).strip()
         if not field_key:
             continue
-        updated[field_key] = coerce_config_value(field_key, value, base_config)
+        updated[field_key] = coerce_config_value(field_key, parse_assumption_input_value(field_key, value), base_config)
     return updated
 
 

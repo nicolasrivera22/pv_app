@@ -18,7 +18,7 @@ from pv_product.utils import build_7x24_from_excel
 from services import collect_config_updates, ensure_template, load_config_from_excel, load_example_config, run_scan, run_scenario
 from services.io_excel import WorkbookContractError, _normalize_config_value
 from services.result_views import build_kpis, resolve_selected_candidate_key, resolve_selected_candidate_key_for_scenario
-from services.ui_schema import coerce_config_value
+from services.ui_schema import coerce_config_value, display_assumption_value, parse_assumption_input_value
 from services.validation import validate_config
 
 
@@ -144,6 +144,29 @@ def test_collect_config_updates_preserves_falsey_battery_toggle_and_blank_text_f
     assert updated["battery_name"] == ""
 
 
+def test_collect_config_updates_scales_percentage_inputs_back_to_internal_fractions() -> None:
+    base_config = {
+        **load_example_config().config,
+        "discount_rate": 0.05,
+        "alpha_mix": 0.6,
+        "a_Voc_pct": -0.29,
+    }
+
+    updated = collect_config_updates(
+        [
+            {"field": "discount_rate"},
+            {"field": "alpha_mix"},
+            {"field": "a_Voc_pct"},
+        ],
+        [7.5, 80, -0.31],
+        base_config,
+    )
+
+    assert updated["discount_rate"] == pytest.approx(0.075)
+    assert updated["alpha_mix"] == pytest.approx(0.8)
+    assert updated["a_Voc_pct"] == pytest.approx(-0.31)
+
+
 def test_coerce_config_value_preserves_false_and_zero_and_treats_missing_values_as_missing() -> None:
     base_config = {
         "include_battery": True,
@@ -160,6 +183,16 @@ def test_coerce_config_value_preserves_false_and_zero_and_treats_missing_values_
     assert coerce_config_value("battery_name", np.nan, base_config) == ""
     assert coerce_config_value("years", np.nan, base_config) == 15
     assert coerce_config_value("price_total_COP", "", base_config) == 58_000_000.0
+
+
+def test_assumption_scaling_helpers_render_and_parse_percent_fields_centrally() -> None:
+    assert display_assumption_value("discount_rate", 0.05) == 5
+    assert parse_assumption_input_value("discount_rate", 7.5) == pytest.approx(0.075)
+    assert display_assumption_value("alpha_mix", 0.8) == 80
+    assert parse_assumption_input_value("alpha_mix", 80) == pytest.approx(0.8)
+    assert display_assumption_value("a_Voc_pct", -0.29) == pytest.approx(-0.29)
+    assert parse_assumption_input_value("a_Voc_pct", -0.29) == pytest.approx(-0.29)
+    assert display_assumption_value("limit_peak_ratio", 2.5) == pytest.approx(2.5)
 
 
 def test_normalize_config_value_converts_blank_text_config_fields_from_nan_to_empty_string() -> None:

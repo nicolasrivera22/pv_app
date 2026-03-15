@@ -21,6 +21,14 @@ class FieldUiSchema:
     help_es: str | None = None
     help_en: str | None = None
     options: tuple[tuple[str, Any], ...] = ()
+    display_format: str | None = None
+    precision: int = 0
+    input_step: float | int | None = None
+    suffix_es: str | None = None
+    suffix_en: str | None = None
+    ui_scale: float | None = None
+    min_value: float | int | None = None
+    max_value: float | int | None = None
 
 
 @dataclass(frozen=True)
@@ -34,9 +42,36 @@ class TableColumnUiSchema:
     type: str | None = None
 
 
+_YES_NO_OPTIONS = (("Sí", True), ("No", False))
+_PERCENT_PER_YEAR_ES = "%/año"
+_PERCENT_PER_YEAR_EN = "%/year"
+
+
 FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
-    "E_month_kWh": FieldUiSchema("number", "basic", "Demanda mensual", "Monthly demand"),
-    "alpha_mix": FieldUiSchema("number", "advanced", "Mezcla de carga diurna", "Daytime load mix"),
+    "E_month_kWh": FieldUiSchema(
+        "number",
+        "basic",
+        "Demanda mensual",
+        "Monthly demand",
+        display_format="energy",
+        precision=0,
+        input_step=1,
+        suffix_es="kWh/mes",
+        suffix_en="kWh/month",
+    ),
+    "alpha_mix": FieldUiSchema(
+        "number",
+        "advanced",
+        "Mezcla de carga diurna",
+        "Daytime load mix",
+        display_format="percent",
+        precision=1,
+        suffix_es="%",
+        suffix_en="%",
+        ui_scale=100.0,
+        min_value=0,
+        max_value=100,
+    ),
     "use_excel_profile": FieldUiSchema(
         "dropdown",
         "basic",
@@ -50,22 +85,173 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
             ("Perfil general", "perfil general"),
         ),
     ),
-    "PR": FieldUiSchema("number", "basic", "PR", "PR"),
-    "Tmin_C": FieldUiSchema("number", "advanced", "Temperatura mínima", "Minimum temperature"),
-    "P_mod_W": FieldUiSchema("number", "basic", "Potencia del módulo", "Module power"),
-    "Voc25": FieldUiSchema("number", "advanced", "Voc a 25 °C", "Voc at 25 °C"),
-    "Vmp25": FieldUiSchema("number", "advanced", "Vmp a 25 °C", "Vmp at 25 °C"),
-    "Isc": FieldUiSchema("number", "advanced", "Isc", "Isc"),
-    "a_Voc_pct": FieldUiSchema("number", "advanced", "Coef. térmico Voc", "Voc thermal coefficient"),
-    "ILR_min": FieldUiSchema("number", "advanced", "ILR mínimo", "Minimum ILR"),
-    "ILR_max": FieldUiSchema("number", "advanced", "ILR máximo", "Maximum ILR"),
-    "buy_tariff_COP_kWh": FieldUiSchema("number", "basic", "Tarifa de compra", "Buy tariff"),
-    "sell_tariff_COP_kWh": FieldUiSchema("number", "basic", "Tarifa de venta", "Sell tariff"),
-    "g_tar_buy": FieldUiSchema("number", "advanced", "Crecimiento tarifa compra", "Buy tariff growth"),
-    "g_tar_sell": FieldUiSchema("number", "advanced", "Crecimiento tarifa venta", "Sell tariff growth"),
-    "deg_rate": FieldUiSchema("number", "advanced", "Degradación anual", "Annual degradation"),
-    "discount_rate": FieldUiSchema("number", "basic", "Tasa de descuento", "Discount rate"),
-    "years": FieldUiSchema("number", "basic", "Horizonte (años)", "Project years"),
+    "PR": FieldUiSchema(
+        "number",
+        "basic",
+        "PR",
+        "PR",
+        display_format="percent",
+        precision=1,
+        suffix_es="%",
+        suffix_en="%",
+        ui_scale=100.0,
+        min_value=0,
+        max_value=100,
+    ),
+    "Tmin_C": FieldUiSchema(
+        "number",
+        "advanced",
+        "Temperatura mínima",
+        "Minimum temperature",
+        display_format="temperature",
+        precision=1,
+        suffix_es="°C",
+        suffix_en="°C",
+    ),
+    "P_mod_W": FieldUiSchema(
+        "number",
+        "basic",
+        "Potencia del módulo",
+        "Module power",
+        display_format="power_wp",
+        precision=0,
+        input_step=1,
+        suffix_es="Wp",
+        suffix_en="Wp",
+    ),
+    "Voc25": FieldUiSchema(
+        "number",
+        "advanced",
+        "Voc a 25 °C",
+        "Voc at 25 °C",
+        display_format="voltage",
+        precision=1,
+        suffix_es="V",
+        suffix_en="V",
+    ),
+    "Vmp25": FieldUiSchema(
+        "number",
+        "advanced",
+        "Vmp a 25 °C",
+        "Vmp at 25 °C",
+        display_format="voltage",
+        precision=1,
+        suffix_es="V",
+        suffix_en="V",
+    ),
+    "Isc": FieldUiSchema(
+        "number",
+        "advanced",
+        "Isc",
+        "Isc",
+        display_format="current",
+        precision=2,
+        suffix_es="A",
+        suffix_en="A",
+    ),
+    "a_Voc_pct": FieldUiSchema(
+        "number",
+        "advanced",
+        "Coef. térmico Voc",
+        "Voc thermal coefficient",
+        display_format="percent_per_degree",
+        precision=2,
+        suffix_es="%/°C",
+        suffix_en="%/°C",
+    ),
+    "ILR_min": FieldUiSchema(
+        "number",
+        "advanced",
+        "ILR mínimo",
+        "Minimum ILR",
+        display_format="ratio",
+        precision=2,
+    ),
+    "ILR_max": FieldUiSchema(
+        "number",
+        "advanced",
+        "ILR máximo",
+        "Maximum ILR",
+        display_format="ratio",
+        precision=2,
+    ),
+    "buy_tariff_COP_kWh": FieldUiSchema(
+        "number",
+        "basic",
+        "Tarifa de compra",
+        "Buy tariff",
+        display_format="currency_rate",
+        precision=0,
+        input_step=1,
+        suffix_es="COP/kWh",
+        suffix_en="COP/kWh",
+    ),
+    "sell_tariff_COP_kWh": FieldUiSchema(
+        "number",
+        "basic",
+        "Tarifa de venta",
+        "Sell tariff",
+        display_format="currency_rate",
+        precision=0,
+        input_step=1,
+        suffix_es="COP/kWh",
+        suffix_en="COP/kWh",
+    ),
+    "g_tar_buy": FieldUiSchema(
+        "number",
+        "advanced",
+        "Crecimiento tarifa compra",
+        "Buy tariff growth",
+        display_format="percent_rate",
+        precision=2,
+        suffix_es=_PERCENT_PER_YEAR_ES,
+        suffix_en=_PERCENT_PER_YEAR_EN,
+        ui_scale=100.0,
+    ),
+    "g_tar_sell": FieldUiSchema(
+        "number",
+        "advanced",
+        "Crecimiento tarifa venta",
+        "Sell tariff growth",
+        display_format="percent_rate",
+        precision=2,
+        suffix_es=_PERCENT_PER_YEAR_ES,
+        suffix_en=_PERCENT_PER_YEAR_EN,
+        ui_scale=100.0,
+    ),
+    "deg_rate": FieldUiSchema(
+        "number",
+        "advanced",
+        "Degradación anual",
+        "Annual degradation",
+        display_format="percent_rate",
+        precision=2,
+        suffix_es=_PERCENT_PER_YEAR_ES,
+        suffix_en=_PERCENT_PER_YEAR_EN,
+        ui_scale=100.0,
+    ),
+    "discount_rate": FieldUiSchema(
+        "number",
+        "basic",
+        "Tasa de descuento",
+        "Discount rate",
+        display_format="percent_rate",
+        precision=2,
+        suffix_es=_PERCENT_PER_YEAR_ES,
+        suffix_en=_PERCENT_PER_YEAR_EN,
+        ui_scale=100.0,
+    ),
+    "years": FieldUiSchema(
+        "number",
+        "basic",
+        "Horizonte (años)",
+        "Project years",
+        display_format="integer",
+        precision=0,
+        input_step=1,
+        suffix_es="años",
+        suffix_en="years",
+    ),
     "pricing_mode": FieldUiSchema(
         "dropdown",
         "basic",
@@ -75,7 +261,17 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "Choose whether the base cost is calculated from kWp pricing bands or from a fixed project total.",
         options=(("Variable", "variable"), ("Total", "total")),
     ),
-    "price_total_COP": FieldUiSchema("number", "advanced", "Precio total", "Total price"),
+    "price_total_COP": FieldUiSchema(
+        "number",
+        "advanced",
+        "Precio total",
+        "Total price",
+        display_format="currency",
+        precision=0,
+        input_step=1,
+        suffix_es="COP",
+        suffix_en="COP",
+    ),
     "include_hw_in_price": FieldUiSchema(
         "dropdown",
         "advanced",
@@ -83,7 +279,7 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "Add hardware on top",
         "Si activas esta opción, inversor y batería se suman aparte del precio base del proyecto.",
         "If enabled, inverter and battery are added on top of the base project price.",
-        options=(("Sí", True), ("No", False)),
+        options=_YES_NO_OPTIONS,
     ),
     "include_var_others": FieldUiSchema(
         "dropdown",
@@ -92,33 +288,127 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "Include variable others",
         "Suma la tabla de 'otros costos variables' además del precio principal por kWp.",
         "Adds the 'other variable costs' table on top of the main kWp pricing table.",
-        options=(("Sí", True), ("No", False)),
+        options=_YES_NO_OPTIONS,
     ),
-    "price_others_total": FieldUiSchema("number", "advanced", "Otros fijos", "Fixed others"),
-    "price_per_kWp_COP": FieldUiSchema("number", "advanced", "Precio por kWp", "Price per kWp"),
-    "mc_PR_std": FieldUiSchema("number", "advanced", "MC desv. PR", "MC PR std"),
-    "mc_buy_std": FieldUiSchema("number", "advanced", "MC desv. compra", "MC buy std"),
-    "mc_sell_std": FieldUiSchema("number", "advanced", "MC desv. venta", "MC sell std"),
-    "mc_demand_std": FieldUiSchema("number", "advanced", "MC desv. demanda", "MC demand std"),
+    "price_others_total": FieldUiSchema(
+        "number",
+        "advanced",
+        "Otros fijos",
+        "Fixed others",
+        display_format="currency",
+        precision=0,
+        input_step=1,
+        suffix_es="COP",
+        suffix_en="COP",
+    ),
+    "price_per_kWp_COP": FieldUiSchema(
+        "number",
+        "advanced",
+        "Precio por kWp",
+        "Price per kWp",
+        display_format="currency_rate",
+        precision=0,
+        input_step=1,
+        suffix_es="COP/kWp",
+        suffix_en="COP/kWp",
+    ),
+    "mc_PR_std": FieldUiSchema(
+        "number",
+        "advanced",
+        "MC desv. PR",
+        "MC PR std",
+        display_format="percent",
+        precision=2,
+        suffix_es="%",
+        suffix_en="%",
+        ui_scale=100.0,
+    ),
+    "mc_buy_std": FieldUiSchema(
+        "number",
+        "advanced",
+        "MC desv. compra",
+        "MC buy std",
+        display_format="percent",
+        precision=2,
+        suffix_es="%",
+        suffix_en="%",
+        ui_scale=100.0,
+    ),
+    "mc_sell_std": FieldUiSchema(
+        "number",
+        "advanced",
+        "MC desv. venta",
+        "MC sell std",
+        display_format="percent",
+        precision=2,
+        suffix_es="%",
+        suffix_en="%",
+        ui_scale=100.0,
+    ),
+    "mc_demand_std": FieldUiSchema(
+        "number",
+        "advanced",
+        "MC desv. demanda",
+        "MC demand std",
+        display_format="percent",
+        precision=2,
+        suffix_es="%",
+        suffix_en="%",
+        ui_scale=100.0,
+    ),
     "mc_use_manual_kWp": FieldUiSchema(
         "dropdown",
         "advanced",
         "MC kWp manual",
         "MC manual kWp",
-        options=(("Sí", True), ("No", False)),
+        options=_YES_NO_OPTIONS,
     ),
-    "mc_manual_kWp": FieldUiSchema("number", "advanced", "MC kWp manual fijo", "MC fixed manual kWp"),
-    "mc_n_simulations": FieldUiSchema("number", "advanced", "MC simulaciones", "MC simulations"),
+    "mc_manual_kWp": FieldUiSchema(
+        "number",
+        "advanced",
+        "MC kWp manual fijo",
+        "MC fixed manual kWp",
+        display_format="power_kwp",
+        precision=3,
+        suffix_es="kWp",
+        suffix_en="kWp",
+    ),
+    "mc_n_simulations": FieldUiSchema(
+        "number",
+        "advanced",
+        "MC simulaciones",
+        "MC simulations",
+        display_format="integer",
+        precision=0,
+        input_step=1,
+        suffix_es="sim",
+        suffix_en="sims",
+    ),
     "mc_battery_name": FieldUiSchema("text", "advanced", "MC batería fija", "MC fixed battery"),
     "limit_peak_ratio_enable": FieldUiSchema(
         "dropdown",
         "basic",
         "Limitar relación pico",
         "Enable peak-ratio limit",
-        options=(("Sí", True), ("No", False)),
+        options=_YES_NO_OPTIONS,
     ),
-    "limit_peak_ratio": FieldUiSchema("number", "basic", "Relación pico máxima", "Peak-ratio limit"),
-    "limit_peak_year": FieldUiSchema("number", "advanced", "Año de pico", "Peak year"),
+    "limit_peak_ratio": FieldUiSchema(
+        "number",
+        "basic",
+        "Relación pico máxima",
+        "Peak-ratio limit",
+        display_format="ratio",
+        precision=2,
+    ),
+    "limit_peak_year": FieldUiSchema(
+        "number",
+        "advanced",
+        "Año de pico",
+        "Peak year",
+        display_format="integer",
+        precision=0,
+        input_step=1,
+    ),
     "limit_peak_month_mode": FieldUiSchema(
         "dropdown",
         "advanced",
@@ -138,7 +428,17 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
             ("P95", "p95"),
         ),
     ),
-    "limit_peak_month_fixed": FieldUiSchema("number", "advanced", "Mes pico fijo", "Fixed peak month"),
+    "limit_peak_month_fixed": FieldUiSchema(
+        "number",
+        "advanced",
+        "Mes pico fijo",
+        "Fixed peak month",
+        display_format="integer",
+        precision=0,
+        input_step=1,
+        min_value=1,
+        max_value=12,
+    ),
     "kWp_seed_mode": FieldUiSchema(
         "dropdown",
         "basic",
@@ -146,10 +446,47 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "Seed mode",
         options=(("Auto", "auto"), ("Manual", "manual")),
     ),
-    "kWp_seed_manual_kWp": FieldUiSchema("number", "advanced", "Semilla manual kWp", "Manual seed kWp"),
-    "modules_span_each_side": FieldUiSchema("number", "basic", "Módulos alrededor de semilla", "Modules around seed"),
-    "kWp_min": FieldUiSchema("number", "basic", "kWp mínimo", "Minimum kWp"),
-    "kWp_max": FieldUiSchema("number", "basic", "kWp máximo", "Maximum kWp"),
+    "kWp_seed_manual_kWp": FieldUiSchema(
+        "number",
+        "advanced",
+        "Semilla manual kWp",
+        "Manual seed kWp",
+        display_format="power_kwp",
+        precision=3,
+        suffix_es="kWp",
+        suffix_en="kWp",
+    ),
+    "modules_span_each_side": FieldUiSchema(
+        "number",
+        "basic",
+        "Módulos alrededor de semilla",
+        "Modules around seed",
+        display_format="integer",
+        precision=0,
+        input_step=1,
+        suffix_es="módulos",
+        suffix_en="modules",
+    ),
+    "kWp_min": FieldUiSchema(
+        "number",
+        "basic",
+        "kWp mínimo",
+        "Minimum kWp",
+        display_format="power_kwp",
+        precision=3,
+        suffix_es="kWp",
+        suffix_en="kWp",
+    ),
+    "kWp_max": FieldUiSchema(
+        "number",
+        "basic",
+        "kWp máximo",
+        "Maximum kWp",
+        display_format="power_kwp",
+        precision=3,
+        suffix_es="kWp",
+        suffix_en="kWp",
+    ),
     "export_allowed": FieldUiSchema(
         "dropdown",
         "basic",
@@ -157,7 +494,7 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "Allow export",
         "Permite vender excedentes a la red. Si se desactiva, el modelo opera como cero inyección.",
         "Allows exports to the grid. If disabled, the model behaves as zero-export.",
-        options=(("Sí", True), ("No", False)),
+        options=_YES_NO_OPTIONS,
     ),
     "include_battery": FieldUiSchema(
         "dropdown",
@@ -166,7 +503,7 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "Include battery",
         "Activa el análisis con almacenamiento. Si lo desactivas, solo se evaluarán diseños FV sin batería.",
         "Enables storage analysis. If disabled, only PV-only designs are evaluated.",
-        options=(("Sí", True), ("No", False)),
+        options=_YES_NO_OPTIONS,
     ),
     "battery_name": FieldUiSchema("text", "advanced", "Batería fija", "Fixed battery"),
     "optimize_battery": FieldUiSchema(
@@ -176,9 +513,21 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "Optimize battery",
         "Prueba el catálogo de baterías para cada kWp. Si está desactivado, se usa la batería fija elegida arriba.",
         "Tries the battery catalog for each kWp. If disabled, the fixed battery selected above is used.",
-        options=(("Sí", True), ("No", False)),
+        options=_YES_NO_OPTIONS,
     ),
-    "bat_DoD": FieldUiSchema("number", "advanced", "Profundidad de descarga", "Depth of discharge"),
+    "bat_DoD": FieldUiSchema(
+        "number",
+        "advanced",
+        "Profundidad de descarga",
+        "Depth of discharge",
+        display_format="percent",
+        precision=1,
+        suffix_es="%",
+        suffix_en="%",
+        ui_scale=100.0,
+        min_value=0,
+        max_value=100,
+    ),
     "bat_coupling": FieldUiSchema(
         "dropdown",
         "advanced",
@@ -188,7 +537,19 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "Defines whether the battery is modeled as AC-coupled or DC-coupled.",
         options=(("AC", "ac"), ("DC", "dc")),
     ),
-    "bat_eta_rt": FieldUiSchema("number", "advanced", "Eficiencia batería", "Battery efficiency"),
+    "bat_eta_rt": FieldUiSchema(
+        "number",
+        "advanced",
+        "Eficiencia batería",
+        "Battery efficiency",
+        display_format="percent",
+        precision=1,
+        suffix_es="%",
+        suffix_en="%",
+        ui_scale=100.0,
+        min_value=0,
+        max_value=100,
+    ),
     "profile_type": FieldUiSchema("text", "hidden", "Tipo de perfil", "Profile type"),
 }
 
@@ -417,7 +778,7 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
     "cop_kwp": {
         "MIN": TableColumnUiSchema("kWp mín", "Min kWp", "Límite inferior de la banda.", "Lower bound of the band.", "number", 3, "numeric"),
         "MAX": TableColumnUiSchema("kWp máx", "Max kWp", "Límite superior de la banda.", "Upper bound of the band.", "number", 3, "numeric"),
-        "PRECIO_POR_KWP": TableColumnUiSchema("Precio por kWp [COP]", "Price per kWp [COP]", "Costo aplicado a esa banda de tamaño.", "Cost applied to that size band.", "currency_cop", 0, "numeric"),
+        "PRECIO_POR_KWP": TableColumnUiSchema("Precio por kWp [COP/kWp]", "Price per kWp [COP/kWp]", "Costo aplicado a esa banda de tamaño.", "Cost applied to that size band.", "currency_cop", 0, "numeric"),
     },
     "cop_kwp_others": {
         "MIN": TableColumnUiSchema("kWp mín", "Min kWp", "Límite inferior de la banda.", "Lower bound of the band.", "number", 3, "numeric"),
@@ -513,6 +874,60 @@ def field_options(meta: ConfigFieldMeta, lang: str = "es") -> list[dict[str, Any
     return options
 
 
+def field_suffix(meta: ConfigFieldMeta, lang: str = "es") -> str | None:
+    schema = field_schema_for(meta)
+    if lang == "en":
+        suffix = schema.suffix_en or schema.suffix_es
+    else:
+        suffix = schema.suffix_es or schema.suffix_en
+    if meta.config_key in FIELD_SCHEMAS:
+        return suffix
+    unit = str(meta.unit or "").strip()
+    return unit or None
+
+
+def _default_input_step(precision: int) -> float | int:
+    if precision <= 0:
+        return 1
+    return 10 ** (-precision)
+
+
+def field_input_step(meta: ConfigFieldMeta) -> float | int | None:
+    schema = field_schema_for(meta)
+    if schema.kind != "number":
+        return None
+    if schema.input_step is not None:
+        return schema.input_step
+    return _default_input_step(schema.precision)
+
+
+def _normalize_display_number(value: float, precision: int) -> float | int:
+    normalized = round(float(value), precision)
+    if precision == 0:
+        return int(round(normalized))
+    return normalized
+
+
+def display_assumption_value(field_key: str, value: Any) -> Any:
+    schema = FIELD_SCHEMAS.get(field_key)
+    if schema is None or schema.kind != "number" or _is_missing_config_input(value):
+        return value
+    numeric = float(value)
+    if schema.ui_scale is not None:
+        numeric *= schema.ui_scale
+    return _normalize_display_number(numeric, schema.precision)
+
+
+def parse_assumption_input_value(field_key: str, value: Any) -> Any:
+    schema = FIELD_SCHEMAS.get(field_key)
+    if schema is None or schema.kind != "number" or _is_missing_config_input(value):
+        return value
+    numeric = float(value)
+    if schema.ui_scale is not None:
+        numeric /= schema.ui_scale
+    return numeric
+
+
 def build_assumption_sections(bundle, lang: str = "es", show_all: bool = False) -> list[dict[str, Any]]:
     sections_by_group: dict[str, dict[str, Any]] = {}
     for meta in extract_config_metadata(bundle.config_table, bundle.config):
@@ -537,9 +952,15 @@ def build_assumption_sections(bundle, lang: str = "es", show_all: bool = False) 
                 "label": field_label(meta, lang),
                 "help": field_help(meta, lang),
                 "unit": meta.unit,
+                "suffix": field_suffix(meta, lang),
                 "kind": schema.kind,
+                "display_format": schema.display_format,
+                "precision": schema.precision,
+                "input_step": field_input_step(meta),
+                "min": schema.min_value,
+                "max": schema.max_value,
                 "options": field_options(meta, lang),
-                "value": bundle.config.get(meta.config_key),
+                "value": display_assumption_value(meta.config_key, bundle.config.get(meta.config_key, meta.value)),
                 "supported": meta.supported,
             }
         )

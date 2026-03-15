@@ -84,6 +84,15 @@ def _find_component(node, component_id: str):
     return _find_component(children, component_id)
 
 
+def _find_field(sections: list[dict], field_key: str) -> dict:
+    for section in sections:
+        for bucket in ("basic", "advanced"):
+            for field in section.get(bucket, []):
+                if field["field"] == field_key:
+                    return field
+    raise AssertionError(f"Field {field_key!r} not found")
+
+
 def test_app_defaults_to_spanish() -> None:
     app = create_app()
     layout = app.layout() if callable(app.layout) else app.layout
@@ -204,6 +213,43 @@ def test_assumption_sections_group_and_fallback_help() -> None:
     assert section["help"]
 
 
+def test_assumption_sections_apply_ui_scaling_suffixes_and_bounds() -> None:
+    bundle = load_example_config()
+    bundle = replace(
+        bundle,
+        config={
+            **bundle.config,
+            "discount_rate": 0.05,
+            "alpha_mix": 0.8,
+            "a_Voc_pct": -0.29,
+            "limit_peak_ratio": 2.5,
+            "modules_span_each_side": 4,
+        },
+    )
+
+    sections = build_assumption_sections(bundle, lang="es", show_all=True)
+
+    discount_rate = _find_field(sections, "discount_rate")
+    alpha_mix = _find_field(sections, "alpha_mix")
+    a_voc_pct = _find_field(sections, "a_Voc_pct")
+    limit_peak_ratio = _find_field(sections, "limit_peak_ratio")
+    modules_span = _find_field(sections, "modules_span_each_side")
+
+    assert discount_rate["value"] == 5
+    assert discount_rate["suffix"] == "%/año"
+    assert discount_rate["display_format"] == "percent_rate"
+    assert alpha_mix["value"] == 80
+    assert alpha_mix["suffix"] == "%"
+    assert alpha_mix["min"] == 0
+    assert alpha_mix["max"] == 100
+    assert a_voc_pct["value"] == pytest.approx(-0.29)
+    assert a_voc_pct["suffix"] == "%/°C"
+    assert limit_peak_ratio["display_format"] == "ratio"
+    assert limit_peak_ratio["suffix"] is None
+    assert modules_span["input_step"] == 1
+    assert modules_span["suffix"] == "módulos"
+
+
 def test_display_schema_formats_metrics_and_labels() -> None:
     assert format_metric("NPV_COP", 12500000, "es") == "COP 12,500,000"
     assert format_metric("self_consumption_ratio", 0.456, "es") == "45.6%"
@@ -221,18 +267,21 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
     battery_columns, battery_tooltips = build_table_display_columns("battery_catalog", ["nom_kWh", "max_kW"], "es")
     weight_columns, weight_tooltips = build_table_display_columns("demand_profile_weights", ["W_RES", "TOTAL_kWh"], "es")
     month_columns, month_tooltips = build_table_display_columns("month_profile", ["Demand_month", "HSP_month"], "es")
+    sun_columns, sun_tooltips = build_table_display_columns("sun_profile", ["SOL"], "es")
 
-    assert [column["name"] for column in price_columns] == ["kWp mín", "Precio por kWp [COP]"]
+    assert [column["name"] for column in price_columns] == ["kWp mín", "Precio por kWp [COP/kWp]"]
     assert price_columns[1]["type"] == "numeric"
     assert battery_columns[0]["name"] == "Energía nominal [kWh]"
     assert battery_columns[1]["name"] == "Potencia máx [kW]"
     assert weight_columns[0]["name"] == "Peso res [%]"
     assert month_columns[0]["name"] == "Factor demanda"
     assert month_columns[1]["name"] == "Factor HSP"
+    assert sun_columns[0]["name"] == "Participación solar [%]"
     assert "costo" in price_tooltips["PRECIO_POR_KWP"].lower()
     assert "capacidad" in battery_tooltips["nom_kWh"].lower()
     assert "peso" in weight_tooltips["W_RES"].lower()
     assert "mensual" in month_tooltips["Demand_month"].lower()
+    assert "solar" in sun_tooltips["SOL"].lower()
 
     candidate_table = _find_component(candidate_explorer_section(), "active-candidate-table")
     profile_table = _find_component(profile_editor_section(), "month-profile-editor")
@@ -299,6 +348,12 @@ def test_assumption_editor_uses_inline_help_instead_of_native_title() -> None:
         "help": "Define la energía mensual de referencia.",
         "kind": "number",
         "value": 1234,
+        "suffix": "kWh/mes",
+        "display_format": "energy",
+        "precision": 0,
+        "input_step": 1,
+        "min": None,
+        "max": None,
         "unit": "kWh/mes",
         "options": [],
     }
@@ -310,7 +365,54 @@ def test_assumption_editor_uses_inline_help_instead_of_native_title() -> None:
     )
     markup = str(rendered[0].to_plotly_json())
     assert "field-help-tooltip" in markup
+    assert "input-affix" in markup
+    assert "kWh/mes" in markup
+    assert "scenario-meta" not in markup
     assert "'title':" not in markup
+
+
+def test_assumption_editor_leaves_dropdowns_and_text_fields_without_numeric_affixes() -> None:
+    fields = [
+        {
+            "field": "include_battery",
+            "label": "Incluir batería",
+            "help": "Activa el análisis con almacenamiento.",
+            "kind": "dropdown",
+            "value": True,
+            "suffix": None,
+            "options": [{"label": "Sí", "value": True}, {"label": "No", "value": False}],
+        },
+        {
+            "field": "battery_name",
+            "label": "Batería fija",
+            "help": "Batería fija.",
+            "kind": "text",
+            "value": "",
+            "suffix": None,
+            "options": [],
+        },
+    ]
+    rendered = render_assumption_sections(
+        [{"group": "Batería", "help": "", "basic": fields, "advanced": []}],
+        show_all=False,
+        empty_message="Sin datos",
+        advanced_label="Avanzado",
+    )
+
+    markup = str(rendered[0].to_plotly_json())
+    assert "input-affix" not in markup
+
+
+def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
+    asset_css = Path("assets/app.css")
+    app_source = Path("app.py").read_text(encoding="utf-8")
+    css_source = asset_css.read_text(encoding="utf-8")
+
+    assert asset_css.exists()
+    assert "app.index_string" not in app_source
+    assert ".assumption-input-shell" in css_source
+    assert ".candidate-selection-helper" in css_source
+    assert "body {" in css_source
 
 
 def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:

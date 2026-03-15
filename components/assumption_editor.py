@@ -17,7 +17,24 @@ def _assumption_input(field: dict):
             className="text-input",
         )
     if kind == "number":
-        return dcc.Input(id=component_id, type="number", value=field["value"], className="text-input")
+        input_control = dcc.Input(
+            id=component_id,
+            type="number",
+            value=field["value"],
+            step=field.get("input_step"),
+            min=field.get("min"),
+            max=field.get("max"),
+            className="text-input text-input-affixed" if field.get("suffix") else "text-input",
+        )
+        if field.get("suffix"):
+            return html.Div(
+                className="assumption-input-shell",
+                children=[
+                    input_control,
+                    html.Span(field["suffix"], className="input-affix"),
+                ],
+            )
+        return input_control
     return dcc.Input(id=component_id, type="text", value=field["value"], className="text-input")
 
 
@@ -29,11 +46,11 @@ def _field_card(field: dict) -> html.Div:
             html.Span(field["help"], className="field-help-tooltip"),
         ],
     )
-    unit = html.Div(field["unit"], className="scenario-meta") if field.get("unit") else None
     children = [
         html.Label([field["label"], help_icon], className="input-label"),
         _assumption_input(field),
     ]
+    unit = html.Div(field["unit"], className="scenario-meta") if field.get("kind") != "number" and field.get("unit") else None
     if unit is not None:
         children.append(unit)
     return html.Div(className="field-card", children=children)
