@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dash import Dash, Input, Output, callback, dcc, html, page_container
-from flask import send_file
+from flask import jsonify, request, send_file
 
+from services.desktop_lifecycle import desktop_lifecycle
 from services.i18n import tr
 from services.runtime_paths import assets_dir, bundled_quick_guide_path, configure_runtime_environment, pages_dir
 from services.session_state import bootstrap_client_session
@@ -24,6 +25,40 @@ def create_app() -> Dash:
     @app.server.route("/healthz")
     def healthz():
         return {"status": "ok"}, 200
+
+    @app.server.route("/__desktop/health")
+    def desktop_health():
+        return jsonify(desktop_lifecycle.health_payload())
+
+    def _desktop_request_payload() -> dict[str, str]:
+        payload = request.get_json(silent=True)
+        if isinstance(payload, dict):
+            return {str(key): str(value) for key, value in payload.items() if value is not None}
+        if request.form:
+            return {str(key): str(value) for key, value in request.form.items() if value is not None}
+        return {}
+
+    @app.server.route("/__desktop/client/heartbeat", methods=["POST"])
+    def desktop_client_heartbeat():
+        payload = _desktop_request_payload()
+        client_id = str(payload.get("client_id") or "")
+        token = str(payload.get("instance_token") or "")
+        if not desktop_lifecycle.auto_shutdown_enabled:
+            return jsonify({"status": "disabled"}), 200
+        if not desktop_lifecycle.record_heartbeat(client_id, token):
+            return jsonify({"status": "token_mismatch"}), 409
+        return jsonify({"status": "ok", "active_client_count": desktop_lifecycle.active_client_count()})
+
+    @app.server.route("/__desktop/client/disconnect", methods=["POST"])
+    def desktop_client_disconnect():
+        payload = _desktop_request_payload()
+        client_id = str(payload.get("client_id") or "")
+        token = str(payload.get("instance_token") or "")
+        if not desktop_lifecycle.auto_shutdown_enabled:
+            return jsonify({"status": "disabled"}), 200
+        if not desktop_lifecycle.record_disconnect(client_id, token):
+            return jsonify({"status": "token_mismatch"}), 409
+        return jsonify({"status": "ok", "active_client_count": desktop_lifecycle.active_client_count()})
 
     @app.server.route("/help/guia-rapida")
     def quick_guide():
