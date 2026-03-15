@@ -78,7 +78,7 @@ def fingerprint_deterministic_input(config_bundle: LoadedConfigBundle) -> str:
 
 @dataclass
 class _DeterministicCacheEntry:
-    scan_result: ScanRunResult
+    scan_result_payload: dict[str, Any]
     inserted_at: float
     last_access_at: float
 
@@ -100,13 +100,13 @@ class DeterministicScanCache:
                 return None
             entry.last_access_at = time.time()
             self._entries.move_to_end(fingerprint)
-            return entry.scan_result
+            return ScanRunResult.from_payload(deepcopy(entry.scan_result_payload))
 
     def put(self, fingerprint: str, scan_result: ScanRunResult) -> None:
         now = time.time()
         with self._lock:
             self._entries[fingerprint] = _DeterministicCacheEntry(
-                scan_result=scan_result,
+                scan_result_payload=deepcopy(scan_result.to_payload()),
                 inserted_at=now,
                 last_access_at=now,
             )

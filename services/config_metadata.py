@@ -58,6 +58,8 @@ def update_config_table_values(config_table: pd.DataFrame, config: dict[str, Any
     table = config_table.copy()
     if "Valor" not in table.columns:
         table["Valor"] = ""
+    else:
+        table["Valor"] = table["Valor"].astype(object)
     for index, row in table.iterrows():
         item = str(row.get("Item", "")).strip()
         if not item:

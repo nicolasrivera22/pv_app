@@ -121,6 +121,12 @@ def create_app() -> Dash:
                 .kpi-card { background: white; border-radius: 18px; padding: 1rem; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); }
                 .kpi-label { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; }
                 .kpi-value { margin-top: 0.45rem; font-size: 1.2rem; font-weight: 700; }
+                .selected-candidate-kpi-title { margin: 0.25rem 0 0; font-size: 0.9rem; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.06em; }
+                .candidate-selection-helper { margin-top: 0.25rem; padding: 0.75rem 0.9rem; border-radius: 14px; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+                .selected-candidate-banner { display: flex; flex-wrap: wrap; gap: 0.65rem; margin: 0 0 1rem; }
+                .selected-candidate-banner-item { display: inline-flex; flex-direction: column; gap: 0.18rem; padding: 0.7rem 0.85rem; border-radius: 14px; background: #f8fafc; border: 1px solid #dbeafe; min-width: 150px; }
+                .selected-candidate-banner-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; font-weight: 700; }
+                .selected-candidate-banner-value { color: #0f172a; font-weight: 600; }
                 .link { text-decoration: underline; }
                 .input-label { display: block; margin-bottom: 0.35rem; font-size: 0.92rem; font-weight: 600; color: #334155; }
                 .text-input { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 12px; padding: 0.7rem 0.8rem; background: white; }
@@ -140,6 +146,7 @@ def create_app() -> Dash:
                 .field-help:hover .field-help-tooltip, .field-help:focus-within .field-help-tooltip { opacity: 1; transform: translateY(0); }
                 .catalog-grid, .chart-grid, .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
                 .compare-grid > .panel { min-height: 100%; }
+                .deep-dive-stack { display: grid; gap: 1rem; }
                 .schematic-summary-chip { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.8rem; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-weight: 600; width: fit-content; }
                 .schematic-stack { display: grid; gap: 1rem; }
                 .schematic-diagram-card, .schematic-detail-card, .schematic-legend-card { min-width: 0; width: 100%; }

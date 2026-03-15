@@ -1,8 +1,0 @@
-Escenario: PV_inputs
-Fuente: PV_inputs.xlsx
-Candidato: 24.600::BAT-20
-kWp: 24.600
-Batería: BAT-20
-VPN [COP]: 600,403,179
-Payback [años]: 4.333333333333333
-Relación pico: 2.420

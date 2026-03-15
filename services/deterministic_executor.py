@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
+import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from multiprocessing import get_context
@@ -14,6 +16,8 @@ from pv_product.models import Battery, DispatchConfig, PVSystem
 from pv_product.simulator import Simulator
 
 from .types import LoadedConfigBundle
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PARALLEL_WORKERS = 4
 
@@ -38,6 +42,15 @@ class DeterministicScanTask:
 class DeterministicScanTaskResult:
     task_index: int
     detail_rows: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class WorkerDecision:
+    requested_workers: int
+    effective_workers: int
+    worker_source: str
+    serial_reason: str | None
+    execution_mode: str
 
 
 def _build_battery(batt: dict[str, Any] | None, cfg: dict[str, Any]) -> Battery | None:
@@ -82,17 +95,70 @@ def _build_battery_options(config_bundle: LoadedConfigBundle) -> tuple[dict[str,
     return (bat0,)
 
 
-def _determine_max_workers(max_workers: int | None) -> int:
+def _resolve_requested_workers(max_workers: int | None) -> tuple[int, str]:
     if max_workers is not None:
-        return max(1, int(max_workers))
+        return max(1, int(max_workers)), "explicit"
     env_value = os.getenv("PV_SCAN_MAX_WORKERS")
     if env_value:
         try:
-            return max(1, int(env_value))
+            return max(1, int(env_value)), "env"
         except ValueError:
-            return 1
+            return 1, "env"
     cpu_count = os.cpu_count() or 1
-    return min(max(cpu_count - 1, 1), DEFAULT_PARALLEL_WORKERS)
+    return min(max(cpu_count - 1, 1), DEFAULT_PARALLEL_WORKERS), "heuristic"
+
+
+def _is_frozen_runtime() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def _resolve_worker_decision(
+    *,
+    allow_parallel: bool,
+    task_count: int,
+    max_workers: int | None,
+) -> WorkerDecision:
+    requested_workers, worker_source = _resolve_requested_workers(max_workers)
+    # print(f"Worker decision: allow_parallel={allow_parallel}, "
+    #       f"task_count={task_count}, requested_workers={requested_workers} (source: {worker_source})", 
+    #       file=sys.stderr)
+    serial_reason: str | None = None
+    if not allow_parallel:
+        serial_reason = "allow_parallel_false"
+    elif requested_workers <= 1:
+        serial_reason = "worker_count_leq_1"
+    elif task_count <= 1:
+        serial_reason = "single_task"
+    elif _is_frozen_runtime():
+        print("Advertencia: Se ha detectado un entorno de ejecución congelado. Se usará ejecución serial.", file=sys.stderr)
+        serial_reason = "frozen_runtime"
+
+    execution_mode = "serial" if serial_reason else "parallel"
+    effective_workers = 1 if execution_mode == "serial" else requested_workers
+    return WorkerDecision(
+        requested_workers=requested_workers,
+        effective_workers=effective_workers,
+        worker_source=worker_source,
+        serial_reason=serial_reason,
+        execution_mode=execution_mode,
+    )
+
+
+def _format_log_value(value: Any) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, bool):
+        return str(value).lower()
+    text = str(value)
+    if not text:
+        return "-"
+    if any(char.isspace() for char in text) or "=" in text:
+        return repr(text)
+    return text
+
+
+def _structured_log_message(**fields: Any) -> str:
+    return " ".join(f"{key}={_format_log_value(value)}" for key, value in fields.items())
 
 
 def _build_tasks(config_bundle: LoadedConfigBundle) -> tuple[float, tuple[DeterministicScanTask, ...]]:
@@ -233,16 +299,61 @@ def run_deterministic_scan_tasks(
     allow_parallel: bool = True,
     max_workers: int | None = None,
 ) -> tuple[float, tuple[dict[str, Any], ...]]:
+    started_at = time.perf_counter()
+    tasks: tuple[Any, ...] = ()
+    decision: WorkerDecision | None = None
+    fallback_to_serial = False
+    fallback_reason: str | None = None
+    execution_mode = "serial"
+    effective_workers = 1
+
     seed_kwp, tasks = _build_tasks(config_bundle)
-    worker_count = _determine_max_workers(max_workers)
-    if (
-        not allow_parallel
-        or worker_count <= 1
-        or len(tasks) <= 1
-        or bool(getattr(sys, "frozen", False))
-    ):
-        return seed_kwp, _run_tasks_serial(tasks)
+    decision = _resolve_worker_decision(
+        allow_parallel=allow_parallel,
+        task_count=len(tasks),
+        max_workers=max_workers,
+    )
+    execution_mode = decision.execution_mode
+    effective_workers = decision.effective_workers
     try:
-        return seed_kwp, _run_tasks_parallel(tasks, max_workers=worker_count)
-    except Exception:
-        return seed_kwp, _run_tasks_serial(tasks)
+        if decision.execution_mode == "serial":
+            rows = _run_tasks_serial(tasks)
+        else:
+            try:
+                rows = _run_tasks_parallel(tasks, max_workers=decision.effective_workers)
+            except Exception as exc:
+                fallback_to_serial = True
+                fallback_reason = "parallel_exception"
+                execution_mode = "serial"
+                effective_workers = 1
+                logger.exception(
+                    _structured_log_message(
+                        event="deterministic_scan_parallel_fallback",
+                        candidate_tasks=len(tasks),
+                        requested_workers=decision.requested_workers,
+                        effective_workers=effective_workers,
+                        worker_source=decision.worker_source,
+                        fallback_reason=fallback_reason,
+                        exc_class=type(exc).__name__,
+                        exc_message=str(exc),
+                    )
+                )
+                rows = _run_tasks_serial(tasks)
+        return seed_kwp, rows
+    finally:
+        if decision is not None:
+            total_ms = (time.perf_counter() - started_at) * 1000.0
+            logger.info(
+                _structured_log_message(
+                    event="deterministic_scan",
+                    total_ms=f"{total_ms:.1f}",
+                    candidate_tasks=len(tasks),
+                    execution_mode=execution_mode,
+                    requested_workers=decision.requested_workers,
+                    effective_workers=effective_workers,
+                    worker_source=decision.worker_source,
+                    serial_reason=fallback_reason or decision.serial_reason,
+                    fallback_to_serial=fallback_to_serial,
+                    fallback_reason=fallback_reason,
+                )
+            )

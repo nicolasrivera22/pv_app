@@ -3,6 +3,7 @@ from .candidate_explorer import candidate_explorer_section
 from .catalog_editor import catalog_editor_section
 from .kpi_cards import render_kpi_cards
 from .profile_editor import profile_editor_section
+from .selected_candidate_deep_dive import selected_candidate_deep_dive_section
 from .risk_charts import (
     build_ecdf_figure,
     build_histogram_figure,
@@ -36,5 +37,6 @@ __all__ = [
     "risk_controls_section",
     "risk_tables_section",
     "scenario_sidebar",
+    "selected_candidate_deep_dive_section",
     "unifilar_diagram_section",
 ]

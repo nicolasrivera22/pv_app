@@ -193,7 +193,7 @@ python app.py
 
 ## Desktop packaging
 
-Phase 10C adds a Windows-first local packaging path using PyInstaller and a dedicated desktop launcher.
+Phase 2C adds a Windows-first local packaging path using PyInstaller and a dedicated desktop launcher.
 
 - Supported build target for this phase:
   - one-folder distribution

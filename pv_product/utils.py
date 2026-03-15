@@ -80,16 +80,21 @@ def solar_profile_24(shift=0, exponent=1.0):
 
 def build_7x24_from_excel(df_load: pd.DataFrame, total: bool = False):
     """
-    Convierte una tabla de carga (DOW, HOUR, RES/IND/TOTAL) en:
+    Convierte una tabla de carga en:
       - dow24: ndarray (7,24) con formas horarias por día (cada fila suma 1).
       - day_w: ndarray (7,) con pesos de energía semanal (suman 1).
+
+    Columnas requeridas:
+      - total=True: DOW, HOUR, TOTAL
+      - total=False: DOW, HOUR, RES, IND, TOTAL
     """
     if total:
         req = {"DOW", "HOUR", "TOTAL"}
     else:
         req = {"DOW", "HOUR", "RES", "IND", "TOTAL"}
     if not req.issubset(set(df_load.columns)):
-        raise ValueError("Profiles.LoadProfile debe tener: DOW, HOUR, RES, IND, TOTAL")
+        expected = "DOW, HOUR, TOTAL" if total else "DOW, HOUR, RES, IND, TOTAL"
+        raise ValueError(f"Profiles.LoadProfile debe tener: {expected}")
 
     df = df_load.copy()
     if not total:
@@ -527,49 +532,54 @@ def plot_npv_scan(scan_df, seed_kwp, best_kwp, out_png, wp_panel):
     plt.close(fig)
 
 
-def plot_autoconsumo_anual(df: pd.DataFrame, out_dir: str, name_png: str, n_mods: int, export_allowed: bool = True, best: bool = False) -> None:
-    """Grafica cobertura de demanda año 1 (PV directo, batería, import/export)."""
+def prepare_autoconsumo_anual_series(df: pd.DataFrame, *, export_allowed: bool = True) -> dict:
+    """Prepara series del gráfico anual de autoconsumo/importación/exportación (año 1)."""
     first_year = df.iloc[:12].copy()
-    plt.figure()
-    x = np.arange(len(first_year))
+    if "Año_mes" in first_year.columns:
+        xlabels = [str(value) for value in first_year["Año_mes"].tolist()]
+    else:
+        xlabels = [str(index + 1) for index in range(len(first_year))]
     if {"PV_a_Carga_kWh", "Bateria_a_Carga_kWh", "Importacion_Red_kWh"}.issubset(first_year.columns):
-        autoconsumo = first_year["PV_a_Carga_kWh"] + first_year["Bateria_a_Carga_kWh"]
-        imported = first_year["Importacion_Red_kWh"]
         export = first_year.get("Exportacion_kWh", pd.Series(np.zeros(len(first_year))))
+        series = [
+            {"label": "PV → Carga", "values": first_year["PV_a_Carga_kWh"].to_numpy(dtype=float), "color": "#57eb36"},
+            {"label": "Batería → Carga", "values": first_year["Bateria_a_Carga_kWh"].to_numpy(dtype=float), "color": "#6fa8dc"},
+            {"label": "Importación", "values": first_year["Importacion_Red_kWh"].to_numpy(dtype=float), "color": "#f26c4f"},
+        ]
+        if export_allowed and export is not None:
+            series.append({"label": "Exportación", "values": export.to_numpy(dtype=float), "color": "#f7b32b"})
     else:
         autoconsumo = first_year.get("Autoconsumo_kWh", pd.Series(np.zeros(len(first_year))))
         imported = first_year.get("Demanda_Importada_no_Atendida_kWh", pd.Series(np.zeros(len(first_year))))
-        export = first_year.get("Exportacion_kWh", pd.Series(np.zeros(len(first_year))))
-    if {"PV_a_Carga_kWh", "Bateria_a_Carga_kWh", "Importacion_Red_kWh"}.issubset(first_year.columns):
-        pv_load = first_year["PV_a_Carga_kWh"].values
-        bat_load = first_year["Bateria_a_Carga_kWh"].values
-        imp = imported.values
-        exp_vals = export.values if (export_allowed and export is not None) else np.zeros_like(imp)
-        bottom = np.zeros_like(pv_load)
-        plt.bar(x, pv_load, bottom=bottom, label="PV → Carga", color="#57eb36")
-        bottom = bottom + pv_load
-        plt.bar(x, bat_load, bottom=bottom, label="Batería → Carga", color="#6fa8dc")
-        bottom = bottom + bat_load
-        plt.bar(x, imp, bottom=bottom, label="Importación", color="#f26c4f")
-        bottom = bottom + imp
-        if export_allowed and exp_vals is not None:
-            plt.bar(x, exp_vals, bottom=bottom, label="Exportación", color="#f7b32b")
-    else:
-        plt.bar(x, autoconsumo.values, label="Autoconsumo", color="g")
-        plt.bar(x, imported.values, bottom=autoconsumo.values, label="Demanda importada", color="red")
-        if export_allowed and export is not None:
-            bottom_vals = autoconsumo + imported
-            plt.bar(x, export.values, bottom=bottom_vals.values, label="Exportación", color="orange")
+        series = [
+            {"label": "Autoconsumo", "values": autoconsumo.to_numpy(dtype=float), "color": "g"},
+            {"label": "Demanda importada", "values": imported.to_numpy(dtype=float), "color": "red"},
+        ]
+        if export_allowed and "Exportacion_kWh" in first_year.columns:
+            series.append({"label": "Exportación", "values": first_year["Exportacion_kWh"].to_numpy(dtype=float), "color": "orange"})
+    title = "Autoconsumo, Importación y Exportación (Año 1)" if export_allowed else "Cobertura mensual de demanda (Año 1)"
+    return {"xlabels": xlabels, "series": series, "title": title}
+
+
+def plot_autoconsumo_anual(df: pd.DataFrame, out_dir: str, name_png: str, n_mods: int, export_allowed: bool = True, best: bool = False) -> None:
+    """Grafica cobertura de demanda año 1 (PV directo, batería, import/export)."""
+    prepared = prepare_autoconsumo_anual_series(df, export_allowed=export_allowed)
+    plt.figure()
+    x = np.arange(len(prepared["xlabels"]))
+    bottom = np.zeros(len(prepared["xlabels"]), dtype=float)
+    for series in prepared["series"]:
+        values = np.asarray(series["values"], dtype=float)
+        plt.bar(x, values, bottom=bottom, label=series["label"], color=series["color"])
+        bottom = bottom + values
 
     props = dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray")
     ax = plt.gca()
     ax.text(0.01, 0.99, f"# módulos={int(n_mods)}", transform=ax.transAxes, fontsize=9, verticalalignment="top", horizontalalignment="left", bbox=props)
 
-    plt.xticks(x, [m for m in first_year["Año_mes"]], rotation=45)
+    plt.xticks(x, prepared["xlabels"], rotation=45)
     plt.xlabel("Mes")
     plt.ylabel("kWh")
-    title_base = "Autoconsumo, Importación y Exportación (Año 1)" if export_allowed else "Cobertura mensual de demanda (Año 1)"
-    plt.title(title_base)
+    plt.title(prepared["title"])
     plt.legend()
     plt.tight_layout()
     if best:
@@ -644,6 +654,54 @@ def plot_payback_kde(vals, out_dir, outfile="chart_payback_kde.png", title="Dist
     return outfile
 
 
+def prepare_typical_day_series(
+    kWp,
+    inv_sel,
+    cfg,
+    w24,
+    s24,
+    hsp_month,
+    demand_month_factor,
+    month_for_plot=None,
+    year_for_plot=0,
+):
+    """Prepara las series del gráfico de día típico."""
+    if demand_month_factor is None:
+        demand_month_factor = np.ones(12)
+    if month_for_plot is None:
+        month_for_plot = int(np.argmax(demand_month_factor))
+
+    Dm = 30
+    E_day = demand_month_factor[month_for_plot] * cfg["E_month_kWh"] / Dm
+    P_AC = inv_sel["inverter"]["AC_kW"]
+    pr_deg = (1.0 - cfg.get("deg_rate", 0.0)) ** year_for_plot
+    PR_eff = cfg["PR"] * pr_deg
+
+    demand_kw = np.asarray(w24, dtype=float) * E_day
+    E_pv_day = kWp * PR_eff * hsp_month[month_for_plot]
+    pv_dc = np.asarray(s24, dtype=float) * E_pv_day
+    pv_ac = np.minimum(pv_dc, P_AC)
+    hours = np.arange(24)
+    frame = pd.DataFrame(
+        {
+            "Hora": hours,
+            "Demanda": demand_kw,
+            "Autogeneración": pv_ac,
+            "Sol": np.asarray(s24, dtype=float),
+        }
+    )
+    title = "Día Típico"
+    return {
+        "hours": hours,
+        "demand_kw": demand_kw,
+        "pv_ac_kw": pv_ac,
+        "solar_factor_pct": np.asarray(s24, dtype=float) * 100.0,
+        "month_for_plot": int(month_for_plot),
+        "title": title,
+        "export_frame": frame,
+    }
+
+
 def plot_dia_tipico(
     kWp,
     inv_sel,
@@ -662,30 +720,23 @@ def plot_dia_tipico(
     name_png=None,
 ):
     """Dibuja el 'Día Típico' (consumo vs PV limitado por inversor)."""
-    if demand_month_factor is None:
-        demand_month_factor = np.ones(12)
-    if month_for_plot is None:
-        month_for_plot = int(np.argmax(demand_month_factor))
-
-    Dm = 30
-    E_day = demand_month_factor[month_for_plot] * cfg["E_month_kWh"] / Dm
-    P_AC = inv_sel["inverter"]["AC_kW"]
-    pr_deg = (1.0 - cfg.get("deg_rate", 0.0)) ** year_for_plot
-    PR_eff = cfg["PR"] * pr_deg
-
-    P_dem = np.array(w24) * E_day
-    E_pv_day = kWp * PR_eff * hsp_month[month_for_plot]
-    P_pv_dc = np.array(s24) * E_pv_day
-    P_pv_ac = np.minimum(P_pv_dc, P_AC)
-
-    horas = np.arange(24)
+    prepared = prepare_typical_day_series(
+        kWp,
+        inv_sel,
+        cfg,
+        w24,
+        s24,
+        hsp_month,
+        demand_month_factor,
+        month_for_plot=month_for_plot,
+        year_for_plot=year_for_plot,
+    )
+    horas = prepared["hours"]
     fig, ax1 = plt.subplots(figsize=(9, 5))
-    df_export = pd.DataFrame([horas, P_dem, P_pv_ac, s24]).T
-    df_export.columns = ["Hora", "Demanda", "Autogeneración", "Sol"]
-    df_export.to_csv(os.path.join(out_dir, f"dia_tipico_{kWp}kWp.csv"), index=False)
+    prepared["export_frame"].to_csv(os.path.join(out_dir, f"dia_tipico_{kWp}kWp.csv"), index=False)
 
-    ax1.bar(horas - 0.2, P_dem, width=0.4, label="Consumo", color="red")
-    ax1.bar(horas + 0.2, P_pv_ac, width=0.4, label="FV", color="#57eb36")
+    ax1.bar(horas - 0.2, prepared["demand_kw"], width=0.4, label="Consumo", color="red")
+    ax1.bar(horas + 0.2, prepared["pv_ac_kw"], width=0.4, label="FV", color="#57eb36")
 
     props = dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray")
     ax1.text(0.01, 0.99, f"# módulos={int(1e3 * kWp / cfg['P_mod_W'])}", transform=ax1.transAxes, fontsize=9, verticalalignment="top", horizontalalignment="left", bbox=props)
@@ -697,14 +748,14 @@ def plot_dia_tipico(
     ax1.grid(axis="y", alpha=0.25)
 
     ax2 = ax1.twinx()
-    ax2.plot(horas, s24 * 100.0, linewidth=2.5, label="Factor Solar", color="#f2bb4b")
+    ax2.plot(horas, prepared["solar_factor_pct"], linewidth=2.5, label="Factor Solar", color="#f2bb4b")
     ax2.set_ylabel("Factor Solar [%]")
 
     h1, l1 = ax1.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
     ax1.legend(h1 + h2, l1 + l2, loc="upper right", ncol=3, frameon=True, framealpha=0.9)
 
-    titulo = "Día Típico"
+    titulo = prepared["title"]
     if export_allowed is False:
         titulo += " (Cero inyección)"
     ax1.set_title(titulo)
@@ -719,17 +770,28 @@ def plot_dia_tipico(
     plt.close(fig)
 
 
+def prepare_cumulative_npv_series(df: pd.DataFrame) -> dict:
+    """Prepara series del gráfico de flujo descontado acumulado."""
+    x_values = np.asarray(df["Año_mes"].values)
+    y_values = np.asarray(df["NPV_COP"].values, dtype=float)
+    colors = ["green" if value >= 0 else "red" for value in y_values]
+    sign_changes = np.where(np.sign(y_values[:-1]) != np.sign(y_values[1:]))[0] if len(y_values) > 1 else np.asarray([], dtype=int)
+    crossing_x = x_values[sign_changes[0] + 1] if len(sign_changes) > 0 else None
+    return {
+        "x_values": x_values,
+        "y_values": y_values,
+        "colors": colors,
+        "crossing_x": crossing_x,
+    }
+
+
 def plot_cumulated_npv(df: pd.DataFrame, kWp, out_dir, cfg):
     """Grafica NPV acumulado mensual y marca el cruce a positivo si aplica."""
+    prepared = prepare_cumulative_npv_series(df)
     fig, ax = plt.subplots()
-    x = df["Año_mes"].values
-    y = df["NPV_COP"].values
-    colors = ["green" if val >= 0 else "red" for val in df["NPV_COP"].values]
-    ax.bar(df["Año_mes"].values, df["NPV_COP"].values, color=colors)
-    sign_changes = np.where(np.sign(y[:-1]) != np.sign(y[1:]))[0]
-    if len(sign_changes) > 0:
-        idx = sign_changes[0] + 1
-        ax.axvline(x[idx], linestyle="--", color="blue", linewidth=1.5)
+    ax.bar(prepared["x_values"], prepared["y_values"], color=prepared["colors"])
+    if prepared["crossing_x"] is not None:
+        ax.axvline(prepared["crossing_x"], linestyle="--", color="blue", linewidth=1.5)
 
     plt.xticks(rotation=90)
     ax.xaxis.set_major_locator(mticker.MultipleLocator(10))
@@ -744,21 +806,47 @@ def plot_cumulated_npv(df: pd.DataFrame, kWp, out_dir, cfg):
     plt.close()
 
 
-def plot_battery_monthly(df_month, kWp, cfg):
-    """Grafica cobertura de demanda y destino PV mensual para batería (año 1)."""
+def prepare_battery_monthly_series(df_month: pd.DataFrame) -> dict:
+    """Prepara series mensuales de cobertura de demanda y destino FV."""
     if "Año_mes" in df_month.columns:
         xlabels = df_month["Año_mes"].astype(str).tolist()
     else:
         xlabels = [str(i + 1) for i in range(len(df_month))]
+    pv_load = df_month.get("PV_a_Carga_kWh", pd.Series(np.zeros(len(df_month)))).to_numpy(dtype=float)
+    bat_load = df_month.get("Bateria_a_Carga_kWh", pd.Series(np.zeros(len(df_month)))).to_numpy(dtype=float)
+    imp = df_month.get("Importacion_Red_kWh", pd.Series(np.zeros(len(df_month)))).to_numpy(dtype=float)
+    pv_batt = df_month.get("PV_a_Bateria_kWh", pd.Series(np.zeros(len(df_month)))).to_numpy(dtype=float)
+    exp = df_month.get("Exportacion_kWh", pd.Series(np.zeros(len(df_month)))).to_numpy(dtype=float)
+    if "Curtailment_kWh" in df_month.columns:
+        curtail = df_month["Curtailment_kWh"].to_numpy(dtype=float)
+    else:
+        curtail = np.zeros_like(exp)
+    return {
+        "xlabels": xlabels,
+        "coverage_series": [
+            {"label": "PV → Carga", "values": pv_load},
+            {"label": "Batería → Carga", "values": bat_load},
+            {"label": "Importación Red", "values": imp},
+        ],
+        "destination_series": [
+            {"label": "PV → Carga", "values": pv_load},
+            {"label": "PV → Batería", "values": pv_batt},
+            {"label": "Exportación", "values": exp},
+            {"label": "Curtailment", "values": curtail},
+        ],
+    }
+
+
+def plot_battery_monthly(df_month, kWp, cfg):
+    """Grafica cobertura de demanda y destino PV mensual para batería (año 1)."""
+    prepared = prepare_battery_monthly_series(df_month)
+    xlabels = prepared["xlabels"]
 
     fig1, ax1 = plt.subplots(figsize=(12, 5))
-    pv_load = df_month["PV_a_Carga_kWh"].values
-    bat_load = df_month["Bateria_a_Carga_kWh"].values
-    imp = df_month["Importacion_Red_kWh"].values
-
-    ax1.bar(xlabels, pv_load, label="PV → Carga")
-    ax1.bar(xlabels, bat_load, bottom=pv_load, label="Batería → Carga")
-    ax1.bar(xlabels, imp, bottom=pv_load + bat_load, label="Importación Red")
+    bottom = np.zeros(len(xlabels), dtype=float)
+    for series in prepared["coverage_series"]:
+        ax1.bar(xlabels, series["values"], bottom=bottom, label=series["label"])
+        bottom = bottom + np.asarray(series["values"], dtype=float)
     ax1.set_title("Cobertura de la Demanda (mensual)")
     ax1.set_ylabel("Energía [kWh]")
     ax1.legend()
@@ -767,18 +855,13 @@ def plot_battery_monthly(df_month, kWp, cfg):
     ax1.text(0.01, 0.99, f"# módulos={int(1e3 * kWp / cfg['P_mod_W'])}", transform=ax1.transAxes, fontsize=9, verticalalignment="top", horizontalalignment="left", bbox=props)
 
     fig2, ax2 = plt.subplots(figsize=(12, 5))
-    pv_batt = df_month["PV_a_Bateria_kWh"].values
-    exp = df_month["Exportacion_kWh"].values
-    if "Curtailment_kWh" in df_month.columns:
-        curtail = df_month["Curtailment_kWh"].values
-    else:
-        curtail = np.zeros_like(exp)
-
-    ax2.bar(xlabels, pv_load, label="PV → Carga")
-    ax2.bar(xlabels, pv_batt, bottom=pv_load, label="PV → Batería")
-    ax2.bar(xlabels, exp, bottom=pv_load + pv_batt, label="Exportación")
-    if np.any(curtail > 1e-6):
-        ax2.bar(xlabels, curtail, bottom=pv_load + pv_batt + exp, label="Curtailment")
+    bottom = np.zeros(len(xlabels), dtype=float)
+    for series in prepared["destination_series"]:
+        values = np.asarray(series["values"], dtype=float)
+        if series["label"] == "Curtailment" and not np.any(values > 1e-6):
+            continue
+        ax2.bar(xlabels, values, bottom=bottom, label=series["label"])
+        bottom = bottom + values
 
     ax2.set_title("Destino de la Generación FV (mensual)")
     ax2.set_ylabel("Energía [kWh]")

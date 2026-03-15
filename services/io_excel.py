@@ -121,8 +121,21 @@ def _normalize_choice(value: Any, mapping: dict[str, str], default: str) -> str:
     return mapping.get(slug, default)
 
 
+def _is_missing_config_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
 def _normalize_config_value(key: str, value: Any) -> Any:
     default_value = DEFAULT_CONFIG.get(key)
+    if _is_missing_config_value(value):
+        value = default_value
     if key == "use_excel_profile":
         if isinstance(value, bool):
             return _normalize_mode(value), None
