@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
+import re
+from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
@@ -18,6 +19,12 @@ from pv_product.utils import (
 from .i18n import tr
 from .types import ScenarioRecord, ScenarioSessionState
 from .ui_schema import format_metric, metric_label
+
+
+MONTH_ABBREVIATIONS = {
+    "es": ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"],
+    "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+}
 
 
 def candidate_key_for(k_wp: float, battery_name: str) -> str:
@@ -171,6 +178,34 @@ def _module_annotation(k_wp: float | None, module_power_w: float | None, *, lang
 
 def _deep_dive_empty(title: str, *, lang: str = "es") -> go.Figure:
     return _empty_result_figure(title, tr("workbench.deep_dive.no_data", lang))
+
+
+def _infer_month_number(value: Any) -> int | None:
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        month = int(value.month)
+        return month if 1 <= month <= 12 else None
+    if isinstance(value, (int, float)) and not pd.isna(value):
+        month = int(value)
+        return month if 1 <= month <= 12 else None
+    if value is None:
+        return None
+    parts = [int(part) for part in re.findall(r"\d+", str(value))]
+    for part in reversed(parts):
+        if 1 <= part <= 12:
+            return part
+    return None
+
+
+def abbreviated_month_labels(values: pd.Series | list[Any] | tuple[Any, ...], *, lang: str = "es") -> list[str]:
+    locale = lang if lang in MONTH_ABBREVIATIONS else "es"
+    source = list(values)
+    labels: list[str] = []
+    for index, value in enumerate(source):
+        month_number = _infer_month_number(value)
+        if month_number is None:
+            month_number = (index % 12) + 1
+        labels.append(MONTH_ABBREVIATIONS[locale][month_number - 1])
+    return labels
 
 
 def build_project_timeline(month_count: int, *, base_year: int | None = None) -> pd.DataFrame:
@@ -349,6 +384,8 @@ def build_monthly_balance_figure(
     lang: str = "es",
     title: str | None = None,
 ) -> go.Figure:
+    month_values = monthly_balance["Año_mes"].tolist()
+    month_labels = abbreviated_month_labels(month_values, lang=lang)
     melted = monthly_balance.melt(id_vars="Año_mes", var_name="series", value_name="kWh")
     figure_title = title or ("Balance mensual de energía (año 1)" if lang == "es" else "Monthly energy balance (year 1)")
     figure = px.bar(
@@ -360,7 +397,14 @@ def build_monthly_balance_figure(
         template="plotly_white",
         title=figure_title,
     )
-    figure.update_xaxes(title="Mes" if lang == "es" else "Month")
+    figure.update_xaxes(
+        title="Mes" if lang == "es" else "Month",
+        tickmode="array",
+        tickvals=month_values,
+        ticktext=month_labels,
+        categoryorder="array",
+        categoryarray=month_values,
+    )
     figure.update_yaxes(title="kWh", tickformat=",.0f")
     return figure
 
@@ -385,10 +429,12 @@ def build_annual_coverage_figure(
     if not isinstance(monthly, pd.DataFrame) or monthly.empty:
         return _deep_dive_empty(title, lang=lang)
     prepared = prepare_autoconsumo_anual_series(monthly, export_allowed=export_allowed)
+    month_values = prepared["xlabels"]
+    month_labels = abbreviated_month_labels(month_values, lang=lang)
     figure = go.Figure()
     for series in prepared["series"]:
         figure.add_bar(
-            x=prepared["xlabels"],
+            x=month_values,
             y=series["values"],
             name=series["label"],
             marker_color=series["color"],
@@ -399,7 +445,14 @@ def build_annual_coverage_figure(
         barmode="stack",
         annotations=[annotation] if (annotation := _module_annotation(detail.get("kWp"), config.get("P_mod_W"), lang=lang)) else [],
     )
-    figure.update_xaxes(title="Mes" if lang == "es" else "Month")
+    figure.update_xaxes(
+        title="Mes" if lang == "es" else "Month",
+        tickmode="array",
+        tickvals=month_values,
+        ticktext=month_labels,
+        categoryorder="array",
+        categoryarray=month_values,
+    )
     figure.update_yaxes(title="kWh", tickformat=",.0f")
     return figure
 
@@ -416,6 +469,8 @@ def build_battery_load_figure(
     if not isinstance(monthly, pd.DataFrame) or monthly.empty or not required.issubset(monthly.columns):
         return _deep_dive_empty(title, lang=lang)
     prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy())
+    month_values = prepared["xlabels"]
+    month_labels = abbreviated_month_labels(month_values, lang=lang)
     color_map = {
         "PV → Carga": "#57eb36",
         "Batería → Carga": "#6fa8dc",
@@ -424,7 +479,7 @@ def build_battery_load_figure(
     figure = go.Figure()
     for series in prepared["coverage_series"]:
         figure.add_bar(
-            x=prepared["xlabels"],
+            x=month_values,
             y=series["values"],
             name=series["label"],
             marker_color=color_map.get(series["label"], "#94a3b8"),
@@ -435,7 +490,14 @@ def build_battery_load_figure(
         barmode="stack",
         annotations=[annotation] if (annotation := _module_annotation(detail.get("kWp"), config.get("P_mod_W"), lang=lang)) else [],
     )
-    figure.update_xaxes(title="Mes" if lang == "es" else "Month")
+    figure.update_xaxes(
+        title="Mes" if lang == "es" else "Month",
+        tickmode="array",
+        tickvals=month_values,
+        ticktext=month_labels,
+        categoryorder="array",
+        categoryarray=month_values,
+    )
     figure.update_yaxes(title="Energía [kWh]" if lang == "es" else "Energy [kWh]", tickformat=",.0f")
     return figure
 

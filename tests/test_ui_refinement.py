@@ -43,6 +43,8 @@ from services import (
 from services.result_views import (
     build_annual_coverage_figure,
     build_battery_load_figure,
+    build_monthly_balance,
+    build_monthly_balance_figure,
     build_npv_figure,
     build_pv_destination_figure,
     build_typical_day_figure,
@@ -409,6 +411,24 @@ def test_deep_dive_figure_builders_return_non_empty_plotly_figures() -> None:
     assert typical_day.data[0].type == "bar"
     assert typical_day.data[1].type == "bar"
     assert typical_day.data[2].type == "scatter"
+
+
+def test_workbench_monthly_figures_use_abbreviated_month_labels() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    detail = scenario.scan_result.candidate_details[scenario.selected_candidate_key or scenario.scan_result.best_candidate_key]
+
+    monthly_balance = build_monthly_balance(detail["monthly"], lang="es")
+    monthly_balance_figure = build_monthly_balance_figure(monthly_balance, lang="es")
+    annual = build_annual_coverage_figure(detail, scenario.config_bundle.config, lang="es")
+    battery_load = build_battery_load_figure(detail, scenario.config_bundle.config, lang="es")
+
+    expected = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    assert list(monthly_balance_figure.layout.xaxis.ticktext) == expected
+    assert list(annual.layout.xaxis.ticktext) == expected
+    assert list(battery_load.layout.xaxis.ticktext) == expected
 
 
 def test_cash_flow_timeline_starts_next_calendar_year_and_uses_dual_x_axis() -> None:

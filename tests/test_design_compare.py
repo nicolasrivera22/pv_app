@@ -121,6 +121,30 @@ def test_design_rows_include_customer_facing_fields() -> None:
     assert "is_workbench_selected" in available.columns
 
 
+def test_selected_design_rows_keep_first_selection_and_sort_remaining_by_kwp_then_battery() -> None:
+    state = _run_ready_state()
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+
+    keys = list(scenario.scan_result.candidate_details)
+    pinned = keys[-1]
+    remainder = keys[:4]
+    selection = (pinned, *remainder)
+
+    rows = build_design_comparison_rows(scenario, selection, lang="es")
+
+    expected_remainder = sorted(
+        remainder,
+        key=lambda candidate_key: (
+            float(scenario.scan_result.candidate_details[candidate_key]["kWp"]),
+            str(scenario.scan_result.candidate_details[candidate_key]["battery_name"]),
+            candidate_key,
+        ),
+    )
+    assert rows["candidate_key"].tolist() == [pinned, *expected_remainder]
+    assert rows["design_label"].tolist() == [f"#{index}" for index in range(1, len(rows) + 1)]
+
+
 def test_compare_state_distinguishes_blocked_and_ready_modes() -> None:
     empty_state = build_design_compare_state(None, (), lang="es")
     assert empty_state.code == "no_active"
@@ -165,7 +189,13 @@ def test_monthly_destination_chart_switches_layout_for_large_selection() -> None
     large_figure = build_monthly_pv_destination_figure(large_frame, lang="es", empty_message="vacío")
 
     assert small_figure.layout.barmode == "stack"
+    assert list(small_figure.layout.xaxis.ticktext) == ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    first_design_pv_trace = next(trace for trace in small_figure.data if trace.name.startswith("#1 · FV a carga"))
+    second_design_pv_trace = next(trace for trace in small_figure.data if trace.name.startswith("#2 · FV a carga"))
+    assert first_design_pv_trace.marker.color == "#16a34a"
+    assert second_design_pv_trace.marker.color != first_design_pv_trace.marker.color
     assert len(large_figure.layout.annotations or []) >= len(large_keys)
+    assert list(large_figure.layout.xaxis.ticktext) == ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
 
 def test_typical_day_figure_uses_small_multiples_and_dynamic_height() -> None:

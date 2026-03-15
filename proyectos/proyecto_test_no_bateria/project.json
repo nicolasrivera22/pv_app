@@ -4,7 +4,14 @@
   "slug": "proyecto_test_no_bateria",
   "active_scenario_id": "scenario-10efdff4",
   "comparison_scenario_ids": [],
-  "design_comparison_candidate_keys": {},
+  "design_comparison_candidate_keys": {
+    "scenario-10efdff4": [
+      "17.400::None",
+      "14.400::None",
+      "10.200::None",
+      "24.600::None"
+    ]
+  },
   "scenarios": [
     {
       "scenario_id": "scenario-10efdff4",
@@ -12,8 +19,8 @@
       "source_name": "PV_inputs.xlsx",
       "selected_candidate_key": "17.400::None",
       "dirty": false,
-      "last_run_at": "2026-03-15T00:16:38",
-      "scan_fingerprint": "301ca175fad0d5278d28e104861f098964031e5784cbda82858a14d31023f64a"
+      "last_run_at": "2026-03-15T00:43:24",
+      "scan_fingerprint": "2483f639ee06aaa9d4618072139477092f4d39f24ebed3f317ef61b1cae48f7a"
     }
   ],
   "ui_prefs": {

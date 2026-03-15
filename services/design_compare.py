@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from .i18n import tr
-from .result_views import build_project_timeline
+from .result_views import abbreviated_month_labels, build_project_timeline
 from .types import ScenarioRecord, ScenarioSessionState
 from .ui_schema import format_metric
 
@@ -82,6 +82,68 @@ def _month_labels(monthly: pd.DataFrame) -> list[str]:
         return [str(index + 1) for index in range(12)]
     labels = monthly.iloc[:12]["Año_mes"].astype(str).tolist()
     return labels or [str(index + 1) for index in range(12)]
+
+
+def _ordered_display_candidate_keys(
+    scenario_record: ScenarioRecord,
+    selected_candidate_keys: list[str] | tuple[str, ...],
+) -> tuple[str, ...]:
+    if scenario_record.scan_result is None:
+        return tuple(selected_candidate_keys)
+    valid_keys = [key for key in selected_candidate_keys if key in scenario_record.scan_result.candidate_details]
+    if len(valid_keys) <= 1:
+        return tuple(valid_keys)
+
+    pinned = valid_keys[0]
+
+    def _sort_key(candidate_key: str) -> tuple[float, str, str]:
+        detail = scenario_record.scan_result.candidate_details[candidate_key]
+        return (
+            float(detail.get("kWp", 0.0) or 0.0),
+            str(detail.get("battery_name", "") or ""),
+            candidate_key,
+        )
+
+    remainder = sorted(valid_keys[1:], key=_sort_key)
+    return (pinned, *remainder)
+
+
+MONTHLY_DESTINATION_PALETTES: tuple[dict[str, str], ...] = (
+    {
+        "PV_a_Carga_kWh": "#16a34a",
+        "PV_a_Bateria_kWh": "#a855f7",
+        "Exportacion_kWh": "#2563eb",
+        "Curtailment_kWh": "#94a3b8",
+    },
+    {
+        "PV_a_Carga_kWh": "#0f766e",
+        "PV_a_Bateria_kWh": "#0891b2",
+        "Exportacion_kWh": "#0284c7",
+        "Curtailment_kWh": "#cbd5e1",
+    },
+    {
+        "PV_a_Carga_kWh": "#f59e0b",
+        "PV_a_Bateria_kWh": "#fb7185",
+        "Exportacion_kWh": "#f97316",
+        "Curtailment_kWh": "#d6d3d1",
+    },
+    {
+        "PV_a_Carga_kWh": "#7c3aed",
+        "PV_a_Bateria_kWh": "#8b5cf6",
+        "Exportacion_kWh": "#6366f1",
+        "Curtailment_kWh": "#cbd5e1",
+    },
+    {
+        "PV_a_Carga_kWh": "#65a30d",
+        "PV_a_Bateria_kWh": "#84cc16",
+        "Exportacion_kWh": "#22c55e",
+        "Curtailment_kWh": "#d4d4d8",
+    },
+)
+
+
+def _design_palette(index: int) -> dict[str, str]:
+    return MONTHLY_DESTINATION_PALETTES[index % len(MONTHLY_DESTINATION_PALETTES)]
 
 
 def _inverter_name(detail: dict[str, Any]) -> str:
@@ -286,8 +348,9 @@ def build_selected_design_rows(
             ]
         )
     indexed = rows.set_index("candidate_key")
+    ordered_keys = _ordered_display_candidate_keys(scenario_record, selected_candidate_keys)
     selected_rows: list[dict[str, Any]] = []
-    for index, candidate_key in enumerate(selected_candidate_keys):
+    for index, candidate_key in enumerate(ordered_keys):
         if candidate_key not in indexed.index:
             continue
         row = indexed.loc[candidate_key].to_dict()
@@ -358,7 +421,7 @@ def build_annual_demand_coverage_frame(
         return pd.DataFrame(columns=["design_label", "candidate_key", "metric", "value_kwh"])
     selected_frame = _selected_lookup_frame(scenario_record, selected_candidate_keys)
     rows: list[dict[str, Any]] = []
-    for candidate_key in selected_candidate_keys:
+    for candidate_key in _ordered_display_candidate_keys(scenario_record, selected_candidate_keys):
         if candidate_key not in selected_frame.index:
             continue
         detail = scenario_record.scan_result.candidate_details[candidate_key]
@@ -383,7 +446,7 @@ def build_monthly_pv_destination_frame(
         return pd.DataFrame(columns=["design_label", "candidate_key", "month", "metric", "value_kwh"])
     selected_frame = _selected_lookup_frame(scenario_record, selected_candidate_keys)
     rows: list[dict[str, Any]] = []
-    for candidate_key in selected_candidate_keys:
+    for candidate_key in _ordered_display_candidate_keys(scenario_record, selected_candidate_keys):
         if candidate_key not in selected_frame.index:
             continue
         detail = scenario_record.scan_result.candidate_details[candidate_key]
@@ -437,7 +500,7 @@ def build_typical_day_frame(
     demand_day = (float(demand_month_factor[month_for_plot]) if demand_month_factor.size else 1.0) * float(cfg.get("E_month_kWh", 0.0) or 0.0) / 30.0
     pr_eff = float(cfg.get("PR", 0.0) or 0.0)
     rows: list[dict[str, Any]] = []
-    for candidate_key in selected_candidate_keys:
+    for candidate_key in _ordered_display_candidate_keys(scenario_record, selected_candidate_keys):
         if candidate_key not in selected_frame.index:
             continue
         detail = scenario_record.scan_result.candidate_details[candidate_key]
@@ -476,7 +539,7 @@ def build_npv_projection_frame(
         return pd.DataFrame(columns=["design_label", "candidate_key", "Año_mes", "NPV_COP", "month_index", "calendar_year", "project_year"])
     selected_frame = _selected_lookup_frame(scenario_record, selected_candidate_keys, lang=lang)
     rows: list[dict[str, Any]] = []
-    for candidate_key in selected_candidate_keys:
+    for candidate_key in _ordered_display_candidate_keys(scenario_record, selected_candidate_keys):
         if candidate_key not in selected_frame.index:
             continue
         detail = scenario_record.scan_result.candidate_details[candidate_key]
@@ -550,15 +613,71 @@ def build_monthly_pv_destination_figure(
         return _empty_figure(tr("compare.figure.monthly_destination", lang), empty_message)
 
     month_order = list(dict.fromkeys(frame["month"].tolist()))
+    month_labels = abbreviated_month_labels(month_order, lang=lang)
+    design_labels = list(dict.fromkeys(frame["design_label"].tolist()))
     if selection_count <= 4:
         figure = go.Figure()
+        for design_index, design_label in enumerate(design_labels):
+            palette = _design_palette(design_index)
+            design_subset = frame[frame["design_label"] == design_label]
+            for metric in metrics:
+                subset = design_subset[design_subset["metric"] == metric]
+                if subset.empty:
+                    continue
+                figure.add_bar(
+                    x=subset["month"],
+                    y=subset["value_kwh"],
+                    name=f"{design_label} · {_metric_name(metric, lang)}",
+                    marker_color=palette.get(metric, _metric_color(metric)),
+                    offsetgroup=design_label,
+                    legendgroup=design_label,
+                    customdata=subset[["month", "design_label", "candidate_key"]],
+                    hovertemplate=(
+                        ("Mes" if lang == "es" else "Month")
+                        + ": %{customdata[0]}<br>"
+                        + ("Diseño" if lang == "es" else "Design")
+                        + ": %{customdata[1]}<br>"
+                        + ("Candidato" if lang == "es" else "Candidate")
+                        + ": %{customdata[2]}<br>"
+                        + ("Energía" if lang == "es" else "Energy")
+                        + ": %{y:,.0f} kWh<extra></extra>"
+                    ),
+                )
+        figure.update_layout(template="plotly_white", title=tr("compare.figure.monthly_destination", lang), barmode="stack")
+        figure.update_xaxes(
+            title=tr("compare.axis.month", lang),
+            tickmode="array",
+            tickvals=month_order,
+            ticktext=month_labels,
+            categoryorder="array",
+            categoryarray=month_order,
+        )
+        figure.update_yaxes(title="kWh", tickformat=",.0f")
+        return figure
+
+    columns = 3 if selection_count > 4 else 2
+    rows = int(np.ceil(selection_count / columns))
+    figure = make_subplots(
+        rows=rows,
+        cols=columns,
+        subplot_titles=design_labels,
+        horizontal_spacing=0.08,
+        vertical_spacing=0.14,
+    )
+    for index, design_label in enumerate(design_labels):
+        design_subset = frame[frame["design_label"] == design_label]
+        palette = _design_palette(index)
+        row = (index // columns) + 1
+        column = (index % columns) + 1
         for metric in metrics:
-            subset = frame[frame["metric"] == metric]
+            subset = design_subset[design_subset["metric"] == metric]
+            if subset.empty:
+                continue
             figure.add_bar(
-                x=[subset["month"], subset["design_label"]],
+                x=subset["month"],
                 y=subset["value_kwh"],
-                name=_metric_name(metric, lang),
-                marker_color=_metric_color(metric),
+                name=f"{design_label} · {_metric_name(metric, lang)}",
+                marker_color=palette.get(metric, _metric_color(metric)),
                 customdata=subset[["month", "design_label", "candidate_key"]],
                 hovertemplate=(
                     ("Mes" if lang == "es" else "Month")
@@ -570,30 +689,28 @@ def build_monthly_pv_destination_figure(
                     + ("Energía" if lang == "es" else "Energy")
                     + ": %{y:,.0f} kWh<extra></extra>"
                 ),
+                row=row,
+                col=column,
             )
-        figure.update_layout(template="plotly_white", title=tr("compare.figure.monthly_destination", lang), barmode="stack")
-        figure.update_yaxes(title="kWh", tickformat=",.0f")
-        return figure
-
-    display = frame[frame["metric"].isin(metrics)].copy()
-    display["metric_label"] = display["metric"].map(lambda metric: _metric_name(metric, lang))
-    columns = 3 if selection_count > 4 else 2
-    rows = int(np.ceil(selection_count / columns))
-    figure = px.bar(
-        display,
-        x="month",
-        y="value_kwh",
-        color="metric_label",
-        facet_col="design_label",
-        facet_col_wrap=columns,
-        category_orders={"month": month_order},
+    figure.update_layout(
         template="plotly_white",
         title=tr("compare.figure.monthly_destination", lang),
+        barmode="stack",
         height=max(360, 300 * rows),
     )
-    figure.for_each_annotation(lambda annotation: annotation.update(text=annotation.text.split("=")[-1]))
     figure.update_yaxes(title="kWh", tickformat=",.0f")
-    figure.update_xaxes(title=tr("compare.axis.month", lang))
+    for row in range(1, rows + 1):
+        for column in range(1, columns + 1):
+            figure.update_xaxes(
+                title=tr("compare.axis.month", lang),
+                tickmode="array",
+                tickvals=month_order,
+                ticktext=month_labels,
+                categoryorder="array",
+                categoryarray=month_order,
+                row=row,
+                col=column,
+            )
     return figure
 
 
