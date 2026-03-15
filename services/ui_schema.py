@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import pandas as pd
 from dash.dash_table.Format import Format, Group, Scheme
+
+from pv_product.utils import DEFAULT_CONFIG
 
 from .config_metadata import ConfigFieldMeta, extract_config_metadata
 from .i18n import tr
@@ -445,6 +448,8 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
     },
 }
 
+_MISSING = object()
+
 
 def _prettify_item(item: str) -> str:
     return item.replace("_", " ").strip().capitalize()
@@ -541,19 +546,77 @@ def build_assumption_sections(bundle, lang: str = "es", show_all: bool = False) 
     return list(sections_by_group.values())
 
 
+def _is_missing_config_input(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _schema_default_value(field_key: str) -> Any:
+    schema = FIELD_SCHEMAS.get(field_key)
+    if schema is None:
+        return _MISSING
+    for _, option_value in schema.options:
+        if not _is_missing_config_input(option_value):
+            return option_value
+    if schema.kind == "number":
+        return 0.0
+    if schema.kind in {"text", "dropdown"}:
+        return ""
+    return _MISSING
+
+
+def _default_is_schema_ambiguous(field_key: str, default_value: Any) -> bool:
+    schema = FIELD_SCHEMAS.get(field_key)
+    if schema is None:
+        return False
+    option_values = [option_value for _, option_value in schema.options if not _is_missing_config_input(option_value)]
+    if option_values:
+        option_types = {type(option_value) for option_value in option_values}
+        if len(option_types) == 1:
+            option_type = next(iter(option_types))
+            return not isinstance(default_value, option_type)
+    if schema.kind == "text":
+        return not isinstance(default_value, str)
+    if schema.kind == "number":
+        return not (isinstance(default_value, (int, float)) and not isinstance(default_value, bool))
+    return False
+
+
+def _expected_config_value(field_key: str, base_config: dict[str, Any]) -> Any:
+    default_value = DEFAULT_CONFIG.get(field_key, _MISSING)
+    if default_value is not _MISSING and default_value is not None and not _default_is_schema_ambiguous(field_key, default_value):
+        return default_value
+    schema_value = _schema_default_value(field_key)
+    if schema_value is not _MISSING and schema_value is not None:
+        return schema_value
+    current = base_config.get(field_key, _MISSING)
+    if current is not _MISSING and not _is_missing_config_input(current):
+        return current
+    return None
+
+
 def coerce_config_value(field_key: str, value: Any, base_config: dict[str, Any]) -> Any:
     current = base_config.get(field_key)
-    if value in (None, ""):
-        if isinstance(current, str):
+    expected = _expected_config_value(field_key, base_config)
+    if _is_missing_config_input(value):
+        if isinstance(expected, str):
             return ""
-        return current
-    if isinstance(current, bool):
+        if not _is_missing_config_input(current):
+            return current
+        return expected
+    if isinstance(expected, bool):
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "si", "sí"}
         return bool(value)
-    if isinstance(current, int) and not isinstance(current, bool):
+    if isinstance(expected, int) and not isinstance(expected, bool):
         return int(float(value))
-    if isinstance(current, float):
+    if isinstance(expected, float):
         return float(value)
     return value
 

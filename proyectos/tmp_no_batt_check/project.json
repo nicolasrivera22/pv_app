@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "name": "tmp-no-batt-check",
+  "slug": "tmp_no_batt_check",
+  "active_scenario_id": "scenario-36b566f4",
+  "comparison_scenario_ids": [],
+  "design_comparison_candidate_keys": {},
+  "scenarios": [
+    {
+      "scenario_id": "scenario-36b566f4",
+      "name": "Base",
+      "source_name": "PV_inputs.xlsx",
+      "selected_candidate_key": null,
+      "dirty": true,
+      "last_run_at": null,
+      "scan_fingerprint": null
+    }
+  ],
+  "ui_prefs": {
+    "language": "es"
+  }
+}

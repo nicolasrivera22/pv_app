@@ -11,11 +11,14 @@ import pytest
 import services.scenario_runner as scenario_runner
 from services import (
     add_scenario,
+    build_assumption_sections,
     bootstrap_client_session,
     commit_client_session,
+    collect_config_updates,
     configure_runtime_environment,
     create_scenario_record,
     fingerprint_deterministic_input,
+    frame_from_rows,
     get_deterministic_cache,
     list_projects,
     load_example_config,
@@ -23,6 +26,7 @@ from services import (
     project_exports_root,
     projects_root,
     prune_session_states,
+    rebuild_bundle_from_ui,
     resolve_client_session,
     resolve_deterministic_scan,
     run_deterministic_scan_tasks,
@@ -31,6 +35,7 @@ from services import (
     set_active_scenario,
     set_design_comparison_candidates,
     update_selected_candidate,
+    update_scenario_bundle,
 )
 from services.cache import DETERMINISTIC_CACHE_SCHEMA_VERSION
 from services.project_io import read_project_manifest
@@ -65,6 +70,15 @@ def _clear_runtime_state():
 
 def _patch_user_root(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("services.runtime_paths.user_root", lambda: tmp_path)
+
+
+def _assumption_field_value(sections: list[dict], field_key: str):
+    for section in sections:
+        for bucket in ("basic", "advanced"):
+            for field in section.get(bucket, []):
+                if field.get("field") == field_key:
+                    return field.get("value")
+    raise AssertionError(f"Field {field_key!r} not found in assumption sections")
 
 
 def test_client_session_payload_omits_heavy_deterministic_blobs() -> None:
@@ -223,6 +237,55 @@ def test_project_round_trip_uses_canonical_csv_tables_and_restores_workspace(tmp
     hydrated_base = hydrated.get_scenario(base.scenario_id)
     assert hydrated_base is not None and hydrated_base.scan_result is not None
     assert hydrated_base.selected_candidate_key == alt_key
+
+
+def test_apply_no_battery_edit_persists_through_project_save_and_reopen(tmp_path, monkeypatch) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+
+    bundle = _fast_bundle()
+    seeded_bundle = replace(bundle, config={**bundle.config, "include_battery": True, "optimize_battery": False, "battery_name": ""})
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", seeded_bundle))
+    state = save_project(state, project_name="Proyecto Sin Bateria", language="es")
+
+    reopened = open_project(state.project_slug)
+    active = reopened.get_scenario()
+    assert active is not None
+    assert active.config_bundle.config["battery_name"] == ""
+
+    config_updates = collect_config_updates(
+        [{"field": "include_battery"}, {"field": "battery_name"}],
+        [False, ""],
+        active.config_bundle.config,
+    )
+    assert config_updates["include_battery"] is False
+
+    rebuilt_bundle = rebuild_bundle_from_ui(
+        active.config_bundle,
+        config_updates=config_updates,
+        inverter_catalog=active.config_bundle.inverter_catalog,
+        battery_catalog=active.config_bundle.battery_catalog,
+        demand_profile=frame_from_rows(active.config_bundle.demand_profile_table.to_dict("records"), list(active.config_bundle.demand_profile_table.columns)),
+        demand_profile_weights=frame_from_rows(active.config_bundle.demand_profile_weights_table.to_dict("records"), list(active.config_bundle.demand_profile_weights_table.columns)),
+        demand_profile_general=frame_from_rows(active.config_bundle.demand_profile_general_table.to_dict("records"), list(active.config_bundle.demand_profile_general_table.columns)),
+        month_profile=frame_from_rows(active.config_bundle.month_profile_table.to_dict("records"), list(active.config_bundle.month_profile_table.columns)),
+        sun_profile=frame_from_rows(active.config_bundle.sun_profile_table.to_dict("records"), list(active.config_bundle.sun_profile_table.columns)),
+        cop_kwp_table=frame_from_rows(active.config_bundle.cop_kwp_table.to_dict("records"), list(active.config_bundle.cop_kwp_table.columns)),
+        cop_kwp_table_others=frame_from_rows(active.config_bundle.cop_kwp_table_others.to_dict("records"), list(active.config_bundle.cop_kwp_table_others.columns)),
+    )
+    updated_state = update_scenario_bundle(reopened, active.scenario_id, rebuilt_bundle)
+    updated_active = updated_state.get_scenario(active.scenario_id)
+    assert updated_active is not None
+    assert updated_active.config_bundle.config["include_battery"] is False
+
+    sections = build_assumption_sections(updated_active.config_bundle, lang="es", show_all=False)
+    assert _assumption_field_value(sections, "include_battery") is False
+
+    saved_again = save_project(updated_state, project_name=updated_state.project_name, language="es")
+    reopened_again = open_project(saved_again.project_slug)
+    reloaded_active = reopened_again.get_scenario(active.scenario_id)
+    assert reloaded_active is not None
+    assert reloaded_active.config_bundle.config["include_battery"] is False
+    assert reloaded_active.config_bundle.config["battery_name"] == ""
 
 
 def test_project_dirty_only_tracks_persisted_workspace_state(tmp_path, monkeypatch) -> None:

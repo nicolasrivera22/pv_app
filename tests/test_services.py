@@ -6,6 +6,7 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pandas.testing as pdt
 import pytest
@@ -14,9 +15,10 @@ from openpyxl.utils import range_boundaries
 
 from pv_product.simulator import calculate_capex_client
 from pv_product.utils import build_7x24_from_excel
-from services import ensure_template, load_config_from_excel, load_example_config, run_scan, run_scenario
-from services.io_excel import WorkbookContractError
+from services import collect_config_updates, ensure_template, load_config_from_excel, load_example_config, run_scan, run_scenario
+from services.io_excel import WorkbookContractError, _normalize_config_value
 from services.result_views import build_kpis, resolve_selected_candidate_key, resolve_selected_candidate_key_for_scenario
+from services.ui_schema import coerce_config_value
 from services.validation import validate_config
 
 
@@ -111,10 +113,63 @@ def test_loads_spanish_workbook_and_normalizes_config() -> None:
 
     assert bundle.config["bat_coupling"] == "dc"
     assert bundle.config["include_battery"] is True
+    assert bundle.config["battery_name"] == ""
+    assert bundle.config["mc_battery_name"] == ""
     assert bundle.config["export_allowed"] is True
     assert bundle.config["use_excel_profile"] == "perfil horario relativo"
     assert bundle.demand_profile_7x24.shape == (7, 24)
     assert bundle.hsp_month.shape == (12,)
+
+
+def test_collect_config_updates_preserves_falsey_battery_toggle_and_blank_text_fields() -> None:
+    base_config = {
+        **load_example_config().config,
+        "include_battery": True,
+        "battery_name": np.nan,
+        "price_total_COP": 58_000_000.0,
+    }
+
+    updated = collect_config_updates(
+        [
+            {"field": "include_battery"},
+            {"field": "price_total_COP"},
+            {"field": "battery_name"},
+        ],
+        [False, 0, ""],
+        base_config,
+    )
+
+    assert updated["include_battery"] is False
+    assert updated["price_total_COP"] == 0.0
+    assert updated["battery_name"] == ""
+
+
+def test_coerce_config_value_preserves_false_and_zero_and_treats_missing_values_as_missing() -> None:
+    base_config = {
+        "include_battery": True,
+        "price_total_COP": 58_000_000.0,
+        "battery_name": np.nan,
+        "years": np.nan,
+        "use_excel_profile": "perfil horario relativo",
+    }
+
+    assert coerce_config_value("include_battery", False, base_config) is False
+    assert coerce_config_value("price_total_COP", 0, base_config) == 0.0
+    assert coerce_config_value("use_excel_profile", "perfil general", base_config) == "perfil general"
+    assert coerce_config_value("battery_name", "", base_config) == ""
+    assert coerce_config_value("battery_name", np.nan, base_config) == ""
+    assert coerce_config_value("years", np.nan, base_config) == 15
+    assert coerce_config_value("price_total_COP", "", base_config) == 58_000_000.0
+
+
+def test_normalize_config_value_converts_blank_text_config_fields_from_nan_to_empty_string() -> None:
+    battery_name, battery_error = _normalize_config_value("battery_name", np.nan)
+    mc_battery_name, mc_battery_error = _normalize_config_value("mc_battery_name", np.nan)
+
+    assert battery_name == ""
+    assert battery_error is None
+    assert mc_battery_name == ""
+    assert mc_battery_error is None
 
 
 def test_deterministic_scan_ignores_monte_carlo_fields() -> None:
@@ -356,6 +411,23 @@ def test_empty_battery_catalog_is_rejected_when_batteries_enabled(tmp_path) -> N
     assert any(issue.field == "Battery_Catalog" and issue.level == "error" for issue in issues)
     with pytest.raises(ValueError, match="Battery_Catalog"):
         run_scan(bundle)
+
+
+def test_no_battery_configuration_still_scans_through_the_no_battery_path() -> None:
+    bundle = _fast_bundle()
+    no_battery_bundle = replace(
+        bundle,
+        config={**bundle.config, "include_battery": False, "optimize_battery": False, "battery_name": ""},
+    )
+
+    scan = run_scan(no_battery_bundle)
+
+    assert scan.candidates.empty is False
+    assert set(scan.candidates["battery"].astype(str)) == {"None"}
+    assert {detail["battery_name"] for detail in scan.candidate_details.values()} == {"None"}
+    assert all(float(detail["battery"]["nom_kWh"]) == 0.0 for detail in scan.candidate_details.values())
+    assert all(float(detail["battery"]["max_kW"]) == 0.0 for detail in scan.candidate_details.values())
+    assert all(key.endswith("::None") for key in scan.candidate_details)
 
 
 def test_invalid_optimization_range_is_rejected(tmp_path) -> None:
