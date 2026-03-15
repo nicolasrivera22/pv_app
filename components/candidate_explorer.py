@@ -3,9 +3,11 @@ from __future__ import annotations
 from dash import dash_table, dcc, html
 
 from services.i18n import tr
+from services.runtime_paths import is_frozen_runtime
 
 
 def candidate_explorer_section() -> html.Div:
+    open_button_style = {} if is_frozen_runtime() else {"display": "none"}
     return html.Div(
         id="candidate-selection-section",
         className="panel",
@@ -19,6 +21,14 @@ def candidate_explorer_section() -> html.Div:
                         children=[
                             html.Button(tr("workbench.export_scenario", "es"), id="scenario-export-btn", n_clicks=0, className="action-btn secondary"),
                             html.Button(tr("common.export_artifacts", "es"), id="scenario-artifacts-btn", n_clicks=0, className="action-btn tertiary"),
+                            html.Button(
+                                tr("common.open_exports_folder", "es"),
+                                id="scenario-open-exports-btn",
+                                n_clicks=0,
+                                className="action-btn tertiary",
+                                disabled=True,
+                                style=open_button_style,
+                            ),
                         ],
                     ),
                 ],

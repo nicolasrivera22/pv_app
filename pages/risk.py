@@ -21,6 +21,8 @@ from services import (
     clear_missing_risk_result_payload,
     export_risk_artifacts,
     get_risk_result,
+    open_export_folder,
+    publish_export_artifacts,
     project_exports_root,
     resolve_client_session,
     resolve_scenario_session,
@@ -63,6 +65,7 @@ def _safe_int(value: Any) -> int | None:
 layout = html.Div(
     className="page",
     children=[
+        dcc.Store(id="risk-latest-export-folder", storage_type="memory", data=""),
         dcc.Store(id="risk-result-store", storage_type="memory"),
         html.Div(
             className="main-stack",
@@ -98,6 +101,7 @@ layout = html.Div(
     Output("risk-retain-samples-help", "children"),
     Output("risk-run-btn", "children"),
     Output("risk-export-artifacts-btn", "children"),
+    Output("risk-open-exports-btn", "children"),
     Output("risk-export-progress", "children"),
     Output("risk-summary-title", "children"),
     Output("risk-distributions-title", "children"),
@@ -125,6 +129,7 @@ def translate_risk_page(language_value):
         tr("risk.retain_samples.help", lang),
         tr("risk.run", lang),
         tr("risk.export_artifacts", lang),
+        tr("common.open_exports_folder", lang),
         tr("risk.export_artifacts_running", lang),
         tr("risk.summary.title", lang),
         tr("risk.distributions.title", lang),
@@ -149,6 +154,14 @@ def populate_risk_scenarios(session_payload, current_value):
     options = [{"label": scenario.name, "value": scenario.scenario_id} for scenario in scenarios]
     selected = resolve_default_risk_scenario(state, current_value)
     return options, selected
+
+
+@callback(
+    Output("risk-open-exports-btn", "disabled"),
+    Input("risk-latest-export-folder", "data"),
+)
+def sync_risk_export_folder_button(folder_path):
+    return not bool(folder_path)
 
 
 @callback(
@@ -479,6 +492,7 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
 
 @callback(
     Output("risk-status", "children", allow_duplicate=True),
+    Output("risk-latest-export-folder", "data"),
     Input("risk-export-artifacts-btn", "n_clicks"),
     State("risk-result-store", "data"),
     State("scenario-session-store", "data"),
@@ -499,11 +513,50 @@ def export_risk_result_artifacts(n_clicks, result_payload, session_payload, lang
         raise PreventUpdate
     result = get_risk_result(str(result_id))
     if result is None:
-        return tr("risk.error.result_missing", lang)
+        return tr("risk.error.result_missing", lang), ""
     _, state = resolve_client_session(session_payload, language=lang)
     scenario = state.get_scenario(payload.get("scenario_id"))
     if scenario is None:
-        return tr("risk.error.scenario_unavailable", lang)
+        return tr("risk.error.scenario_unavailable", lang), ""
     output_root = project_exports_root(state.project_slug) if state.project_slug else None
     paths = export_risk_artifacts(scenario, result, output_root=output_root or Path("Resultados"))
-    return tr("risk.export_done", lang, path=str(paths[0].parent.resolve()))
+    publish_result = publish_export_artifacts(
+        paths,
+        project_slug=state.project_slug,
+        scenario_slug=scenario.name or scenario.scenario_id,
+        export_kind="risk",
+    )
+    if publish_result.published_root is not None:
+        published_path = str(publish_result.published_root.resolve())
+        return tr("risk.export_done", lang, path=published_path), published_path
+    if publish_result.publish_error:
+        return (
+            tr(
+                "risk.export_partial",
+                lang,
+                path=str(publish_result.internal_root.resolve()),
+                error=publish_result.publish_error,
+            ),
+            "",
+        )
+    return tr("risk.export_done", lang, path=str(publish_result.display_root.resolve())), ""
+
+
+@callback(
+    Output("risk-status", "children", allow_duplicate=True),
+    Input("risk-open-exports-btn", "n_clicks"),
+    State("risk-latest-export-folder", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def open_risk_exports_folder(n_clicks, folder_path, language_value):
+    if not n_clicks:
+        raise PreventUpdate
+    lang = _lang(language_value)
+    if not folder_path:
+        return tr("common.exports_folder_unavailable", lang, error=tr("common.exports_folder_none", lang))
+    try:
+        open_export_folder(folder_path)
+    except (FileNotFoundError, OSError, RuntimeError) as exc:
+        return tr("common.exports_folder_unavailable", lang, error=str(exc))
+    return tr("common.exports_folder_opened", lang, path=folder_path)

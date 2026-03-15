@@ -21,6 +21,12 @@ from .design_compare import (
     resolve_design_selection,
     sanitize_design_selection,
 )
+from .export_access import (
+    ExportPublishResult,
+    build_published_export_destination,
+    open_export_folder,
+    publish_export_artifacts,
+)
 from .export_artifacts import (
     export_deterministic_artifacts,
     export_risk_artifacts,
@@ -42,6 +48,7 @@ from .runtime_paths import (
     projects_root,
     resource_root,
     runtime_cache_root,
+    user_friendly_exports_root,
     user_root,
     user_workbook_path,
 )
@@ -157,6 +164,7 @@ __all__ = [
     "MonteCarloRunResult",
     "MonteCarloSummary",
     "PercentileSummary",
+    "ExportPublishResult",
     "ProjectManifest",
     "ProjectScenarioManifest",
     "RiskMetricSummary",
@@ -201,6 +209,7 @@ __all__ = [
     "derive_panel_count",
     "duplicate_scenario",
     "ensure_template",
+    "build_published_export_destination",
     "export_deterministic_artifacts",
     "export_comparison_workbook",
     "export_design_comparison_workbook",
@@ -225,10 +234,12 @@ __all__ = [
     "build_unifilar_model",
     "metric_help",
     "metric_label",
+    "open_export_folder",
     "open_project",
     "normalize_battery_catalog_rows",
     "normalize_inverter_catalog_rows",
     "pages_dir",
+    "publish_export_artifacts",
     "project_exports_root",
     "project_inputs_root",
     "project_root",
@@ -273,6 +284,7 @@ __all__ = [
     "infer_string_layout",
     "to_cytoscape_elements",
     "tr",
+    "user_friendly_exports_root",
     "user_root",
     "user_workbook_path",
     "update_config_table_values",

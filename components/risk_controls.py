@@ -3,9 +3,11 @@ from __future__ import annotations
 from dash import dcc, html
 
 from services.i18n import tr
+from services.runtime_paths import is_frozen_runtime
 
 
 def risk_controls_section() -> html.Div:
+    open_button_style = {} if is_frozen_runtime() else {"display": "none"}
     return html.Div(
         className="panel",
         children=[
@@ -18,6 +20,14 @@ def risk_controls_section() -> html.Div:
                         children=[
                             html.Button(tr("risk.run", "es"), id="risk-run-btn", n_clicks=0, className="action-btn"),
                             html.Button(tr("risk.export_artifacts", "es"), id="risk-export-artifacts-btn", n_clicks=0, className="action-btn tertiary"),
+                            html.Button(
+                                tr("common.open_exports_folder", "es"),
+                                id="risk-open-exports-btn",
+                                n_clicks=0,
+                                className="action-btn tertiary",
+                                disabled=True,
+                                style=open_button_style,
+                            ),
                         ],
                     ),
                 ],

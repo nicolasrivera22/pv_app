@@ -43,7 +43,9 @@ from services import (
     list_projects,
     normalize_battery_catalog_rows,
     normalize_inverter_catalog_rows,
+    open_export_folder,
     open_project,
+    publish_export_artifacts,
     project_exports_root,
     project_root,
     rebuild_bundle_from_ui,
@@ -176,6 +178,7 @@ layout = html.Div(
     className="page",
     children=[
         dcc.Download(id="scenario-download"),
+        dcc.Store(id="workbench-latest-export-folder", storage_type="memory", data=""),
         html.Div(
             className="workbench-grid",
             children=[
@@ -268,6 +271,7 @@ layout = html.Div(
     Output("selected-candidate-deep-dive-title", "children"),
     Output("scenario-export-btn", "children"),
     Output("scenario-artifacts-btn", "children"),
+    Output("scenario-open-exports-btn", "children"),
     Output("scenario-artifacts-progress", "children"),
     Input("language-selector", "value"),
 )
@@ -320,6 +324,7 @@ def translate_workbench_page(language_value):
         tr("workbench.deep_dive.title", lang),
         tr("workbench.export_scenario", lang),
         tr("common.export_artifacts", lang),
+        tr("common.open_exports_folder", lang),
         tr("workbench.export_artifacts_running", lang),
     )
 
@@ -410,6 +415,14 @@ def populate_scenario_shell(session_payload, language_value):
         export_disabled,
         export_disabled,
     )
+
+
+@callback(
+    Output("scenario-open-exports-btn", "disabled"),
+    Input("workbench-latest-export-folder", "data"),
+)
+def sync_workbench_export_folder_button(folder_path):
+    return not bool(folder_path)
 
 
 @callback(
@@ -959,6 +972,7 @@ def export_active_scenario(n_clicks, session_payload):
 
 @callback(
     Output("workbench-status", "children", allow_duplicate=True),
+    Output("workbench-latest-export-folder", "data"),
     Input("scenario-artifacts-btn", "n_clicks"),
     State("scenario-session-store", "data"),
     State("language-selector", "value"),
@@ -977,4 +991,43 @@ def export_active_artifacts(n_clicks, session_payload, language_value):
         raise PreventUpdate
     output_root = project_exports_root(state.project_slug) if state.project_slug else Path("Resultados")
     paths = export_deterministic_artifacts(active, output_root=output_root)
-    return tr("workbench.export_artifacts_done", lang, path=str(paths[0].parent.resolve()))
+    publish_result = publish_export_artifacts(
+        paths,
+        project_slug=state.project_slug,
+        scenario_slug=active.name or active.scenario_id,
+        export_kind="deterministic",
+    )
+    if publish_result.published_root is not None:
+        published_path = str(publish_result.published_root.resolve())
+        return tr("workbench.export_artifacts_done", lang, path=published_path), published_path
+    if publish_result.publish_error:
+        return (
+            tr(
+                "workbench.export_artifacts_partial",
+                lang,
+                path=str(publish_result.internal_root.resolve()),
+                error=publish_result.publish_error,
+            ),
+            "",
+        )
+    return tr("workbench.export_artifacts_done", lang, path=str(publish_result.display_root.resolve())), ""
+
+
+@callback(
+    Output("workbench-status", "children", allow_duplicate=True),
+    Input("scenario-open-exports-btn", "n_clicks"),
+    State("workbench-latest-export-folder", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def open_workbench_exports_folder(n_clicks, folder_path, language_value):
+    if not n_clicks:
+        raise PreventUpdate
+    lang = _lang(language_value)
+    if not folder_path:
+        return tr("common.exports_folder_unavailable", lang, error=tr("common.exports_folder_none", lang))
+    try:
+        open_export_folder(folder_path)
+    except (FileNotFoundError, OSError, RuntimeError) as exc:
+        return tr("common.exports_folder_unavailable", lang, error=str(exc))
+    return tr("common.exports_folder_opened", lang, path=folder_path)
