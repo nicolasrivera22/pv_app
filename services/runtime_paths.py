@@ -7,6 +7,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKBOOK_NAME = "PV_inputs.xlsx"
+QUICK_GUIDE_NAME = "PVWorkbench_Guia_Rapida.html"
 PROJECTS_DIRNAME = "proyectos"
 RUNTIME_CACHE_DIRNAME = ".pv_runtime_cache"
 
@@ -37,6 +38,10 @@ def pages_dir() -> Path:
 
 def bundled_workbook_path() -> Path:
     return (resource_root() / WORKBOOK_NAME).resolve()
+
+
+def bundled_quick_guide_path() -> Path:
+    return (resource_root() / QUICK_GUIDE_NAME).resolve()
 
 
 def user_workbook_path() -> Path:

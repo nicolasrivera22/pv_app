@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from components.selected_candidate_deep_dive import selected_candidate_deep_dive
 from components.profile_editor import profile_editor_section
 from components.catalog_editor import catalog_editor_section
 from pages import workbench as workbench_page
+help_page = importlib.import_module("pages.help")
 from services import (
     ScenarioSessionState,
     add_scenario,
@@ -86,8 +88,23 @@ def test_app_defaults_to_spanish() -> None:
     app = create_app()
     layout = app.layout() if callable(app.layout) else app.layout
     selector = _find_component(layout, "language-selector")
+    help_nav = _find_component(layout, "nav-help-label")
     assert isinstance(selector, dcc.Dropdown)
     assert selector.value == "es"
+    assert help_nav is not None
+    assert help_nav.children == "Ayuda"
+
+
+def test_help_page_renders_bundled_guide_frame() -> None:
+    layout = help_page.layout() if callable(help_page.layout) else help_page.layout
+    frame = _find_component(layout, "help-quick-guide-frame")
+    missing = _find_component(layout, "help-missing-message")
+    title = _find_component(layout, "help-page-title")
+
+    assert title.children == tr("help.title", "es")
+    assert frame is not None
+    assert frame.src == "/help/guia-rapida"
+    assert missing is not None
 
 
 def test_first_render_placeholders_are_spanish_first() -> None:

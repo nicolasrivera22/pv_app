@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PVWorkbench — Guía rápida</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --accent: #2563eb;
+      --accent-2: #0ea5e9;
+      --soft: #e2e8f0;
+      --ok: #16a34a;
+      --warn: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 40px 20px 60px;
+    }
+    .hero {
+      color: white;
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 2.2rem;
+    }
+    .hero p {
+      margin: 0;
+      color: #cbd5e1;
+      line-height: 1.6;
+      max-width: 760px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 18px;
+      margin-top: 24px;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+    }
+    .card h2 {
+      margin-top: 0;
+      font-size: 1.15rem;
+      color: var(--accent);
+    }
+    .card p, .card li {
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    ol, ul { padding-left: 20px; }
+    .badge {
+      display: inline-block;
+      background: #dbeafe;
+      color: #1d4ed8;
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 0.88rem;
+      font-weight: bold;
+      margin-bottom: 12px;
+    }
+    .steps {
+      background: white;
+      border-radius: 22px;
+      padding: 26px;
+      margin-top: 24px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+    }
+    .steps h2 { margin-top: 0; color: var(--accent); }
+    .callout {
+      border-left: 5px solid var(--warn);
+      background: #fff7ed;
+      padding: 14px 16px;
+      border-radius: 10px;
+      color: #7c2d12;
+      margin-top: 16px;
+    }
+    .good {
+      border-left-color: var(--ok);
+      background: #f0fdf4;
+      color: #166534;
+    }
+    footer {
+      color: #cbd5e1;
+      font-size: 0.95rem;
+      margin-top: 28px;
+      text-align: center;
+    }
+    code {
+      background: #e2e8f0;
+      padding: 2px 6px;
+      border-radius: 6px;
+      color: #0f172a;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div class="badge">Prueba de fuego en Windows</div>
+      <h1>PVWorkbench — Guía rápida</h1>
+      <p>
+        Esta aplicación sirve para explorar diseños fotovoltaicos, revisar resultados
+        económicos y energéticos, guardar proyectos y correr una página de riesgo con
+        Monte Carlo. En esta etapa nos interesa validar claridad, estabilidad y facilidad de uso.
+      </p>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Cómo abrir la app</h2>
+        <ol>
+          <li>Abre la carpeta entregada <code>PVWorkbench</code>.</li>
+          <li>Haz doble clic en <code>PVWorkbench.exe</code>.</li>
+          <li>Espera unos segundos mientras arranca el servidor local.</li>
+          <li>La app debería abrirse sola en tu navegador.</li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <h2>Qué probar primero</h2>
+        <ul>
+          <li>Cargar el ejemplo incluido.</li>
+          <li>Correr un barrido determinístico.</li>
+          <li>Explorar candidatos y el análisis detallado.</li>
+          <li>Guardar y reabrir un proyecto.</li>
+          <li>Exportar resultados.</li>
+          <li>Probar la página de riesgo.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Qué feedback nos ayuda mucho</h2>
+        <ul>
+          <li>Pantallas o botones confusos.</li>
+          <li>Pasos poco evidentes.</li>
+          <li>Lentitud o bloqueos.</li>
+          <li>Errores extraños.</li>
+          <li>Resultados inesperados.</li>
+        </ul>
+      </section>
+    </div>
+
+    <section class="steps">
+      <h2>Flujo recomendado de prueba</h2>
+      <ol>
+        <li><strong>Cargar ejemplo:</strong> confirma que la app abre y navega bien.</li>
+        <li><strong>Correr determinístico:</strong> revisa curva VPN vs kWp, tabla de candidatos, KPIs y análisis detallado.</li>
+        <li><strong>Editar parámetros:</strong> cambia algunos valores simples y vuelve a correr.</li>
+        <li><strong>Guardar proyecto:</strong> guarda, cierra y reabre para verificar persistencia.</li>
+        <li><strong>Exportar:</strong> verifica que aparezcan archivos en <code>Resultados</code> o dentro del proyecto.</li>
+        <li><strong>Riesgo:</strong> corre una simulación Monte Carlo pequeña desde la página de riesgo.</li>
+      </ol>
+
+      <div class="callout good">
+        No solo buscamos bugs. También nos importa muchísimo saber en qué partes la app se siente confusa o poco natural.
+      </div>
+
+      <div class="callout">
+        Si la app no abre sola en el navegador, vuelve a ejecutar <code>PVWorkbench.exe</code> y revisa si Windows o el antivirus mostró alguna advertencia.
+      </div>
+    </section>
+
+    <footer>
+      PVWorkbench · Guía rápida de uso local · Windows trial build
+    </footer>
+  </div>
+</body>
+</html>
