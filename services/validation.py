@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import re
 
 import numpy as np
 import pandas as pd
@@ -20,6 +21,32 @@ INVERTER_REQUIRED_COLUMNS = ["name", "AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max
 BATTERY_REQUIRED_COLUMNS = ["name", "nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"]
 INVERTER_NUMERIC_COLUMNS = ["AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max", "Imax_mppt", "n_mppt", "price_COP"]
 BATTERY_NUMERIC_COLUMNS = ["nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"]
+
+_ROW_REQUIRED_RE = re.compile(r"Fila (\d+): el campo '([^']+)' es obligatorio\.")
+_ROW_NUMERIC_RE = re.compile(r"Fila (\d+): '([^']+)' debe ser numérico\.")
+_DUPLICATES_RE = re.compile(r"Los nombres deben ser únicos\. Duplicados: (.+)\.")
+_VALUE_GT_ZERO_RE = re.compile(r"El valor de '([^']+)' debe ser mayor que cero\.")
+_INVALID_VALUE_RE = re.compile(r"Valor inválido para '([^']+)': (.+)\.")
+_INVALID_BOOL_RE = re.compile(r"Valor booleano inválido para '([^']+)': (.+)\.")
+_DAY_PROFILE_RE = re.compile(r"El perfil del día (\d+) no suma 1 exactamente; se usará tal como quedó normalizado\.")
+_SCAN_BUILD_RE = re.compile(r"No se pudo generar el barrido de candidatos: (.+)")
+_BASE_PRICE_BAND_RE = re.compile(r"No hay banda de precio base para ([0-9.]+) kWp\.")
+_OTHER_PRICE_BAND_RE = re.compile(r"No hay banda de precio variable adicional para ([0-9.]+) kWp\.")
+
+_TABLE_COLUMN_LABELS = {
+    "name": {"es": "Nombre", "en": "Name"},
+    "AC_kW": {"es": "Potencia AC", "en": "AC power"},
+    "Vmppt_min": {"es": "Vmppt mínimo", "en": "Minimum MPPT voltage"},
+    "Vmppt_max": {"es": "Vmppt máximo", "en": "Maximum MPPT voltage"},
+    "Vdc_max": {"es": "Vdc máximo", "en": "Maximum DC voltage"},
+    "Imax_mppt": {"es": "Corriente máxima MPPT", "en": "Maximum MPPT current"},
+    "n_mppt": {"es": "Cantidad de MPPT", "en": "MPPT count"},
+    "price_COP": {"es": "Precio", "en": "Price"},
+    "nom_kWh": {"es": "Energía nominal", "en": "Nominal energy"},
+    "max_kW": {"es": "Potencia máxima", "en": "Maximum power"},
+    "max_ch_kW": {"es": "Potencia máxima de carga", "en": "Maximum charge power"},
+    "max_dis_kW": {"es": "Potencia máxima de descarga", "en": "Maximum discharge power"},
+}
 
 
 def _price_table_covers_candidate(table: pd.DataFrame, k_wp: float) -> bool:
@@ -80,6 +107,153 @@ def normalize_catalog_rows(
         frame[column] = series
 
     return frame, issues
+
+
+def _table_column_label(column: str, lang: str) -> str:
+    mapping = _TABLE_COLUMN_LABELS.get(column)
+    if mapping is None:
+        return column.replace("_", " ").strip()
+    return mapping["en" if lang == "en" else "es"]
+
+
+def localize_validation_message(issue: ValidationIssue, *, lang: str = "es") -> str:
+    message = issue.message
+    if match := _ROW_REQUIRED_RE.fullmatch(message):
+        row, column = match.groups()
+        column_label = _table_column_label(column, lang)
+        if lang == "en":
+            return f"Row {row}: add a value for {column_label}."
+        return f"Fila {row}: agrega un valor en {column_label}."
+    if match := _ROW_NUMERIC_RE.fullmatch(message):
+        row, column = match.groups()
+        column_label = _table_column_label(column, lang)
+        if lang == "en":
+            return f"Row {row}: enter a numeric value for {column_label}."
+        return f"Fila {row}: ingresa un valor numérico en {column_label}."
+    if match := _DUPLICATES_RE.fullmatch(message):
+        duplicates = match.group(1)
+        if lang == "en":
+            return f"Each item must have a unique name. Duplicate names: {duplicates}."
+        return f"Cada elemento debe tener un nombre único. Nombres duplicados: {duplicates}."
+    if _VALUE_GT_ZERO_RE.fullmatch(message):
+        if lang == "en":
+            return "Enter a value greater than zero."
+        return "Ingresa un valor mayor que cero."
+    if message == "modules_span_each_side no puede ser negativo.":
+        if lang == "en":
+            return "Use zero or a positive number of modules."
+        return "Usa cero o un número positivo de módulos."
+    if message == "limit_peak_month_fixed debe estar entre 1 y 12.":
+        if lang == "en":
+            return "Choose a month between 1 and 12."
+        return "Elige un mes entre 1 y 12."
+    if message == "ILR_min no puede ser mayor que ILR_max.":
+        if lang == "en":
+            return "Minimum ILR cannot be higher than Maximum ILR."
+        return "El ILR mínimo no puede ser mayor que el ILR máximo."
+    if message == "kWp_min no puede ser mayor que kWp_max.":
+        if lang == "en":
+            return "Minimum scan size cannot be higher than Maximum scan size."
+        return "El tamaño mínimo del escaneo no puede ser mayor que el tamaño máximo."
+    if message == "La eficiencia de batería debe estar entre 0 y 1.":
+        if lang == "en":
+            return "Enter a round-trip efficiency above 0% and up to 100%."
+        return "Ingresa una eficiencia ida y vuelta mayor a 0% y hasta 100%."
+    if message == "La profundidad de descarga debe estar entre 0 y 1.":
+        if lang == "en":
+            return "Enter a depth of discharge above 0% and up to 100%."
+        return "Ingresa una profundidad de descarga mayor a 0% y hasta 100%."
+    if message == "pricing_mode debe ser 'variable' o 'total'.":
+        if lang == "en":
+            return "Choose Variable (by kWp bands) or Fixed project total."
+        return "Elige Variable (por bandas de kWp) o Total fijo del proyecto."
+    if message == "kWp_seed_mode debe ser 'auto' o 'manual'.":
+        if lang == "en":
+            return "Choose Auto or Manual for the scan starting point."
+        return "Elige Auto o Manual para el punto inicial del escaneo."
+    if message == "bat_coupling debe ser 'ac' o 'dc'.":
+        if lang == "en":
+            return "Choose AC or DC for the battery connection model."
+        return "Elige AC o DC para el modelo de conexión de la batería."
+    if message == "limit_peak_month_mode debe ser 'max' o 'fixed'.":
+        if lang == "en":
+            return "Choose Max or Fixed to define the peak month."
+        return "Elige Máximo o Fijo para definir el mes pico."
+    if message == "limit_peak_basis debe ser weighted_mean, max, weekday o p95.":
+        if lang == "en":
+            return "Choose how to measure the load peak: Weighted mean, Max, Weekday, or P95."
+        return "Elige cómo medir el pico de carga: Promedio ponderado, Máximo, Día hábil o P95."
+    if message == "use_excel_profile debe ser un modo de perfil soportado.":
+        if lang == "en":
+            return "Choose a supported demand profile method."
+        return "Elige un método de perfil de demanda compatible."
+    if message == "El catálogo de inversores está vacío.":
+        if lang == "en":
+            return "Add at least one inverter in Hardware catalogs before running the deterministic scan."
+        return "Agrega al menos un inversor en Catálogos de hardware antes de ejecutar el escaneo determinístico."
+    if message == "Se solicitó batería, pero el catálogo está vacío.":
+        if lang == "en":
+            return "Battery analysis is enabled, but the battery catalog is empty. Add a battery or turn battery analysis off."
+        return "El análisis con batería está activado, pero el catálogo está vacío. Agrega una batería o desactiva el análisis con batería."
+    if message == "battery_name no existe en el catálogo de baterías.":
+        if lang == "en":
+            return "Choose a fixed battery that exists in the battery catalog, or turn on battery optimization."
+        return "Elige una batería fija que exista en el catálogo o activa la optimización de baterías."
+    if message == "El perfil 7x24 debe tener forma (7, 24).":
+        if lang == "en":
+            return "The weekday 7x24 demand table must contain 7 days and 24 hourly values."
+        return "La tabla de demanda hora-día-semana debe tener 7 días y 24 valores horarios."
+    if message == "Los pesos diarios deben tener 7 valores.":
+        if lang == "en":
+            return "The daily-weight table must contain 7 values, one for each day."
+        return "La tabla de pesos diarios debe tener 7 valores, uno por cada día."
+    if message == "Los perfiles mensuales deben tener 12 meses.":
+        if lang == "en":
+            return "The monthly demand and HSP table must contain 12 months."
+        return "La tabla de demanda mensual y HSP debe tener 12 meses."
+    if message == "El perfil solar debe tener 24 horas.":
+        if lang == "en":
+            return "The hourly solar profile must contain 24 values."
+        return "El perfil solar horario debe tener 24 valores."
+    if message == "El perfil solar se normalizó para que sume 1.":
+        if lang == "en":
+            return "The solar profile did not sum to 100%, so the app normalized it automatically. Review it if that was not intentional."
+        return "El perfil solar no sumaba 100%, así que la app lo normalizó automáticamente. Revísalo si eso no era intencional."
+    if match := _DAY_PROFILE_RE.fullmatch(message):
+        day = match.group(1)
+        if lang == "en":
+            return f"Day {day} in the 7x24 demand profile does not sum to 100%. The normalized version will be used."
+        return f"El día {day} del perfil 7x24 no suma 100%. Se usará la versión normalizada."
+    if match := _SCAN_BUILD_RE.fullmatch(message):
+        detail = match.group(1)
+        if lang == "en":
+            return f"The current scan settings could not build a feasible design range. Review the starting size, module span, and kWp limits. Details: {detail}"
+        return f"La configuración actual no pudo construir un rango factible de diseños. Revisa el punto inicial, el span de módulos y los límites de kWp. Detalle: {detail}"
+    if message == "La configuración actual no genera ningún candidato de kWp.":
+        if lang == "en":
+            return "The current scan settings do not produce any feasible designs. Widen the scan range or relax the peak-ratio limit."
+        return "La configuración actual no produce diseños factibles. Amplía el rango de escaneo o relaja el límite de pico FV."
+    if match := _BASE_PRICE_BAND_RE.fullmatch(message):
+        kwp = match.group(1)
+        if lang == "en":
+            return f"No base pricing band covers {kwp} kWp. Extend the pricing table or narrow the design scan."
+        return f"Ninguna banda de precio base cubre {kwp} kWp. Amplía la tabla de precios o estrecha el escaneo."
+    if match := _OTHER_PRICE_BAND_RE.fullmatch(message):
+        kwp = match.group(1)
+        if lang == "en":
+            return f"No additional-cost band covers {kwp} kWp. Extend that table or turn off additional variable costs."
+        return f"Ninguna banda de costos adicionales cubre {kwp} kWp. Amplía esa tabla o desactiva los costos variables adicionales."
+    if match := _INVALID_VALUE_RE.fullmatch(message):
+        raw_value = match.group(2)
+        if lang == "en":
+            return f"The imported value could not be read. Check the workbook cell and try again. Current value: {raw_value}."
+        return f"No se pudo interpretar el valor importado. Revisa la celda del libro e inténtalo de nuevo. Valor actual: {raw_value}."
+    if match := _INVALID_BOOL_RE.fullmatch(message):
+        raw_value = match.group(2)
+        if lang == "en":
+            return f"Use Yes or No for this field. Current value: {raw_value}."
+        return f"Usa Sí o No en este campo. Valor actual: {raw_value}."
+    return message
 
 
 def normalize_inverter_catalog_rows(rows: list[dict] | None) -> tuple[pd.DataFrame, list[ValidationIssue]]:

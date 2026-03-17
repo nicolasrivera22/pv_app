@@ -104,16 +104,13 @@ def test_app_defaults_to_spanish() -> None:
     assert help_nav.children == "Ayuda"
 
 
-def test_help_page_renders_bundled_guide_frame() -> None:
+def test_help_page_renders_real_product_help_content() -> None:
     layout = help_page.layout() if callable(help_page.layout) else help_page.layout
-    frame = _find_component(layout, "help-quick-guide-frame")
-    missing = _find_component(layout, "help-missing-message")
     title = _find_component(layout, "help-page-title")
+    content = _find_component(layout, "help-content")
 
     assert title.children == tr("help.title", "es")
-    assert frame is not None
-    assert frame.src == "/help/guia-rapida"
-    assert missing is not None
+    assert content is not None
 
 
 def test_first_render_placeholders_are_spanish_first() -> None:
@@ -127,7 +124,7 @@ def test_first_render_placeholders_are_spanish_first() -> None:
     assert scenario_dropdown.placeholder == "No hay escenarios cargados"
     assert rename_input.placeholder == "Nombre del escenario"
     assert risk_scenario_dropdown.placeholder == "Selecciona un escenario completado"
-    assert risk_candidate_dropdown.placeholder == "Selecciona un candidato factible"
+    assert risk_candidate_dropdown.placeholder == "Selecciona un diseño factible"
 
 
 def test_risk_chart_section_stacks_full_width_cards_with_descriptions() -> None:
@@ -474,7 +471,7 @@ def test_npv_chart_adds_top_axis_for_panel_count() -> None:
     assert list(figure.layout.xaxis2.ticktext) == ["20", "30"]
     assert list(figure.layout.xaxis2.tickvals) == pytest.approx([12.0, 18.0])
     assert list(figure.data[0].customdata[0][:2]) == ["12.000::None", 20]
-    assert any(trace.name == "Candidato seleccionado" for trace in figure.data)
+    assert any(trace.name == "Diseño seleccionado" for trace in figure.data)
 
 
 def test_npv_chart_omits_top_axis_without_valid_module_power() -> None:

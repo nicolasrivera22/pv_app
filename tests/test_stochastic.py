@@ -87,11 +87,11 @@ def test_monte_carlo_does_not_change_deterministic_baseline() -> None:
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
-        ({"selected_candidate_key": None}, "selected_candidate_key"),
-        ({"selected_candidate_key": "missing"}, "missing"),
-        ({"selected_candidate_key": "unused", "mode": "optimal_per_draw"}, "aún no está soportado"),
-        ({"selected_candidate_key": "unused", "seed": -1}, "seed"),
-        ({"selected_candidate_key": "unused", "n_simulations": 0}, "n_simulations"),
+        ({"selected_candidate_key": None}, "diseño factible"),
+        ({"selected_candidate_key": "missing"}, "diseño seleccionado"),
+        ({"selected_candidate_key": "unused", "mode": "optimal_per_draw"}, "todavía no está disponible"),
+        ({"selected_candidate_key": "unused", "seed": -1}, "semilla"),
+        ({"selected_candidate_key": "unused", "n_simulations": 0}, "simulaciones"),
     ],
 )
 def test_validation_failures_are_explicit(kwargs, message) -> None:

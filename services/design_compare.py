@@ -12,7 +12,7 @@ from plotly.subplots import make_subplots
 from .i18n import tr
 from .result_views import abbreviated_month_labels, build_project_timeline
 from .types import ScenarioRecord, ScenarioSessionState
-from .ui_schema import format_metric
+from .ui_schema import format_metric, metric_label
 
 MAX_COMPARE_DESIGNS = 10
 
@@ -843,7 +843,8 @@ def build_npv_projection_figure(
             + "<br>"
             + tr("timeline.hover.project_month", lang)
             + ": %{customdata[7]:.0f}<br>"
-            + "VPN: %{y:,.0f}<extra></extra>"
+            + metric_label("NPV_COP", lang)
+            + ": %{y:,.0f}<extra></extra>"
         )
     )
     if {"month_index", "calendar_year", "project_year"}.issubset(display.columns):

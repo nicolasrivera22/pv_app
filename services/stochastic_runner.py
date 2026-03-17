@@ -7,6 +7,7 @@ import pandas as pd
 
 from pv_product.utils import simulate_monthly_series_dow
 
+from .i18n import tr
 from .result_views import summarize_energy_metrics
 from .risk_views import build_risk_views_from_samples
 from .scenario_runner import run_scan
@@ -26,31 +27,41 @@ MONTE_CARLO_WARNING_THRESHOLD = 5000
 MC_UNCERTAINTY_FIELDS = ("mc_PR_std", "mc_buy_std", "mc_sell_std", "mc_demand_std")
 
 
-def _validate_non_negative_int(value, field: str) -> int:
+def _validate_non_negative_int(value, field: str, *, lang: str = "es") -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{field} debe ser un entero no negativo.")
+        if field == "seed":
+            raise ValueError(tr("risk.error.invalid_seed", lang))
+        raise ValueError(f"{field} must be a non-negative integer." if lang == "en" else f"{field} debe ser un entero no negativo.")
     if value < 0:
-        raise ValueError(f"{field} debe ser un entero no negativo.")
+        if field == "seed":
+            raise ValueError(tr("risk.error.invalid_seed", lang))
+        raise ValueError(f"{field} must be a non-negative integer." if lang == "en" else f"{field} debe ser un entero no negativo.")
     return value
 
 
-def _validate_positive_int(value, field: str) -> int:
+def _validate_positive_int(value, field: str, *, lang: str = "es") -> int:
     if isinstance(value, bool):
-        raise ValueError(f"{field} debe ser un entero positivo.")
+        if field == "n_simulations":
+            raise ValueError(tr("risk.error.invalid_n_simulations", lang))
+        raise ValueError(f"{field} must be a positive integer." if lang == "en" else f"{field} debe ser un entero positivo.")
     if isinstance(value, float):
         if not value.is_integer():
-            raise ValueError(f"{field} debe ser un entero positivo.")
+            if field == "n_simulations":
+                raise ValueError(tr("risk.error.invalid_n_simulations", lang))
+            raise ValueError(f"{field} must be a positive integer." if lang == "en" else f"{field} debe ser un entero positivo.")
         value = int(value)
     if not isinstance(value, int) or value <= 0:
-        raise ValueError(f"{field} debe ser un entero positivo.")
+        if field == "n_simulations":
+            raise ValueError(tr("risk.error.invalid_n_simulations", lang))
+        raise ValueError(f"{field} must be a positive integer." if lang == "en" else f"{field} debe ser un entero positivo.")
     return value
 
 
-def _lookup_price_per_kwp(table: pd.DataFrame, k_wp: float, table_name: str) -> float:
+def _lookup_price_per_kwp(table: pd.DataFrame, k_wp: float, table_name: str, *, lang: str = "es") -> float:
     mask = (table["MIN"] < k_wp) & (table["MAX"] >= k_wp)
     matches = table.loc[mask, "PRECIO_POR_KWP"].values
     if len(matches) == 0:
-        raise ValueError(f"No hay banda de precio en '{table_name}' para {k_wp:.3f} kWp.")
+        raise ValueError(tr("risk.error.price_band_missing", lang, kwp=float(k_wp), table_name=table_name))
     return float(matches[0])
 
 
@@ -61,16 +72,17 @@ def _resolve_request(
     n_simulations: int | None,
     return_samples: bool,
     mode: str,
+    lang: str,
 ) -> tuple[MonteCarloRunRequest, int]:
     if mode != MC_SUPPORTED_MODE:
-        raise ValueError(f"El modo '{mode}' aún no está soportado en 2B.1. Usa '{MC_SUPPORTED_MODE}'.")
+        raise ValueError(tr("risk.error.unsupported_mode", lang, mode=MC_SUPPORTED_MODE))
     if not selected_candidate_key:
-        raise ValueError("selected_candidate_key es obligatorio para Monte Carlo de candidato fijo.")
-    seed_value = _validate_non_negative_int(seed, "seed")
+        raise ValueError(tr("risk.error.no_candidate", lang))
+    seed_value = _validate_non_negative_int(seed, "seed", lang=lang)
     if n_simulations is None:
-        resolved_n = _validate_positive_int(config_bundle.config.get("mc_n_simulations", 0), "n_simulations")
+        resolved_n = _validate_positive_int(config_bundle.config.get("mc_n_simulations", 0), "n_simulations", lang=lang)
     else:
-        resolved_n = _validate_positive_int(n_simulations, "n_simulations")
+        resolved_n = _validate_positive_int(n_simulations, "n_simulations", lang=lang)
     return (
         MonteCarloRunRequest(
             mode=mode,
@@ -164,6 +176,8 @@ def _simulate_fixed_candidate_draws(
     config_bundle: LoadedConfigBundle,
     detail: dict,
     request: MonteCarloRunRequest,
+    *,
+    lang: str = "es",
 ) -> pd.DataFrame:
     cfg = deepcopy(config_bundle.config)
     k_wp = float(detail["kWp"])
@@ -171,12 +185,14 @@ def _simulate_fixed_candidate_draws(
         config_bundle.cop_kwp_table,
         k_wp,
         "Precios_kWp_relativos",
+        lang=lang,
     )
     if cfg.get("include_var_others"):
         price_per_kwp_cop += _lookup_price_per_kwp(
             config_bundle.cop_kwp_table_others,
             k_wp,
             "Precios_kWp_relativos_Otros",
+            lang=lang,
         )
 
     rng = np.random.default_rng(request.seed)
@@ -237,31 +253,23 @@ def run_monte_carlo(
         n_simulations=n_simulations,
         return_samples=return_samples,
         mode=mode,
+        lang=lang,
     )
     baseline = _resolve_baseline_scan(config_bundle, baseline_scan)
     if request.selected_candidate_key not in baseline.candidate_details:
-        raise ValueError(f"No existe el candidato '{request.selected_candidate_key}' en el escaneo determinístico.")
+        raise ValueError(tr("risk.error.design_missing_in_scan", lang))
 
     detail = baseline.candidate_details[request.selected_candidate_key]
-    sample_frame = _simulate_fixed_candidate_draws(config_bundle, detail, request)
+    sample_frame = _simulate_fixed_candidate_draws(config_bundle, detail, request, lang=lang)
     summary, risk_metrics = _summarize_samples(sample_frame)
 
     warnings: list[str] = []
     if resolved_n > MONTE_CARLO_WARNING_THRESHOLD:
-        if lang == "en":
-            warnings.append(
-                f"{resolved_n:,} simulations is above the recommended threshold of {MONTE_CARLO_WARNING_THRESHOLD:,}. Most users can leave detailed samples turned off."
-            )
-        else:
-            warnings.append(
-                f"{resolved_n:,} simulaciones supera el umbral recomendado de {MONTE_CARLO_WARNING_THRESHOLD:,}. La mayoría de los usuarios puede dejar apagadas las muestras detalladas."
-            )
-    if summary.payback_years.n_finite == 0:
         warnings.append(
-            "No simulation reached payback within the project horizon."
-            if lang == "en"
-            else "Ninguna simulación alcanzó payback dentro del horizonte del proyecto."
+            tr("risk.warning.large_run", lang, count=resolved_n, threshold=MONTE_CARLO_WARNING_THRESHOLD)
         )
+    if summary.payback_years.n_finite == 0:
+        warnings.append(tr("risk.warning.no_payback", lang))
 
     labels = {
         "candidate_key": detail["candidate_key"],

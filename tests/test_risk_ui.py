@@ -81,7 +81,7 @@ def test_ready_scenarios_filter_and_validation_are_explicit() -> None:
 
     issues = validate_risk_run_inputs(scenario, None, 0, -1, lang="en")
     assert any("fresh deterministic run" in issue for issue in issues)
-    assert any("candidate" in issue.lower() for issue in issues)
+    assert any("design" in issue.lower() for issue in issues)
     assert any("Simulation count" in issue for issue in issues)
     assert any("Seed" in issue for issue in issues)
 
@@ -129,7 +129,7 @@ def test_missing_result_payload_clears_stale_reference_with_friendly_message() -
 
     assert payload["result_id"] is None
     assert payload["retain_samples"] is True
-    assert "ya no está en memoria" in payload["status"]
+    assert "ya no está disponible" in payload["status"]
     assert payload["errors"]
 
 
