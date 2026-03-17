@@ -228,6 +228,7 @@ def run_monte_carlo(
     return_samples: bool = False,
     baseline_scan: ScanRunResult | None = None,
     mode: str = MC_SUPPORTED_MODE,
+    lang: str = "es",
 ) -> MonteCarloRunResult:
     request, resolved_n = _resolve_request(
         config_bundle,
@@ -247,11 +248,20 @@ def run_monte_carlo(
 
     warnings: list[str] = []
     if resolved_n > MONTE_CARLO_WARNING_THRESHOLD:
-        warnings.append(
-            f"n_simulations={resolved_n} supera el umbral recomendado de {MONTE_CARLO_WARNING_THRESHOLD}; conserva solo vistas compactas si no necesitas muestras crudas."
-        )
+        if lang == "en":
+            warnings.append(
+                f"{resolved_n:,} simulations is above the recommended threshold of {MONTE_CARLO_WARNING_THRESHOLD:,}. Most users can leave detailed samples turned off."
+            )
+        else:
+            warnings.append(
+                f"{resolved_n:,} simulaciones supera el umbral recomendado de {MONTE_CARLO_WARNING_THRESHOLD:,}. La mayoría de los usuarios puede dejar apagadas las muestras detalladas."
+            )
     if summary.payback_years.n_finite == 0:
-        warnings.append("Ninguna simulación alcanzó payback dentro del horizonte del proyecto.")
+        warnings.append(
+            "No simulation reached payback within the project horizon."
+            if lang == "en"
+            else "Ninguna simulación alcanzó payback dentro del horizonte del proyecto."
+        )
 
     labels = {
         "candidate_key": detail["candidate_key"],

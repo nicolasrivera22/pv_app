@@ -284,8 +284,8 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     "include_var_others": FieldUiSchema(
         "dropdown",
         "advanced",
-        "Incluir otros variables",
-        "Include variable others",
+        "Incluir costos variables adicionales",
+        "Include additional variable costs",
         "Suma la tabla de 'otros costos variables' además del precio principal por kWp.",
         "Adds the 'other variable costs' table on top of the main kWp pricing table.",
         options=_YES_NO_OPTIONS,
@@ -293,8 +293,8 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     "price_others_total": FieldUiSchema(
         "number",
         "advanced",
-        "Otros fijos",
-        "Fixed others",
+        "Otros costos fijos",
+        "Other fixed costs",
         display_format="currency",
         precision=0,
         input_step=1,
@@ -315,8 +315,10 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     "mc_PR_std": FieldUiSchema(
         "number",
         "advanced",
-        "MC desv. PR",
-        "MC PR std",
+        "Incertidumbre de PR",
+        "PR uncertainty",
+        "Variación mensual aplicada al PR en el análisis de Riesgo.",
+        "Monthly variation applied to PR in Risk.",
         display_format="percent",
         precision=2,
         suffix_es="%",
@@ -326,8 +328,10 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     "mc_buy_std": FieldUiSchema(
         "number",
         "advanced",
-        "MC desv. compra",
-        "MC buy std",
+        "Incertidumbre tarifa de compra",
+        "Buy tariff uncertainty",
+        "Variación mensual aplicada a la tarifa de compra en el análisis de Riesgo.",
+        "Monthly variation applied to the buy tariff in Risk.",
         display_format="percent",
         precision=2,
         suffix_es="%",
@@ -337,8 +341,10 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     "mc_sell_std": FieldUiSchema(
         "number",
         "advanced",
-        "MC desv. venta",
-        "MC sell std",
+        "Incertidumbre tarifa de venta",
+        "Sell tariff uncertainty",
+        "Variación mensual aplicada a la tarifa de venta en el análisis de Riesgo.",
+        "Monthly variation applied to the sell tariff in Risk.",
         display_format="percent",
         precision=2,
         suffix_es="%",
@@ -348,8 +354,10 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     "mc_demand_std": FieldUiSchema(
         "number",
         "advanced",
-        "MC desv. demanda",
-        "MC demand std",
+        "Incertidumbre de demanda",
+        "Demand uncertainty",
+        "Variación mensual aplicada a la demanda en el análisis de Riesgo.",
+        "Monthly variation applied to demand in Risk.",
         display_format="percent",
         precision=2,
         suffix_es="%",
@@ -359,15 +367,19 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     "mc_use_manual_kWp": FieldUiSchema(
         "dropdown",
         "advanced",
-        "MC kWp manual",
-        "MC manual kWp",
+        "Usar tamaño fijo en Riesgo",
+        "Use fixed size in Risk",
+        "Usa un tamaño fijo para Riesgo en lugar del tamaño del diseño seleccionado.",
+        "Uses a fixed size for Risk instead of the selected design size.",
         options=_YES_NO_OPTIONS,
     ),
     "mc_manual_kWp": FieldUiSchema(
         "number",
         "advanced",
-        "MC kWp manual fijo",
-        "MC fixed manual kWp",
+        "Tamaño fijo para Riesgo",
+        "Fixed size for Risk",
+        "Tamaño fijo usado en Riesgo cuando activas el tamaño manual.",
+        "Fixed size used in Risk when manual size is enabled.",
         display_format="power_kwp",
         precision=3,
         suffix_es="kWp",
@@ -376,15 +388,24 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     "mc_n_simulations": FieldUiSchema(
         "number",
         "advanced",
-        "MC simulaciones",
-        "MC simulations",
+        "Simulaciones por defecto en Riesgo",
+        "Default Risk simulations",
+        "Cantidad de simulaciones sugerida por defecto en la página de Riesgo.",
+        "Default simulation count suggested on the Risk page.",
         display_format="integer",
         precision=0,
         input_step=1,
         suffix_es="sim",
         suffix_en="sims",
     ),
-    "mc_battery_name": FieldUiSchema("text", "advanced", "MC batería fija", "MC fixed battery"),
+    "mc_battery_name": FieldUiSchema(
+        "text",
+        "advanced",
+        "Batería fija para Riesgo",
+        "Fixed battery for Risk",
+        "Batería fija usada en Riesgo cuando corresponde.",
+        "Fixed battery used in Risk when applicable.",
+    ),
     "limit_peak_ratio_enable": FieldUiSchema(
         "dropdown",
         "basic",
@@ -562,7 +583,7 @@ GROUP_LABELS = {
     "Monte Carlo": {"es": "Monte Carlo", "en": "Monte Carlo"},
     "Restricción de Proporción Pico": {"es": "Restricción de Proporción Pico", "en": "Peak-Ratio Constraint"},
     "Semilla": {"es": "Semilla", "en": "Seed"},
-    "Controles de Batería y Exporte": {"es": "Batería y Exporte", "en": "Battery and Export"},
+    "Controles de Batería y Exporte": {"es": "Batería y exportación", "en": "Battery and export"},
 }
 
 GROUP_HELP = {
@@ -587,8 +608,8 @@ GROUP_HELP = {
         "en": "Collects the most practical battery, export, and self-consumption decisions.",
     },
     "Monte Carlo": {
-        "es": "Estos valores solo afectan el análisis de riesgo en la página de Monte Carlo.",
-        "en": "These values only affect risk analysis on the Monte Carlo page.",
+        "es": "Estos valores solo afectan el análisis en la página de Riesgo.",
+        "en": "These values only affect analysis on the Risk page.",
     },
 }
 
@@ -869,7 +890,21 @@ def field_options(meta: ConfigFieldMeta, lang: str = "es") -> list[dict[str, Any
     for label, value in schema.options:
         options.append({"label": label, "value": value})
     if lang == "en":
-        replacements = {"Sí": "Yes", "No": "No", "Máximo": "Max", "Promedio ponderado": "Weighted mean", "Día hábil": "Weekday"}
+        replacements = {
+            "Sí": "Yes",
+            "No": "No",
+            "Máximo": "Max",
+            "Fijo": "Fixed",
+            "Promedio ponderado": "Weighted mean",
+            "Día hábil": "Weekday",
+            "Perfil hora-día-semana": "Weekday 7x24 profile",
+            "Perfil horario relativo": "Relative hourly profile",
+            "Perfil general": "General profile",
+            "Variable": "Variable (by kWp bands)",
+            "Total": "Fixed project total",
+            "Auto": "Auto",
+            "Manual": "Manual",
+        }
         return [{"label": replacements.get(option["label"], option["label"]), "value": option["value"]} for option in options]
     return options
 

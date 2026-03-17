@@ -583,16 +583,14 @@ def build_annual_demand_coverage_figure(
             y=subset["value_kwh"],
             name=_metric_name(metric, lang),
             marker_color=_metric_color(metric),
-            customdata=subset[["candidate_key"]],
-            hovertemplate=(
-                ("Diseño" if lang == "es" else "Design")
-                + ": %{x}<br>"
-                + ("Candidato" if lang == "es" else "Candidate")
-                + ": %{customdata[0]}<br>"
-                + ("Energía" if lang == "es" else "Energy")
-                + ": %{y:,.0f} kWh<extra></extra>"
-            ),
-        )
+                customdata=subset[["candidate_key"]],
+                hovertemplate=(
+                    ("Diseño" if lang == "es" else "Design")
+                    + ": %{x}<br>"
+                    + ("Energía" if lang == "es" else "Energy")
+                    + ": %{y:,.0f} kWh<extra></extra>"
+                ),
+            )
     figure.update_layout(template="plotly_white", title=tr("compare.figure.annual_coverage", lang), barmode="stack")
     figure.update_xaxes(title=tr("compare.axis.design", lang))
     figure.update_yaxes(title="kWh", tickformat=",.0f")
@@ -637,8 +635,6 @@ def build_monthly_pv_destination_figure(
                         + ": %{customdata[0]}<br>"
                         + ("Diseño" if lang == "es" else "Design")
                         + ": %{customdata[1]}<br>"
-                        + ("Candidato" if lang == "es" else "Candidate")
-                        + ": %{customdata[2]}<br>"
                         + ("Energía" if lang == "es" else "Energy")
                         + ": %{y:,.0f} kWh<extra></extra>"
                     ),
@@ -684,8 +680,6 @@ def build_monthly_pv_destination_figure(
                     + ": %{customdata[0]}<br>"
                     + ("Diseño" if lang == "es" else "Design")
                     + ": %{customdata[1]}<br>"
-                    + ("Candidato" if lang == "es" else "Candidate")
-                    + ": %{customdata[2]}<br>"
                     + ("Energía" if lang == "es" else "Energy")
                     + ": %{y:,.0f} kWh<extra></extra>"
                 ),
@@ -834,8 +828,6 @@ def build_npv_projection_figure(
         hovertemplate=(
             ("Diseño" if lang == "es" else "Design")
             + ": %{fullData.name}<br>"
-            + ("Candidato" if lang == "es" else "Candidate")
-            + ": %{customdata[0]}<br>"
             + "kWp: %{customdata[1]:.3f}<br>"
             + ("Paneles" if lang == "es" else "Panels")
             + ": %{customdata[2]}<br>"

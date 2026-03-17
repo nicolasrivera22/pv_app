@@ -262,6 +262,7 @@ def run_risk_analysis(
             n_simulations=int(n_simulations),
             return_samples=retain_samples,
             baseline_scan=scenario.scan_result,
+            lang=lang,
         )
         result_id = store_risk_result(result)
         return build_risk_result_store_payload(

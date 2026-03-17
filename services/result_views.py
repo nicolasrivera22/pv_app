@@ -321,7 +321,6 @@ def build_npv_figure(
     figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
     figure = go.Figure()
     hover_template = (
-        f"{'Candidato' if lang == 'es' else 'Candidate'}: %{{customdata[0]}}<br>"
         f"{'kWp' if lang == 'es' else 'kWp'}: %{{x:.3f}}<br>"
         f"{'Paneles' if lang == 'es' else 'Panels'}: %{{customdata[1]}}<br>"
         f"{'Batería' if lang == 'es' else 'Battery'}: %{{customdata[2]}}<br>"
@@ -350,11 +349,11 @@ def build_npv_figure(
                 y=selected_row["NPV_COP"],
                 mode="markers",
                 marker={"size": 14, "color": "#b91c1c"},
-                name="Candidato seleccionado" if lang == "es" else "Selected candidate",
+                name="Diseño seleccionado" if lang == "es" else "Selected design",
                 customdata=selected_row[["candidate_key", "panel_count"]],
                 hovertemplate=(
-                    ("Seleccionado" if lang == "es" else "Selected")
-                    + ": %{customdata[0]}<br>"
+                    ("Diseño seleccionado" if lang == "es" else "Selected design")
+                    + "<br>"
                     + ("Paneles" if lang == "es" else "Panels")
                     + ": %{customdata[1]}<extra></extra>"
                 ),
@@ -428,7 +427,7 @@ def build_annual_coverage_figure(
     monthly = detail.get("monthly")
     if not isinstance(monthly, pd.DataFrame) or monthly.empty:
         return _deep_dive_empty(title, lang=lang)
-    prepared = prepare_autoconsumo_anual_series(monthly, export_allowed=export_allowed)
+    prepared = prepare_autoconsumo_anual_series(monthly, export_allowed=export_allowed, lang=lang)
     month_values = prepared["xlabels"]
     month_labels = abbreviated_month_labels(month_values, lang=lang)
     figure = go.Figure()
@@ -468,14 +467,22 @@ def build_battery_load_figure(
     required = {"PV_a_Carga_kWh", "Bateria_a_Carga_kWh", "Importacion_Red_kWh"}
     if not isinstance(monthly, pd.DataFrame) or monthly.empty or not required.issubset(monthly.columns):
         return _deep_dive_empty(title, lang=lang)
-    prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy())
+    prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy(), lang=lang)
     month_values = prepared["xlabels"]
     month_labels = abbreviated_month_labels(month_values, lang=lang)
-    color_map = {
-        "PV → Carga": "#57eb36",
-        "Batería → Carga": "#6fa8dc",
-        "Importación Red": "#f26c4f",
-    }
+    color_map = (
+        {
+            "PV → Carga": "#57eb36",
+            "Batería → Carga": "#6fa8dc",
+            "Importación Red": "#f26c4f",
+        }
+        if lang == "es"
+        else {
+            "PV to load": "#57eb36",
+            "Battery to load": "#6fa8dc",
+            "Grid import": "#f26c4f",
+        }
+    )
     figure = go.Figure()
     for series in prepared["coverage_series"]:
         figure.add_bar(
@@ -513,13 +520,22 @@ def build_pv_destination_figure(
     required = {"PV_a_Carga_kWh", "PV_a_Bateria_kWh", "Exportacion_kWh"}
     if not isinstance(monthly, pd.DataFrame) or monthly.empty or not required.issubset(monthly.columns):
         return _deep_dive_empty(title, lang=lang)
-    prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy())
-    color_map = {
-        "PV → Carga": "#57eb36",
-        "PV → Batería": "#6fa8dc",
-        "Exportación": "#f7b32b",
-        "Curtailment": "#94a3b8",
-    }
+    prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy(), lang=lang)
+    color_map = (
+        {
+            "PV → Carga": "#57eb36",
+            "PV → Batería": "#6fa8dc",
+            "Exportación": "#f7b32b",
+            "Recorte": "#94a3b8",
+        }
+        if lang == "es"
+        else {
+            "PV to load": "#57eb36",
+            "PV to battery": "#6fa8dc",
+            "Export": "#f7b32b",
+            "Curtailment": "#94a3b8",
+        }
+    )
     figure = go.Figure()
     for series in prepared["destination_series"]:
         values = list(series["values"])

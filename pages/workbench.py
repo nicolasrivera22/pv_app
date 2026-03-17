@@ -203,6 +203,7 @@ layout = html.Div(
                                 html.Div(tr("workbench.no_active_scenario", "es"), id="active-source-status", className="status-line"),
                                 html.Div(tr("workbench.run_pending", "es"), id="active-run-status", className="status-line"),
                                 html.Div(tr("workbench.run_running", "es"), id="active-run-progress", className="status-line", style={"display": "none"}),
+                                html.P(tr("workbench.scan_guidance", "es"), id="active-scan-guidance", className="section-copy"),
                                 html.H3(tr("common.validation", "es"), id="active-validation-title"),
                                 html.Div(render_validation_panel([], lang="es"), id="active-validation"),
                             ],
@@ -249,6 +250,7 @@ layout = html.Div(
     Output("run-active-scan-btn", "children"),
     Output("active-validation-title", "children"),
     Output("active-run-progress", "children"),
+    Output("active-scan-guidance", "children"),
     Output("assumption-editor-title", "children"),
     Output("assumption-show-all", "options"),
     Output("apply-edits-btn", "children"),
@@ -267,6 +269,8 @@ layout = html.Div(
     Output("add-inverter-row-btn", "children"),
     Output("add-battery-row-btn", "children"),
     Output("candidate-explorer-title", "children"),
+    Output("candidate-export-note", "children"),
+    Output("candidate-explorer-intro", "children"),
     Output("selected-candidate-kpi-title", "children"),
     Output("candidate-selection-helper", "children"),
     Output("selected-candidate-deep-dive-title", "children"),
@@ -302,6 +306,7 @@ def translate_workbench_page(language_value):
         tr("workbench.run_scan", lang),
         tr("common.validation", lang),
         tr("workbench.run_running", lang),
+        tr("workbench.scan_guidance", lang),
         tr("workbench.assumptions", lang),
         [{"label": tr("workbench.assumptions.show_all", lang), "value": "all"}],
         tr("workbench.assumptions.apply", lang),
@@ -320,6 +325,8 @@ def translate_workbench_page(language_value):
         tr("workbench.add_row", lang),
         tr("workbench.add_row", lang),
         tr("workbench.candidate_explorer", lang),
+        tr("workbench.export.note", lang),
+        tr("workbench.candidate_explorer.intro", lang),
         tr("workbench.selected_design.summary", lang),
         tr("workbench.candidate_selection.helper", lang),
         tr("workbench.deep_dive.title", lang),
@@ -362,9 +369,9 @@ def populate_scenario_shell(session_payload, language_value):
     pills = []
     for scenario in state.scenarios:
         css = "scenario-pill active" if scenario.scenario_id == state.active_scenario_id else "scenario-pill"
-        status = "pendiente" if scenario.dirty and scenario.scan_result is None else ("requiere recálculo" if scenario.dirty else "listo")
+        status = "sin ejecutar" if scenario.dirty and scenario.scan_result is None else ("requiere recálculo" if scenario.dirty else "listo")
         if lang == "en":
-            status = "pending" if scenario.dirty and scenario.scan_result is None else ("rerun needed" if scenario.dirty else "ready")
+            status = "not run yet" if scenario.dirty and scenario.scan_result is None else ("rerun required" if scenario.dirty else "ready")
         pills.append(
             html.Div(
                 className=css,

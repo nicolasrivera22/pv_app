@@ -532,7 +532,7 @@ def plot_npv_scan(scan_df, seed_kwp, best_kwp, out_png, wp_panel):
     plt.close(fig)
 
 
-def prepare_autoconsumo_anual_series(df: pd.DataFrame, *, export_allowed: bool = True) -> dict:
+def prepare_autoconsumo_anual_series(df: pd.DataFrame, *, export_allowed: bool = True, lang: str = "es") -> dict:
     """Prepara series del gráfico anual de autoconsumo/importación/exportación (año 1)."""
     first_year = df.iloc[:12].copy()
     if "Año_mes" in first_year.columns:
@@ -541,23 +541,38 @@ def prepare_autoconsumo_anual_series(df: pd.DataFrame, *, export_allowed: bool =
         xlabels = [str(index + 1) for index in range(len(first_year))]
     if {"PV_a_Carga_kWh", "Bateria_a_Carga_kWh", "Importacion_Red_kWh"}.issubset(first_year.columns):
         export = first_year.get("Exportacion_kWh", pd.Series(np.zeros(len(first_year))))
+        pv_to_load = "PV → Carga" if lang == "es" else "PV to load"
+        battery_to_load = "Batería → Carga" if lang == "es" else "Battery to load"
+        grid_import = "Importación" if lang == "es" else "Grid import"
+        export_label = "Exportación" if lang == "es" else "Export"
         series = [
-            {"label": "PV → Carga", "values": first_year["PV_a_Carga_kWh"].to_numpy(dtype=float), "color": "#57eb36"},
-            {"label": "Batería → Carga", "values": first_year["Bateria_a_Carga_kWh"].to_numpy(dtype=float), "color": "#6fa8dc"},
-            {"label": "Importación", "values": first_year["Importacion_Red_kWh"].to_numpy(dtype=float), "color": "#f26c4f"},
+            {"label": pv_to_load, "values": first_year["PV_a_Carga_kWh"].to_numpy(dtype=float), "color": "#57eb36"},
+            {"label": battery_to_load, "values": first_year["Bateria_a_Carga_kWh"].to_numpy(dtype=float), "color": "#6fa8dc"},
+            {"label": grid_import, "values": first_year["Importacion_Red_kWh"].to_numpy(dtype=float), "color": "#f26c4f"},
         ]
         if export_allowed and export is not None:
-            series.append({"label": "Exportación", "values": export.to_numpy(dtype=float), "color": "#f7b32b"})
+            series.append({"label": export_label, "values": export.to_numpy(dtype=float), "color": "#f7b32b"})
     else:
         autoconsumo = first_year.get("Autoconsumo_kWh", pd.Series(np.zeros(len(first_year))))
         imported = first_year.get("Demanda_Importada_no_Atendida_kWh", pd.Series(np.zeros(len(first_year))))
+        self_consumption = "Autoconsumo" if lang == "es" else "Self-consumption"
+        imported_demand = "Demanda importada" if lang == "es" else "Imported demand"
+        export_label = "Exportación" if lang == "es" else "Export"
         series = [
-            {"label": "Autoconsumo", "values": autoconsumo.to_numpy(dtype=float), "color": "g"},
-            {"label": "Demanda importada", "values": imported.to_numpy(dtype=float), "color": "red"},
+            {"label": self_consumption, "values": autoconsumo.to_numpy(dtype=float), "color": "g"},
+            {"label": imported_demand, "values": imported.to_numpy(dtype=float), "color": "red"},
         ]
         if export_allowed and "Exportacion_kWh" in first_year.columns:
-            series.append({"label": "Exportación", "values": first_year["Exportacion_kWh"].to_numpy(dtype=float), "color": "orange"})
-    title = "Autoconsumo, Importación y Exportación (Año 1)" if export_allowed else "Cobertura mensual de demanda (Año 1)"
+            series.append({"label": export_label, "values": first_year["Exportacion_kWh"].to_numpy(dtype=float), "color": "orange"})
+    title = (
+        "Autoconsumo, Importación y Exportación (Año 1)"
+        if lang == "es" and export_allowed
+        else "Cobertura mensual de demanda (Año 1)"
+        if lang == "es"
+        else "Self-consumption, import, and export (Year 1)"
+        if export_allowed
+        else "Monthly demand coverage (Year 1)"
+    )
     return {"xlabels": xlabels, "series": series, "title": title}
 
 
@@ -806,7 +821,7 @@ def plot_cumulated_npv(df: pd.DataFrame, kWp, out_dir, cfg):
     plt.close()
 
 
-def prepare_battery_monthly_series(df_month: pd.DataFrame) -> dict:
+def prepare_battery_monthly_series(df_month: pd.DataFrame, *, lang: str = "es") -> dict:
     """Prepara series mensuales de cobertura de demanda y destino FV."""
     if "Año_mes" in df_month.columns:
         xlabels = df_month["Año_mes"].astype(str).tolist()
@@ -821,18 +836,24 @@ def prepare_battery_monthly_series(df_month: pd.DataFrame) -> dict:
         curtail = df_month["Curtailment_kWh"].to_numpy(dtype=float)
     else:
         curtail = np.zeros_like(exp)
+    pv_to_load = "PV → Carga" if lang == "es" else "PV to load"
+    battery_to_load = "Batería → Carga" if lang == "es" else "Battery to load"
+    grid_import = "Importación Red" if lang == "es" else "Grid import"
+    pv_to_battery = "PV → Batería" if lang == "es" else "PV to battery"
+    export_label = "Exportación" if lang == "es" else "Export"
+    curtailment = "Curtailment" if lang == "en" else "Recorte"
     return {
         "xlabels": xlabels,
         "coverage_series": [
-            {"label": "PV → Carga", "values": pv_load},
-            {"label": "Batería → Carga", "values": bat_load},
-            {"label": "Importación Red", "values": imp},
+            {"label": pv_to_load, "values": pv_load},
+            {"label": battery_to_load, "values": bat_load},
+            {"label": grid_import, "values": imp},
         ],
         "destination_series": [
-            {"label": "PV → Carga", "values": pv_load},
-            {"label": "PV → Batería", "values": pv_batt},
-            {"label": "Exportación", "values": exp},
-            {"label": "Curtailment", "values": curtail},
+            {"label": pv_to_load, "values": pv_load},
+            {"label": pv_to_battery, "values": pv_batt},
+            {"label": export_label, "values": exp},
+            {"label": curtailment, "values": curtail},
         ],
     }
 
