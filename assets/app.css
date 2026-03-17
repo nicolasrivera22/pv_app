@@ -189,7 +189,10 @@ body {
 }
 
 .active-summary-copy {
-    max-width: 92ch;
+    color: #475569;
+    font-size: 0.93rem;
+    line-height: 1.6;
+    max-width: none;
     margin-top: 0.45rem;
     margin-bottom: 0;
 }

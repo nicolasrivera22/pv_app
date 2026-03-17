@@ -200,7 +200,7 @@ layout = html.Div(
                                                 html.Div(tr("workbench.no_active_scenario", "es"), id="active-source-status", className="status-line active-summary-meta"),
                                                 html.Div(tr("workbench.run_pending", "es"), id="active-run-status", className="status-line active-summary-meta"),
                                                 html.Div(tr("workbench.run_running", "es"), id="active-run-progress", className="status-line active-summary-meta", style={"display": "none"}),
-                                                html.P(tr("workbench.scan_guidance", "es"), id="active-scan-guidance", className="section-copy active-summary-copy"),
+                                                html.P(tr("workbench.scan_guidance", "es"), id="active-scan-guidance", className="active-summary-copy"),
                                             ],
                                         ),
                                         html.Div(
