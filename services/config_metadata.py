@@ -10,6 +10,17 @@ def _config_key(item: str) -> str:
     return "bat_coupling" if item == "coupling" else item
 
 
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if bool(pd.isna(value)):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
 @dataclass(frozen=True)
 class ConfigFieldMeta:
     item: str
@@ -32,7 +43,7 @@ def extract_config_metadata(config_table: pd.DataFrame, config: dict[str, Any]) 
     table["Grupo"] = table["Grupo"].ffill().fillna("")
     metadata: list[ConfigFieldMeta] = []
     for order, (_, row) in enumerate(table.iterrows()):
-        item = str(row.get("Item", "")).strip()
+        item = _safe_text(row.get("Item", ""))
         if not item:
             continue
         config_key = _config_key(item)
@@ -40,9 +51,9 @@ def extract_config_metadata(config_table: pd.DataFrame, config: dict[str, Any]) 
             ConfigFieldMeta(
                 item=item,
                 config_key=config_key,
-                group=str(row.get("Grupo", "") or "").strip(),
-                description=str(row.get("Descripción", "") or "").strip(),
-                unit=str(row.get("Unidad", "") or "").strip(),
+                group=_safe_text(row.get("Grupo", "")),
+                description=_safe_text(row.get("Descripción", "")),
+                unit=_safe_text(row.get("Unidad", "")),
                 order=order,
                 value=config.get(config_key, row.get("Valor")),
                 supported=config_key in config,

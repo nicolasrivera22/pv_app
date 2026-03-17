@@ -84,6 +84,22 @@ def _find_component(node, component_id: str):
     return _find_component(children, component_id)
 
 
+def _find_component_with_class(node, class_name: str):
+    classes = str(getattr(node, "className", "") or "").split()
+    if class_name in classes:
+        return node
+    children = getattr(node, "children", None)
+    if children is None:
+        return None
+    if isinstance(children, (list, tuple)):
+        for child in children:
+            found = _find_component_with_class(child, class_name)
+            if found is not None:
+                return found
+        return None
+    return _find_component_with_class(children, class_name)
+
+
 def _find_field(sections: list[dict], field_key: str) -> dict:
     for section in sections:
         for bucket in ("basic", "advanced"):
@@ -400,6 +416,52 @@ def test_assumption_editor_leaves_dropdowns_and_text_fields_without_numeric_affi
     assert "input-affix" not in markup
 
 
+def test_assumption_sections_do_not_render_nan_like_helper_text() -> None:
+    bundle = load_example_config()
+    config_table = bundle.config_table.copy()
+    mask = config_table["Item"] == "include_battery"
+    config_table.loc[mask, "Descripción"] = float("nan")
+    config_table.loc[mask, "Unidad"] = float("nan")
+    bundle = replace(bundle, config_table=config_table)
+
+    sections = build_assumption_sections(bundle, lang="es", show_all=True)
+    field = _find_field(sections, "include_battery")
+    rendered = render_assumption_sections(
+        [{"group": "Batería", "help": "", "basic": [field], "advanced": []}],
+        show_all=True,
+        empty_message="Sin datos",
+        advanced_label="Avanzado",
+    )
+
+    markup = str(rendered[0].to_plotly_json()).lower()
+    assert field["unit"] == ""
+    assert "nan" not in markup
+
+
+def test_active_summary_uses_copy_and_meta_classes_for_hierarchy() -> None:
+    guidance = _find_component(workbench_page.layout, "active-scan-guidance")
+    source_status = _find_component(workbench_page.layout, "active-source-status")
+    run_status = _find_component(workbench_page.layout, "active-run-status")
+    run_button = _find_component(workbench_page.layout, "run-active-scan-btn")
+
+    assert "active-summary-copy" in guidance.className
+    assert "active-summary-meta" in source_status.className
+    assert "active-summary-meta" in run_status.className
+    assert run_button is not None
+
+
+def test_active_summary_uses_two_column_layout_with_dedicated_content_and_action_areas() -> None:
+    top = _find_component_with_class(workbench_page.layout, "active-summary-top")
+    content = _find_component_with_class(workbench_page.layout, "active-summary-content")
+    actions = _find_component_with_class(workbench_page.layout, "active-summary-actions")
+
+    assert top is not None
+    assert content is not None
+    assert actions is not None
+    assert _find_component(content, "active-scan-guidance") is not None
+    assert _find_component(actions, "run-active-scan-btn") is not None
+
+
 def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     asset_css = Path("assets/app.css")
     app_source = Path("app.py").read_text(encoding="utf-8")
@@ -410,6 +472,10 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".assumption-input-shell" in css_source
     assert ".candidate-selection-helper" in css_source
     assert "body {" in css_source
+    assert ".active-summary-copy" in css_source
+    assert "grid-template-columns: minmax(0, 1fr) auto;" in css_source
+    assert ".active-summary-top" in css_source
+    assert ".active-summary-actions" in css_source
 
 
 def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:

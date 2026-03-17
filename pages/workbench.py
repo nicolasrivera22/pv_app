@@ -188,22 +188,27 @@ layout = html.Div(
                     className="main-stack",
                     children=[
                         html.Div(
-                            className="panel",
+                            className="panel active-summary-card",
                             children=[
                                 html.Div(
-                                    className="section-head",
+                                    className="active-summary-top",
                                     children=[
-                                        html.H2(tr("workbench.section.active", "es"), id="active-scenario-panel-title"),
                                         html.Div(
-                                            className="controls",
+                                            className="active-summary-content",
+                                            children=[
+                                                html.H2(tr("workbench.section.active", "es"), id="active-scenario-panel-title"),
+                                                html.Div(tr("workbench.no_active_scenario", "es"), id="active-source-status", className="status-line active-summary-meta"),
+                                                html.Div(tr("workbench.run_pending", "es"), id="active-run-status", className="status-line active-summary-meta"),
+                                                html.Div(tr("workbench.run_running", "es"), id="active-run-progress", className="status-line active-summary-meta", style={"display": "none"}),
+                                                html.P(tr("workbench.scan_guidance", "es"), id="active-scan-guidance", className="section-copy active-summary-copy"),
+                                            ],
+                                        ),
+                                        html.Div(
+                                            className="active-summary-actions",
                                             children=[html.Button(tr("workbench.run_scan", "es"), id="run-active-scan-btn", n_clicks=0, className="action-btn")],
                                         ),
                                     ],
                                 ),
-                                html.Div(tr("workbench.no_active_scenario", "es"), id="active-source-status", className="status-line"),
-                                html.Div(tr("workbench.run_pending", "es"), id="active-run-status", className="status-line"),
-                                html.Div(tr("workbench.run_running", "es"), id="active-run-progress", className="status-line", style={"display": "none"}),
-                                html.P(tr("workbench.scan_guidance", "es"), id="active-scan-guidance", className="section-copy"),
                                 html.H3(tr("common.validation", "es"), id="active-validation-title"),
                                 html.Div(render_validation_panel([], lang="es"), id="active-validation"),
                             ],
