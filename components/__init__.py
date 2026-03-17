@@ -11,7 +11,7 @@ from .risk_charts import (
     render_risk_summary_cards,
     risk_charts_section,
 )
-from .risk_controls import risk_controls_section
+from .risk_controls import render_risk_monte_carlo_fields, risk_controls_section
 from .risk_tables import render_message_list, render_metadata_table, risk_tables_section
 from .scenario_controls import scenario_sidebar
 from .unifilar_diagram import render_schematic_inspector, render_schematic_legend, unifilar_diagram_section
@@ -30,6 +30,7 @@ __all__ = [
     "render_message_list",
     "render_metadata_table",
     "render_risk_summary_cards",
+    "render_risk_monte_carlo_fields",
     "render_schematic_inspector",
     "render_schematic_legend",
     "render_validation_panel",

@@ -1034,9 +1034,71 @@ def parse_assumption_input_value(field_key: str, value: Any) -> Any:
     return numeric
 
 
-def build_assumption_sections(bundle, lang: str = "es", show_all: bool = False) -> list[dict[str, Any]]:
+def _field_payload(meta: ConfigFieldMeta, bundle, *, lang: str = "es") -> dict[str, Any]:
+    schema = field_schema_for(meta)
+    payload = {
+        "field": meta.config_key,
+        "item": meta.item,
+        "label": field_label(meta, lang),
+        "help": field_help(meta, lang),
+        "unit": meta.unit,
+        "suffix": field_suffix(meta, lang),
+        "kind": schema.kind,
+        "display_format": schema.display_format,
+        "precision": schema.precision,
+        "input_step": field_input_step(meta),
+        "min": schema.min_value,
+        "max": schema.max_value,
+        "options": field_options(meta, lang),
+        "value": display_assumption_value(meta.config_key, bundle.config.get(meta.config_key, meta.value)),
+        "supported": meta.supported,
+    }
+    if meta.config_key == "mc_battery_name":
+        names = [
+            str(value).strip()
+            for value in bundle.battery_catalog.get("name", pd.Series(dtype=object)).astype(str).tolist()
+            if str(value).strip() and str(value).strip().lower() != "nan"
+        ]
+        payload["kind"] = "dropdown"
+        payload["options"] = [{"label": tr("common.no_battery", lang), "value": ""}] + [
+            {"label": name, "value": name} for name in dict.fromkeys(names)
+        ]
+        payload["value"] = str(payload["value"] or "")
+    return payload
+
+
+def build_config_fields(
+    bundle,
+    field_keys: list[str] | tuple[str, ...],
+    *,
+    lang: str = "es",
+) -> list[dict[str, Any]]:
+    if not field_keys:
+        return []
+    order = {field_key: index for index, field_key in enumerate(field_keys)}
+    fields: list[dict[str, Any]] = []
+    for meta in extract_config_metadata(bundle.config_table, bundle.config):
+        if meta.config_key not in order:
+            continue
+        schema = field_schema_for(meta)
+        if schema.visibility == "hidden":
+            continue
+        fields.append(_field_payload(meta, bundle, lang=lang))
+    return sorted(fields, key=lambda field: order.get(field["field"], len(order)))
+
+
+def build_assumption_sections(
+    bundle,
+    lang: str = "es",
+    show_all: bool = False,
+    *,
+    exclude_groups: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    excluded = {str(group).strip() for group in (exclude_groups or set()) if str(group).strip()}
     sections_by_group: dict[str, dict[str, Any]] = {}
     for meta in extract_config_metadata(bundle.config_table, bundle.config):
+        if meta.group in excluded:
+            continue
         schema = field_schema_for(meta)
         if schema.visibility == "hidden":
             continue
@@ -1051,25 +1113,7 @@ def build_assumption_sections(bundle, lang: str = "es", show_all: bool = False) 
                 "advanced": [],
             },
         )
-        bucket["basic" if target == "all" else target].append(
-            {
-                "field": meta.config_key,
-                "item": meta.item,
-                "label": field_label(meta, lang),
-                "help": field_help(meta, lang),
-                "unit": meta.unit,
-                "suffix": field_suffix(meta, lang),
-                "kind": schema.kind,
-                "display_format": schema.display_format,
-                "precision": schema.precision,
-                "input_step": field_input_step(meta),
-                "min": schema.min_value,
-                "max": schema.max_value,
-                "options": field_options(meta, lang),
-                "value": display_assumption_value(meta.config_key, bundle.config.get(meta.config_key, meta.value)),
-                "supported": meta.supported,
-            }
-        )
+        bucket["basic" if target == "all" else target].append(_field_payload(meta, bundle, lang=lang))
     return list(sections_by_group.values())
 
 

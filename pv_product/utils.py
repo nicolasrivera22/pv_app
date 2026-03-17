@@ -679,6 +679,8 @@ def prepare_typical_day_series(
     demand_month_factor,
     month_for_plot=None,
     year_for_plot=0,
+    battery=None,
+    export_allowed=True,
 ):
     """Prepara las series del gráfico de día típico."""
     if demand_month_factor is None:
@@ -696,12 +698,37 @@ def prepare_typical_day_series(
     E_pv_day = kWp * PR_eff * hsp_month[month_for_plot]
     pv_dc = np.asarray(s24, dtype=float) * E_pv_day
     pv_ac = np.minimum(pv_dc, P_AC)
+    battery_input = battery
+    if battery and "usable_kWh" not in battery and "nom_kWh" in battery:
+        battery_input = dict(battery)
+        battery_input["usable_kWh"] = float(battery.get("nom_kWh", 0.0) or 0.0) * float(cfg.get("bat_DoD", 0.0) or 0.0)
+    battery_obj, soc0 = _make_battery_obj(battery_input)
+    export_limit_kw = None if bool(export_allowed) else 0.0
+    dispatch = dispatch_day(
+        pv_dc,
+        demand_kw,
+        battery_obj,
+        DispatchConfig(
+            inverter_ac_kw=float(P_AC),
+            allow_import=True,
+            allow_export=True,
+            export_limit_kw=export_limit_kw,
+            mode="grid" if bool(export_allowed) else "zero_export",
+        ),
+        soc0,
+    )
     hours = np.arange(24)
     frame = pd.DataFrame(
         {
             "Hora": hours,
             "Demanda": demand_kw,
             "Autogeneración": pv_ac,
+            "FV_a_Carga": dispatch.pv_to_load,
+            "FV_a_Batería": dispatch.pv_to_batt,
+            "Batería_a_Carga": dispatch.batt_to_load,
+            "Importación_Red": dispatch.import_energy,
+            "Exportación": dispatch.export_energy,
+            "Recorte": dispatch.curtail,
             "Sol": np.asarray(s24, dtype=float),
         }
     )
@@ -710,6 +737,13 @@ def prepare_typical_day_series(
         "hours": hours,
         "demand_kw": demand_kw,
         "pv_ac_kw": pv_ac,
+        "pv_to_load_kw": np.asarray(dispatch.pv_to_load, dtype=float),
+        "pv_to_battery_kw": np.asarray(dispatch.pv_to_batt, dtype=float),
+        "battery_to_load_kw": np.asarray(dispatch.batt_to_load, dtype=float),
+        "grid_import_kw": np.asarray(dispatch.import_energy, dtype=float),
+        "export_kw": np.asarray(dispatch.export_energy, dtype=float),
+        "curtail_kw": np.asarray(dispatch.curtail, dtype=float),
+        "has_battery": battery_obj is not None and float(battery_obj.usable_kwh) > 0.0,
         "solar_factor_pct": np.asarray(s24, dtype=float) * 100.0,
         "month_for_plot": int(month_for_plot),
         "title": title,
@@ -745,6 +779,8 @@ def plot_dia_tipico(
         demand_month_factor,
         month_for_plot=month_for_plot,
         year_for_plot=year_for_plot,
+        battery=battery,
+        export_allowed=export_allowed,
     )
     horas = prepared["hours"]
     fig, ax1 = plt.subplots(figsize=(9, 5))
@@ -752,6 +788,11 @@ def plot_dia_tipico(
 
     ax1.bar(horas - 0.2, prepared["demand_kw"], width=0.4, label="Consumo", color="red")
     ax1.bar(horas + 0.2, prepared["pv_ac_kw"], width=0.4, label="FV", color="#57eb36")
+    if prepared.get("has_battery"):
+        ax1.plot(horas, prepared["battery_to_load_kw"], linewidth=2.5, marker="o", label="Batería a carga", color="#2563eb")
+        ax1.plot(horas, prepared["pv_to_battery_kw"], linewidth=2.0, marker="o", linestyle="--", label="FV a batería", color="#f59e0b")
+        if np.any(np.abs(prepared["grid_import_kw"]) > 1e-6):
+            ax1.plot(horas, prepared["grid_import_kw"], linewidth=1.8, linestyle=":", label="Importación red", color="#6b7280")
 
     props = dict(boxstyle="round", facecolor="whitesmoke", edgecolor="gray")
     ax1.text(0.01, 0.99, f"# módulos={int(1e3 * kWp / cfg['P_mod_W'])}", transform=ax1.transAxes, fontsize=9, verticalalignment="top", horizontalalignment="left", bbox=props)

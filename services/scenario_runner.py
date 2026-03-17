@@ -26,6 +26,9 @@ def _deterministic_config(config: dict) -> dict:
     cfg["mc_sell_std"] = 0.0
     cfg["mc_demand_std"] = 0.0
     cfg["mc_n_simulations"] = 0
+    cfg["mc_use_manual_kWp"] = False
+    cfg["mc_manual_kWp"] = 0.0
+    cfg["mc_battery_name"] = ""
     return cfg
 
 

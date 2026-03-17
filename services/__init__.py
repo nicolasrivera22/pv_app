@@ -100,6 +100,7 @@ from .scenario_session import (
     set_active_scenario,
     set_comparison_scenarios,
     set_design_comparison_candidates,
+    update_scenario_risk_config,
     update_scenario_bundle,
     update_selected_candidate,
 )
@@ -136,6 +137,7 @@ from .types import (
 )
 from .ui_schema import (
     build_assumption_sections,
+    build_config_fields,
     build_display_columns,
     build_table_display_columns,
     format_metric,
@@ -181,6 +183,7 @@ __all__ = [
     "ScenarioSessionState",
     "ValidationIssue",
     "build_assumption_sections",
+    "build_config_fields",
     "build_schematic_legend",
     "add_scenario",
     "append_design_selection",
@@ -299,6 +302,7 @@ __all__ = [
     "user_workbook_path",
     "update_config_table_values",
     "update_scenario_bundle",
+    "update_scenario_risk_config",
     "update_selected_candidate",
     "validate_config",
     "validate_risk_run_inputs",

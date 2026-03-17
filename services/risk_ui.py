@@ -148,6 +148,7 @@ def build_risk_result_store_payload(
     n_simulations: int | None,
     seed: int | None,
     retain_samples: bool,
+    mc_settings: dict[str, Any] | None = None,
     status: str | None = None,
     errors: list[str] | None = None,
     warnings: list[str] | None = None,
@@ -159,6 +160,7 @@ def build_risk_result_store_payload(
         "n_simulations": n_simulations,
         "seed": seed,
         "retain_samples": retain_samples,
+        "mc_settings": dict(mc_settings or {}),
         "status": status,
         "errors": list(errors or []),
         "warnings": list(warnings or []),
@@ -174,6 +176,7 @@ def clear_missing_risk_result_payload(payload: dict[str, Any] | None, *, lang: s
         n_simulations=payload.get("n_simulations"),
         seed=payload.get("seed"),
         retain_samples=bool(payload.get("retain_samples")),
+        mc_settings=dict(payload.get("mc_settings") or {}),
         status=tr("risk.status.rerun_needed", lang),
         errors=[tr("risk.error.result_missing", lang)],
     )

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import importlib.util
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from components.risk_charts import build_ecdf_figure, build_histogram_figure
 from services import (
     ScenarioSessionState,
     add_scenario,
@@ -26,6 +27,16 @@ from services import (
     tr,
     validate_risk_run_inputs,
 )
+
+_RISK_CHARTS_SPEC = importlib.util.spec_from_file_location(
+    "risk_charts_for_tests",
+    Path(__file__).resolve().parents[1] / "components" / "risk_charts.py",
+)
+assert _RISK_CHARTS_SPEC is not None and _RISK_CHARTS_SPEC.loader is not None
+_RISK_CHARTS = importlib.util.module_from_spec(_RISK_CHARTS_SPEC)
+_RISK_CHARTS_SPEC.loader.exec_module(_RISK_CHARTS)
+build_ecdf_figure = _RISK_CHARTS.build_ecdf_figure
+build_histogram_figure = _RISK_CHARTS.build_histogram_figure
 
 
 def _fast_bundle():
@@ -94,6 +105,7 @@ def test_browser_payload_stays_compact() -> None:
         n_simulations=100,
         seed=0,
         retain_samples=False,
+        mc_settings={"mc_PR_std": 0.1},
         status="ok",
         errors=[],
         warnings=["warn"],
@@ -106,6 +118,7 @@ def test_browser_payload_stays_compact() -> None:
         "n_simulations",
         "seed",
         "retain_samples",
+        "mc_settings",
         "status",
         "errors",
         "warnings",
@@ -123,12 +136,14 @@ def test_missing_result_payload_clears_stale_reference_with_friendly_message() -
             "n_simulations": 100,
             "seed": 0,
             "retain_samples": True,
+            "mc_settings": {"mc_PR_std": 0.1},
         },
         lang="es",
     )
 
     assert payload["result_id"] is None
     assert payload["retain_samples"] is True
+    assert payload["mc_settings"] == {"mc_PR_std": 0.1}
     assert "ya no está disponible" in payload["status"]
     assert payload["errors"]
 

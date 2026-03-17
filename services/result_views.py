@@ -576,6 +576,8 @@ def build_typical_day_figure(
         scenario.config_bundle.solar_profile,
         scenario.config_bundle.hsp_month,
         scenario.config_bundle.demand_month_factor,
+        battery=detail.get("battery"),
+        export_allowed=export_allowed,
     )
     figure = make_subplots(specs=[[{"secondary_y": True}]])
     figure.add_bar(
@@ -592,6 +594,40 @@ def build_typical_day_figure(
         marker_color="#57eb36",
         offsetgroup="pv",
     )
+    if prepared.get("has_battery"):
+        figure.add_trace(
+            go.Scatter(
+                x=prepared["hours"],
+                y=prepared["battery_to_load_kw"],
+                mode="lines+markers",
+                name=tr("common.chart.battery_to_load", lang),
+                line={"color": "#2563eb", "width": 3},
+                marker={"size": 6, "color": "#2563eb"},
+            ),
+            secondary_y=False,
+        )
+        figure.add_trace(
+            go.Scatter(
+                x=prepared["hours"],
+                y=prepared["pv_to_battery_kw"],
+                mode="lines+markers",
+                name=tr("common.chart.pv_to_battery", lang),
+                line={"color": "#f59e0b", "width": 2.5, "dash": "dash"},
+                marker={"size": 5, "color": "#f59e0b"},
+            ),
+            secondary_y=False,
+        )
+        if any(abs(float(value)) > 1e-6 for value in prepared["grid_import_kw"]):
+            figure.add_trace(
+                go.Scatter(
+                    x=prepared["hours"],
+                    y=prepared["grid_import_kw"],
+                    mode="lines",
+                    name=tr("common.chart.grid_import", lang),
+                    line={"color": "#6b7280", "width": 2, "dash": "dot"},
+                ),
+                secondary_y=False,
+            )
     figure.add_trace(
         go.Scatter(
             x=prepared["hours"],
