@@ -111,7 +111,7 @@ layout = html.Div(
                             ],
                         ),
                         html.P(tr("compare.intro", "es"), id="compare-page-intro"),
-                        html.P(tr("compare.flow_note", "es"), id="compare-flow-note", className="section-copy"),
+                        html.P(tr("compare.flow_note", "es"), id="compare-flow-note", className="section-copy section-copy-wide"),
                         html.Div(className="scenario-meta", children=[html.Span(tr("compare.active_scenario", "es"), id="compare-active-scenario-label"), html.Span(" — ", className="scenario-sep"), html.Span("", id="compare-active-scenario-value")]),
                         html.Div("", id="comparison-export-progress", className="status-line", style={"display": "none"}),
                         html.Div(tr("compare.state.no_active", "es"), id="compare-status", className="status-line"),
@@ -175,7 +175,7 @@ layout = html.Div(
                                 className="panel",
                                 children=[
                                     html.H3(tr("compare.summary", "es"), id="comparison-summary-title"),
-                                    html.P(tr("compare.summary.note", "es"), id="compare-summary-note", className="section-copy"),
+                                    html.P(tr("compare.summary.note", "es"), id="compare-summary-note", className="section-copy section-copy-wide"),
                                     dash_table.DataTable(
                                         id="comparison-summary-table",
                                         data=[],

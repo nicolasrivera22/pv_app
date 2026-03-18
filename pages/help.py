@@ -248,7 +248,7 @@ def _render_section(section: dict[str, object]) -> html.Div:
         )
     ]
     for paragraph in section.get("paragraphs", ()):
-        children.append(html.P(str(paragraph), className="section-copy"))
+        children.append(html.P(str(paragraph), className="section-copy section-copy-wide"))
     bullets = section.get("bullets", ())
     if bullets:
         children.append(
@@ -282,7 +282,7 @@ def layout():
                                 className="section-head",
                                 children=[html.H2(tr("help.title", "es"), id="help-page-title")],
                             ),
-                            html.P(tr("help.intro", "es"), id="help-page-intro", className="section-copy"),
+                            html.P(tr("help.intro", "es"), id="help-page-intro", className="section-copy section-copy-wide"),
                         ],
                     ),
                     html.Div(id="help-content", className="main-stack", children=build_help_sections("es")),

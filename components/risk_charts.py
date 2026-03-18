@@ -33,7 +33,7 @@ def risk_charts_section() -> html.Div:
         className="panel",
         children=[
             html.H3(tr("risk.summary.title", "es"), id="risk-summary-title"),
-            html.P(tr("risk.summary.note", "es"), id="risk-summary-note", className="section-copy"),
+            html.P(tr("risk.summary.note", "es"), id="risk-summary-note", className="section-copy section-copy-wide"),
             html.Div(id="risk-summary-cards", className="kpi-grid"),
             html.H3(tr("risk.distributions.title", "es"), id="risk-distributions-title"),
             html.Div(

@@ -137,7 +137,7 @@ def risk_controls_section() -> html.Div:
                 className="subpanel",
                 children=[
                     html.H4(tr("risk.monte_carlo_settings.title", "es"), id="risk-monte-carlo-title"),
-                    html.P(tr("risk.monte_carlo_settings.help", "es"), id="risk-monte-carlo-help", className="section-copy"),
+                    html.P(tr("risk.monte_carlo_settings.help", "es"), id="risk-monte-carlo-help", className="section-copy section-copy-wide"),
                     html.Div(id="risk-monte-carlo-fields", className="assumption-grid"),
                 ],
             ),

@@ -26,7 +26,7 @@ def profile_editor_section() -> html.Div:
         className="panel secondary-panel",
         children=[
             html.Div(className="section-head", children=[html.H3(tr("workbench.profiles", "es"), id="profile-editor-title")]),
-            html.Div(tr("workbench.profiles.note", "es"), id="profile-editor-note", className="section-copy"),
+            html.Div(tr("workbench.profiles.note", "es"), id="profile-editor-note", className="section-copy section-copy-wide"),
             html.Div(
                 className="catalog-grid",
                 children=[
