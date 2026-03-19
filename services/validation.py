@@ -292,8 +292,8 @@ def localize_validation_message(issue: ValidationIssue, *, lang: str = "es") -> 
     if match := _OTHER_PRICE_BAND_RE.fullmatch(message):
         kwp = match.group(1)
         if lang == "en":
-            return f"No additional-cost band covers {kwp} kWp. Extend that table or turn off additional variable costs."
-        return f"Ninguna banda de costos adicionales cubre {kwp} kWp. Amplía esa tabla o desactiva los costos variables adicionales."
+            return f"No additional-cost band covers {kwp} kWp. Extend that table or turn off other variable prices."
+        return f"Ninguna banda de costos adicionales cubre {kwp} kWp. Amplía esa tabla o desactiva los otros precios variables."
     if match := _INVALID_VALUE_RE.fullmatch(message):
         raw_value = match.group(2)
         if lang == "en":

@@ -79,6 +79,7 @@ def _profile_panel(
     panel_class_name: str = "",
     page_size: int = 8,
     add_row_button_id: str | None = None,
+    placeholder_id: str | None = None,
 ) -> html.Div:
     activator = html.Button(
         tr("workbench.profiles.preview_chart", "es"),
@@ -105,6 +106,17 @@ def _profile_panel(
         _profile_title(title_key, title_id, tooltip_key, tooltip_id),
         html.Div(className="profile-table-actions", children=action_children),
     ]
+    panel_children = [
+        html.Div(
+            className="section-head profile-table-head",
+            children=head_children,
+        ),
+        _profile_table(table_id, page_size=page_size),
+    ]
+    if placeholder_id is not None:
+        panel_children.append(
+            html.Div(id=placeholder_id, className="profile-table-placeholder", style={"display": "none"})
+        )
     div_kwargs = {"className": class_name}
     if panel_id is not None:
         div_kwargs["id"] = panel_id
@@ -114,13 +126,7 @@ def _profile_panel(
         children=[
             html.Div(
                 **div_kwargs,
-                children=[
-                    html.Div(
-                        className="section-head profile-table-head",
-                        children=head_children,
-                    ),
-                    _profile_table(table_id, page_size=page_size),
-                ],
+                children=panel_children,
             ),
         ],
     )
@@ -188,6 +194,7 @@ def profile_editor_section() -> html.Div:
                         "price-kwp-editor",
                         panel_id="price-kwp-panel",
                         add_row_button_id="add-price-kwp-row-btn",
+                        placeholder_id="price-kwp-placeholder",
                     ),
                     _profile_panel(
                         "price-kwp-others-card",
@@ -198,6 +205,7 @@ def profile_editor_section() -> html.Div:
                         "price-kwp-others-editor",
                         panel_id="price-kwp-others-panel",
                         add_row_button_id="add-price-kwp-others-row-btn",
+                        placeholder_id="price-kwp-others-placeholder",
                     ),
                     _profile_panel(
                         "demand-profile-card",

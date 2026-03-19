@@ -308,10 +308,10 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     "include_var_others": FieldUiSchema(
         "dropdown",
         "advanced",
-        "Incluir costos variables adicionales",
-        "Include additional variable costs",
-        "Suma la tabla de costos variables adicionales además del precio principal por kWp.",
-        "Adds the additional-variable-cost table on top of the main kWp pricing table.",
+        "Incluir otros precios variables",
+        "Include other variable prices",
+        "Suma la tabla de otros precios variables además del precio principal por kWp.",
+        "Adds the other-variable-prices table on top of the main kWp pricing table.",
         options=_YES_NO_OPTIONS,
     ),
     "price_others_total": FieldUiSchema(

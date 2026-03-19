@@ -132,7 +132,10 @@ def _render_precios_section(section: dict, *, show_all: bool, advanced_label: st
             extra = "precios-card"
             if f["field"] == "price_total_COP" and disabled_total:
                 extra = "precios-card field-card-disabled"
-            row2_cards.append(_field_card(f, extra_class=extra))
+            card = _field_card(f, extra_class=extra)
+            if f["field"] == "price_total_COP":
+                card.id = "price-total-card"
+            row2_cards.append(card)
         blocks.append(
             html.Div(
                 className="precios-row precios-row-2",

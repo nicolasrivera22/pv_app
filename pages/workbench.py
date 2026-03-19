@@ -672,32 +672,87 @@ def populate_assumptions(session_payload, show_all_values, language_value):
     )
 
 
+def _resolve_pricing_inputs(assumption_input_ids, assumption_values, cfg):
+    """Derive pricing_mode and include_var_others from current on-screen inputs, falling back to saved config."""
+    pricing_mode = str(cfg.get("pricing_mode", "variable")).strip().lower()
+    include_others = cfg.get("include_var_others", False)
+    for input_id, value in zip(assumption_input_ids or [], assumption_values or []):
+        field = (input_id or {}).get("field", "") if isinstance(input_id, dict) else ""
+        if field == "pricing_mode" and value is not None:
+            pricing_mode = str(value).strip().lower()
+        elif field == "include_var_others" and value is not None:
+            include_others = value
+    return pricing_mode, include_others
+
+
 @callback(
     Output("price-kwp-panel", "style"),
     Output("price-kwp-others-panel", "style"),
+    Output("price-kwp-placeholder", "children"),
+    Output("price-kwp-placeholder", "style"),
+    Output("price-kwp-others-placeholder", "children"),
+    Output("price-kwp-others-placeholder", "style"),
     Input("scenario-session-store", "data"),
+    Input({"type": "assumption-input", "field": ALL}, "id"),
+    Input({"type": "assumption-input", "field": ALL}, "value"),
+    Input("language-selector", "value"),
 )
-def toggle_pricing_table_visibility(session_payload):
-    """Hide/show pricing profile tables based on saved config values."""
+def toggle_pricing_table_visibility(session_payload, assumption_input_ids, assumption_values, language_value):
+    """Show/hide pricing profile tables with explanatory placeholders based on current inputs."""
+    lang = _lang(language_value)
     _, state = _session(session_payload, None)
     active = state.get_scenario()
     if active is None:
         hidden = {"display": "none"}
-        return hidden, hidden
+        placeholder_hidden = {"display": "none"}
+        return hidden, hidden, "", placeholder_hidden, "", placeholder_hidden
 
     cfg = active.config_bundle.config
-    pricing_mode = str(cfg.get("pricing_mode", "variable")).strip().lower()
-    include_others = cfg.get("include_var_others", False)
+    pricing_mode, include_others = _resolve_pricing_inputs(assumption_input_ids, assumption_values, cfg)
 
     price_kwp_style = {"display": "block"}
+    kwp_placeholder_children = ""
+    kwp_placeholder_style = {"display": "none"}
     if pricing_mode == "total":
         price_kwp_style = {"display": "none"}
+        kwp_placeholder_children = tr("workbench.profiles.placeholder.price_hidden", lang)
+        kwp_placeholder_style = {"display": "block"}
 
     price_others_style = {"display": "block"}
+    others_placeholder_children = ""
+    others_placeholder_style = {"display": "none"}
     if not include_others:
         price_others_style = {"display": "none"}
+        others_placeholder_children = tr("workbench.profiles.placeholder.price_others_hidden", lang)
+        others_placeholder_style = {"display": "block"}
 
-    return price_kwp_style, price_others_style
+    return (
+        price_kwp_style,
+        price_others_style,
+        kwp_placeholder_children,
+        kwp_placeholder_style,
+        others_placeholder_children,
+        others_placeholder_style,
+    )
+
+
+@callback(
+    Output("price-total-card", "className"),
+    Input({"type": "assumption-input", "field": ALL}, "id"),
+    Input({"type": "assumption-input", "field": ALL}, "value"),
+    prevent_initial_call=True,
+)
+def toggle_price_total_disabled(assumption_input_ids, assumption_values):
+    """Immediately grey out the fixed-total card when pricing_mode is variable."""
+    pricing_mode = "variable"
+    for input_id, value in zip(assumption_input_ids or [], assumption_values or []):
+        field = (input_id or {}).get("field", "") if isinstance(input_id, dict) else ""
+        if field == "pricing_mode" and value is not None:
+            pricing_mode = str(value).strip().lower()
+            break
+    if pricing_mode == "variable":
+        return "field-card precios-card field-card-disabled"
+    return "field-card precios-card"
 
 
 @callback(

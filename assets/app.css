@@ -1045,6 +1045,18 @@ body {
     filter: grayscale(30%);
 }
 
+/* ── Profile table placeholder (shown when table is hidden) ── */
+
+.profile-table-placeholder {
+    padding: 0.75rem 0.9rem;
+    border-radius: 14px;
+    background: #f1f5f9;
+    color: #64748b;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    border: 1px dashed #cbd5e1;
+}
+
 /* ── Currency text input alignment ── */
 
 .currency-text-input {
