@@ -97,6 +97,23 @@ def test_ready_scenarios_filter_and_validation_are_explicit() -> None:
     assert any("Seed" in issue for issue in issues)
 
 
+def test_validation_rejects_non_positive_manual_risk_kwp_when_enabled() -> None:
+    state = _run_ready_scenario()
+    scenario = state.get_scenario()
+    assert scenario is not None
+
+    issues = validate_risk_run_inputs(
+        scenario,
+        resolve_default_risk_candidate(scenario),
+        10,
+        0,
+        mc_settings={"mc_use_manual_kWp": True, "mc_manual_kWp": 0},
+        lang="en",
+    )
+
+    assert tr("risk.error.invalid_manual_kWp", "en") in issues
+
+
 def test_browser_payload_stays_compact() -> None:
     payload = build_risk_result_store_payload(
         result_id="mc-123",

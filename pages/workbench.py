@@ -826,6 +826,7 @@ def populate_assumptions(session_payload, show_all_values, language_value):
         active.config_bundle,
         lang=lang,
         show_all="all" in (show_all_values or []),
+        exclude_groups={"Monte Carlo"},
     )
     return render_assumption_sections(
         sections,

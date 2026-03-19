@@ -20,6 +20,7 @@ from components import (
     risk_tables_section,
 )
 from services import (
+    assumption_context_map,
     clear_missing_risk_result_payload,
     commit_client_session,
     export_risk_artifacts,
@@ -56,6 +57,9 @@ RISK_MONTE_CARLO_FIELDS = (
     "mc_buy_std",
     "mc_sell_std",
     "mc_demand_std",
+    "mc_use_manual_kWp",
+    "mc_manual_kWp",
+    "mc_battery_name",
 )
 
 def _lang(value: str | None) -> str:
@@ -75,6 +79,15 @@ def _safe_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _risk_field_card_class(*, disabled: bool = False, emphasize: bool = False) -> str:
+    classes = ["field-card"]
+    if disabled:
+        classes.append("field-card-disabled")
+    if emphasize and not disabled:
+        classes.append("field-card-highlight")
+    return " ".join(dict.fromkeys(classes))
 
 
 layout = html.Div(
@@ -206,7 +219,7 @@ def populate_risk_candidates(session_payload, scenario_id, language_value, curre
     options = build_risk_candidate_options(scenario, lang)
     option_values = {option["value"] for option in options}
     candidate_key = current_candidate_key if current_candidate_key in option_values else resolve_default_risk_candidate(scenario)
-    mc_fields = build_config_fields(scenario.config_bundle, RISK_MONTE_CARLO_FIELDS, lang=lang)
+    mc_fields = _risk_mc_fields_with_context(scenario.config_bundle, lang=lang)
 
     default_n = int(scenario.config_bundle.config.get("mc_n_simulations", 1000) or 1000)
     n_simulations = current_n_simulations
@@ -216,14 +229,8 @@ def populate_risk_candidates(session_payload, scenario_id, language_value, curre
     return options, candidate_key, n_simulations, render_risk_monte_carlo_fields(mc_fields, empty_message=tr("risk.monte_carlo_settings.empty", lang))
 
 
-def _collect_risk_mc_settings(base_config, n_simulations, field_ids, field_values) -> dict[str, Any]:
-    updates = {
-        "mc_n_simulations": coerce_config_value(
-            "mc_n_simulations",
-            parse_assumption_input_value("mc_n_simulations", n_simulations),
-            base_config,
-        )
-    }
+def _collect_risk_mc_field_settings(base_config, field_ids, field_values) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
     for component_id, value in zip(field_ids or [], field_values or []):
         field_key = str(component_id.get("field", "")).strip()
         if not field_key:
@@ -234,6 +241,79 @@ def _collect_risk_mc_settings(base_config, n_simulations, field_ids, field_value
             base_config,
         )
     return updates
+
+
+def _collect_risk_mc_settings(base_config, n_simulations, field_ids, field_values) -> dict[str, Any]:
+    updates = {
+        "mc_n_simulations": coerce_config_value(
+            "mc_n_simulations",
+            parse_assumption_input_value("mc_n_simulations", n_simulations),
+            base_config,
+        )
+    }
+    updates.update(_collect_risk_mc_field_settings(base_config, field_ids, field_values))
+    return updates
+
+
+def _risk_mc_fields_with_context(config_bundle, *, lang: str = "es") -> list[dict[str, Any]]:
+    fields = build_config_fields(config_bundle, RISK_MONTE_CARLO_FIELDS, lang=lang)
+    context = assumption_context_map(config_bundle.config, lang=lang)
+    disabled_map = dict(context.get("field_disabled") or {})
+    emphasis_map = dict(context.get("field_emphasis") or {})
+    for field in fields:
+        field_key = str(field.get("field", ""))
+        field["disabled"] = bool(disabled_map.get(field_key, False))
+        field["emphasize"] = bool(emphasis_map.get(field_key, False))
+    return fields
+
+
+@callback(
+    Output({"type": "risk-mc-input", "field": ALL}, "disabled"),
+    Output({"type": "risk-mc-field-card", "field": ALL}, "className"),
+    Input("scenario-session-store", "data"),
+    Input("risk-scenario-dropdown", "value"),
+    Input({"type": "risk-mc-input", "field": ALL}, "id"),
+    Input({"type": "risk-mc-input", "field": ALL}, "value"),
+    Input("language-selector", "value"),
+    State({"type": "risk-mc-field-card", "field": ALL}, "id"),
+)
+def sync_risk_monte_carlo_context(
+    session_payload,
+    scenario_id,
+    mc_field_ids,
+    mc_field_values,
+    language_value,
+    mc_card_ids,
+):
+    lang = _lang(language_value)
+    _, state = resolve_client_session(session_payload, language=lang)
+    scenario = state.get_scenario(scenario_id)
+    if scenario is None:
+        return [], []
+
+    current_config = dict(scenario.config_bundle.config)
+    current_config.update(
+        _collect_risk_mc_field_settings(
+            current_config,
+            mc_field_ids,
+            mc_field_values,
+        )
+    )
+    context = assumption_context_map(current_config, lang=lang)
+    disabled_map = dict(context.get("field_disabled") or {})
+    emphasis_map = dict(context.get("field_emphasis") or {})
+    disabled_values = [
+        bool(disabled_map.get((component_id or {}).get("field", ""), False))
+        for component_id in (mc_field_ids or [])
+    ]
+    card_classes = [
+        _risk_field_card_class(
+            disabled=bool(disabled_map.get((component_id or {}).get("field", ""), False)),
+            emphasize=bool(emphasis_map.get((component_id or {}).get("field", ""), False)),
+        )
+        for component_id in (mc_card_ids or [])
+    ]
+    return disabled_values, card_classes
 
 
 def _bundle_with_mc_settings(config_bundle, mc_settings):
@@ -342,7 +422,14 @@ def run_risk_analysis(
         mc_field_ids,
         mc_field_values,
     )
-    errors = validate_risk_run_inputs(scenario, candidate_key, n_simulations, seed, lang=lang)
+    errors = validate_risk_run_inputs(
+        scenario,
+        candidate_key,
+        n_simulations,
+        seed,
+        mc_settings=mc_settings,
+        lang=lang,
+    )
     if errors:
         return build_risk_result_store_payload(
             result_id=None,

@@ -21,6 +21,7 @@ from components.candidate_explorer import candidate_explorer_section
 from components.selected_candidate_deep_dive import selected_candidate_deep_dive_section
 from components.profile_editor import profile_editor_section
 from components.catalog_editor import catalog_editor_section
+from pages import risk as risk_page
 from pages import workbench as workbench_page
 help_page = importlib.import_module("pages.help")
 from services import (
@@ -704,13 +705,48 @@ def test_workbench_assumption_context_callback_highlights_fixed_battery_selectio
     assert note_styles == [{"display": "block"}]
 
 
-def test_populate_assumptions_keeps_monte_carlo_group_visible_in_workbench() -> None:
+def test_populate_assumptions_hides_monte_carlo_group_in_workbench() -> None:
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     payload = _session_payload(state, lang="es")
 
     rendered = workbench_page.populate_assumptions(payload, [], "es")
 
-    assert any("Monte Carlo" in str(section.to_plotly_json()) for section in rendered)
+    assert not any("Monte Carlo" in str(section.to_plotly_json()) for section in rendered)
+
+
+def test_risk_monte_carlo_context_callback_enables_manual_kwp_only_when_requested() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None
+
+    payload = _session_payload(state, lang="en")
+    field_values = {
+        "mc_PR_std": 5.0,
+        "mc_buy_std": 4.0,
+        "mc_sell_std": 3.0,
+        "mc_demand_std": 2.0,
+        "mc_use_manual_kWp": True,
+        "mc_manual_kWp": 16.5,
+        "mc_battery_name": "BAT-10",
+    }
+    input_ids = [{"type": "risk-mc-input", "field": field} for field in field_values]
+    card_ids = [{"type": "risk-mc-field-card", "field": field} for field in field_values]
+
+    disabled_values, card_classes = risk_page.sync_risk_monte_carlo_context(
+        payload,
+        scenario.scenario_id,
+        input_ids,
+        list(field_values.values()),
+        "en",
+        card_ids,
+    )
+
+    disabled_by_field = dict(zip(field_values.keys(), disabled_values))
+    class_by_field = dict(zip(field_values.keys(), card_classes))
+
+    assert disabled_by_field["mc_manual_kWp"] is False
+    assert "field-card-disabled" not in class_by_field["mc_manual_kWp"]
 
 
 def test_active_summary_uses_copy_and_meta_classes_for_hierarchy() -> None:
@@ -811,6 +847,9 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert asset_css.exists()
     assert "app.index_string" not in app_source
     assert ".assumption-input-shell" in css_source
+    assert ".assumption-editor-panel" in css_source
+    assert "--assumption-control-height" in css_source
+    assert ".assumption-editor-panel .Select-control" in css_source
     assert ".candidate-selection-helper" in css_source
     assert "body {" in css_source
     assert ".active-summary-copy" in css_source

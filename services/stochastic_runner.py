@@ -5,10 +5,11 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 
+from pv_product.hardware import select_inverter_and_strings
 from pv_product.utils import simulate_monthly_series_dow
 
 from .i18n import tr
-from .result_views import summarize_energy_metrics
+from .result_views import battery_name_from_candidate, candidate_key_for, summarize_energy_metrics
 from .risk_views import build_risk_views_from_samples
 from .scenario_runner import run_scan
 from .types import (
@@ -63,6 +64,16 @@ def _lookup_price_per_kwp(table: pd.DataFrame, k_wp: float, table_name: str, *, 
     if len(matches) == 0:
         raise ValueError(tr("risk.error.price_band_missing", lang, kwp=float(k_wp), table_name=table_name))
     return float(matches[0])
+
+
+def _validate_manual_k_wp(value, *, lang: str = "es") -> float:
+    try:
+        manual_k_wp = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(tr("risk.error.invalid_manual_kWp", lang)) from exc
+    if not np.isfinite(manual_k_wp) or manual_k_wp <= 0:
+        raise ValueError(tr("risk.error.invalid_manual_kWp", lang))
+    return manual_k_wp
 
 
 def _resolve_request(
@@ -172,15 +183,63 @@ def summarize_monte_carlo(result: MonteCarloRunResult) -> MonteCarloSummary:
     return result.summary
 
 
+def _resolve_effective_design(
+    config_bundle: LoadedConfigBundle,
+    detail: dict,
+    *,
+    lang: str = "es",
+) -> dict[str, object]:
+    cfg = deepcopy(config_bundle.config)
+    k_wp = float(detail["kWp"])
+    inv_sel = deepcopy(detail["inv_sel"])
+    if bool(cfg.get("mc_use_manual_kWp")):
+        manual_k_wp = _validate_manual_k_wp(cfg.get("mc_manual_kWp"), lang=lang)
+        n_mod = max(1, int(round(manual_k_wp * 1000.0 / float(cfg["P_mod_W"]))))
+        k_wp = n_mod * float(cfg["P_mod_W"]) / 1000.0
+        manual_inv_sel = select_inverter_and_strings(
+            kWp=k_wp,
+            module={
+                "P_mod_W": cfg["P_mod_W"],
+                "Voc25": cfg["Voc25"],
+                "Vmp25": cfg["Vmp25"],
+                "Isc": cfg["Isc"],
+            },
+            Tmin_C=cfg["Tmin_C"],
+            a_Voc_pct=cfg["a_Voc_pct"],
+            inv_catalog=config_bundle.inverter_catalog,
+            ILR_target=(cfg["ILR_min"], cfg["ILR_max"]),
+        )
+        if manual_inv_sel is not None:
+            inv_sel = deepcopy(manual_inv_sel)
+
+    battery = deepcopy(detail["battery"])
+    manual_battery_name = str(cfg.get("mc_battery_name", "") or "").strip()
+    if manual_battery_name:
+        battery_names = config_bundle.battery_catalog.get("name", pd.Series(dtype=object)).astype(str)
+        matches = config_bundle.battery_catalog.loc[battery_names == manual_battery_name]
+        if not matches.empty:
+            battery = matches.iloc[0].to_dict()
+
+    battery_name = battery_name_from_candidate(battery)
+    return {
+        "candidate_key": candidate_key_for(k_wp, battery_name),
+        "kWp": k_wp,
+        "inv_sel": inv_sel,
+        "battery": battery,
+        "battery_name": battery_name,
+    }
+
+
 def _simulate_fixed_candidate_draws(
     config_bundle: LoadedConfigBundle,
     detail: dict,
     request: MonteCarloRunRequest,
     *,
     lang: str = "es",
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, object]]:
     cfg = deepcopy(config_bundle.config)
-    k_wp = float(detail["kWp"])
+    effective_detail = _resolve_effective_design(config_bundle, detail, lang=lang)
+    k_wp = float(effective_detail["kWp"])
     price_per_kwp_cop = _lookup_price_per_kwp(
         config_bundle.cop_kwp_table,
         k_wp,
@@ -201,8 +260,8 @@ def _simulate_fixed_candidate_draws(
         monthly, summary = simulate_monthly_series_dow(
             cfg=cfg,
             kWp=k_wp,
-            inv_sel=detail["inv_sel"],
-            battery_sel=detail["battery"],
+            inv_sel=effective_detail["inv_sel"],
+            battery_sel=effective_detail["battery"],
             export_allowed=bool(cfg["export_allowed"]),
             years=int(cfg["years"]),
             dow24=config_bundle.demand_profile_7x24,
@@ -221,9 +280,9 @@ def _simulate_fixed_candidate_draws(
         rows.append(
             {
                 "simulation_index": simulation_index,
-                "candidate_key": detail["candidate_key"],
+                "candidate_key": effective_detail["candidate_key"],
                 "kWp": k_wp,
-                "battery": detail["battery_name"],
+                "battery": effective_detail["battery_name"],
                 "NPV_COP": float(summary["cum_disc_final"]),
                 "payback_years": summary["payback_years"],
                 "self_consumption_ratio": float(energy["self_consumption_ratio"]),
@@ -232,7 +291,7 @@ def _simulate_fixed_candidate_draws(
                 "annual_export_kwh": float(energy["annual_export_kwh"]),
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), effective_detail
 
 
 def run_monte_carlo(
@@ -260,7 +319,7 @@ def run_monte_carlo(
         raise ValueError(tr("risk.error.design_missing_in_scan", lang))
 
     detail = baseline.candidate_details[request.selected_candidate_key]
-    sample_frame = _simulate_fixed_candidate_draws(config_bundle, detail, request, lang=lang)
+    sample_frame, effective_detail = _simulate_fixed_candidate_draws(config_bundle, detail, request, lang=lang)
     summary, risk_metrics = _summarize_samples(sample_frame)
 
     warnings: list[str] = []
@@ -272,9 +331,9 @@ def run_monte_carlo(
         warnings.append(tr("risk.warning.no_payback", lang))
 
     labels = {
-        "candidate_key": detail["candidate_key"],
-        "battery": detail["battery_name"],
-        "kWp": f"{float(detail['kWp']):.3f}",
+        "candidate_key": str(effective_detail["candidate_key"]),
+        "battery": str(effective_detail["battery_name"]),
+        "kWp": f"{float(effective_detail['kWp']):.3f}",
         "mode": request.mode,
     }
     views = build_risk_views_from_samples(sample_frame, summary, labels=labels)
@@ -286,8 +345,8 @@ def run_monte_carlo(
         n_simulations=resolved_n,
         selected_candidate_key=detail["candidate_key"],
         baseline_best_candidate_key=baseline.best_candidate_key,
-        selected_kWp=float(detail["kWp"]),
-        selected_battery=str(detail["battery_name"]),
+        selected_kWp=float(effective_detail["kWp"]),
+        selected_battery=str(effective_detail["battery_name"]),
         active_uncertainty=active_uncertainty,
         warnings=tuple(warnings),
         summary=summary,

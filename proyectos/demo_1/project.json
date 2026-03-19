@@ -24,10 +24,10 @@
       "scenario_id": "scenario-3cf3eee7",
       "name": "Escenario 2",
       "source_name": "PV_inputs.xlsx",
-      "selected_candidate_key": "24.600::BAT-20",
-      "dirty": false,
-      "last_run_at": "2026-03-19T18:57:12",
-      "scan_fingerprint": "4f95d9e628b04073e7bf0c048c4ea3b04c3b0ca6dafd3d5a6ba269e9b30fe92f"
+      "selected_candidate_key": null,
+      "dirty": true,
+      "last_run_at": null,
+      "scan_fingerprint": null
     }
   ],
   "ui_prefs": {

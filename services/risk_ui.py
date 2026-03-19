@@ -90,6 +90,7 @@ def validate_risk_run_inputs(
     n_simulations: Any,
     seed: Any,
     *,
+    mc_settings: dict[str, Any] | None = None,
     lang: str = "en",
 ) -> list[str]:
     issues: list[str] = []
@@ -107,6 +108,14 @@ def validate_risk_run_inputs(
         issues.append(tr("risk.error.invalid_n_simulations", lang))
     if _coerce_non_negative_int(seed) is None:
         issues.append(tr("risk.error.invalid_seed", lang))
+    effective_config = dict((scenario_record.config_bundle.config if scenario_record is not None else {}) or {})
+    effective_config.update(dict(mc_settings or {}))
+    try:
+        manual_k_wp = float(effective_config.get("mc_manual_kWp", 0) or 0)
+    except (TypeError, ValueError):
+        manual_k_wp = 0.0
+    if bool(effective_config.get("mc_use_manual_kWp")) and manual_k_wp <= 0:
+        issues.append(tr("risk.error.invalid_manual_kWp", lang))
     return issues
 
 

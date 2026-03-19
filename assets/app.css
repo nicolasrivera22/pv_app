@@ -432,6 +432,34 @@ body {
     background: white;
 }
 
+.assumption-editor-panel {
+    --assumption-control-height: 42px;
+}
+
+.assumption-editor-panel .text-input {
+    min-height: var(--assumption-control-height);
+}
+
+.assumption-editor-panel .assumption-input-shell {
+    min-height: var(--assumption-control-height);
+}
+
+.assumption-editor-panel .assumption-input-shell .text-input-affixed {
+    min-height: calc(var(--assumption-control-height) - 2px);
+}
+
+.assumption-editor-panel .Select-control {
+    min-height: var(--assumption-control-height);
+    height: var(--assumption-control-height);
+}
+
+.assumption-editor-panel .Select-placeholder,
+.assumption-editor-panel .Select--single > .Select-control .Select-value,
+.assumption-editor-panel .Select-input {
+    height: var(--assumption-control-height);
+    line-height: var(--assumption-control-height);
+}
+
 .assumption-input-shell {
     display: flex;
     align-items: stretch;

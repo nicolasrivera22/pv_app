@@ -227,7 +227,7 @@ def render_assumption_sections(
 
 def assumption_editor_section() -> html.Div:
     return html.Div(
-        className="panel",
+        className="panel assumption-editor-panel",
         children=[
             html.Div(
                 className="section-head",

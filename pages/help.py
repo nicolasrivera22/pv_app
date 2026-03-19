@@ -72,7 +72,7 @@ HELP_CONTENT: dict[str, tuple[dict[str, object], ...]] = {
             ),
             "bullets": (
                 "Choose a completed scenario and one feasible design from its latest deterministic scan.",
-                "Configure uncertainty inputs in Workbench > Assumptions > Monte Carlo.",
+                "Configure uncertainty inputs in Risk > Monte Carlo settings.",
                 "Those inputs widen or narrow the variation applied to demand, tariffs, PR, and optional fixed-kWp assumptions.",
                 "Use Risk to understand downside, variability, and confidence ranges before making a final decision.",
             ),
@@ -176,7 +176,7 @@ HELP_CONTENT: dict[str, tuple[dict[str, object], ...]] = {
             ),
             "bullets": (
                 "Elige un escenario completado y un diseño factible de su último escaneo determinístico.",
-                "Configura las entradas de incertidumbre en Escenarios > Supuestos > Monte Carlo.",
+                "Configura las entradas de incertidumbre en Riesgo > Parámetros de Monte Carlo.",
                 "Esas entradas amplían o reducen la variación aplicada a demanda, tarifas, PR y, si aplica, al kWp fijo.",
                 "Usa Riesgo para entender downside, variabilidad y rangos de confianza antes de tomar una decisión final.",
             ),
