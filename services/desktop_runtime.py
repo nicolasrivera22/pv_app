@@ -35,14 +35,17 @@ class RuntimeRecord:
 @dataclass
 class StartupLock:
     path: Path
-    fd: int
+    fd: int | None
     metadata: dict[str, Any]
 
     def release(self) -> None:
-        try:
-            os.close(self.fd)
-        except OSError:
-            pass
+        fd = self.fd
+        if fd is not None:
+            self.fd = None
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         try:
             self.path.unlink()
         except FileNotFoundError:

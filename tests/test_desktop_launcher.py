@@ -294,6 +294,142 @@ def test_packaged_watchdog_triggers_shutdown_and_token_owned_cleanup(monkeypatch
     assert removals[-1] == "owned-token"
 
 
+def test_startup_lock_double_release_is_safe(tmp_path) -> None:
+    import os
+    from services.desktop_runtime import StartupLock
+
+    lock_file = tmp_path / "startup.lock"
+    fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    os.write(fd, b'{"pid": 1}')
+    lock = StartupLock(path=lock_file, fd=fd, metadata={"pid": 1})
+
+    lock.release()
+    assert lock.fd is None
+    assert not lock_file.exists()
+
+    # second release must be a no-op — no OSError, no double-close
+    lock.release()
+    assert lock.fd is None
+
+
+def test_startup_lock_release_does_not_close_reused_fd(tmp_path) -> None:
+    import os
+    from services.desktop_runtime import StartupLock
+
+    lock_file = tmp_path / "startup.lock"
+    fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    os.write(fd, b'{"pid": 1}')
+    lock = StartupLock(path=lock_file, fd=fd, metadata={"pid": 1})
+    lock.release()
+
+    # open a new file that may reuse the same fd number
+    other_file = tmp_path / "other.txt"
+    new_fd = os.open(other_file, os.O_CREAT | os.O_WRONLY)
+
+    # second release must NOT close new_fd
+    lock.release()
+
+    # new_fd should still be valid
+    os.write(new_fd, b"still open")
+    os.close(new_fd)
+
+
+def test_lock_released_when_server_creation_fails(monkeypatch) -> None:
+    from services.desktop_lifecycle import desktop_lifecycle
+
+    desktop_lifecycle.reset()
+    lock = _FakeLock()
+
+    monkeypatch.setattr(desktop_launcher, "single_instance_enabled", lambda: True)
+    monkeypatch.setattr(desktop_launcher, "auto_shutdown_enabled", lambda: False)
+    monkeypatch.setattr(desktop_launcher, "acquire_startup_lock", lambda timeout_s=10.0: lock)
+    monkeypatch.setattr(desktop_launcher, "load_runtime_record", lambda: None)
+    monkeypatch.setattr(desktop_launcher, "remove_runtime_record", lambda expected_token=None: True)
+    monkeypatch.setattr(desktop_launcher, "create_local_server", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no ports")))
+    monkeypatch.setattr(desktop_launcher.multiprocessing, "freeze_support", lambda: None)
+
+    with pytest.raises(RuntimeError, match="no ports"):
+        desktop_launcher.main()
+
+    assert lock.release_calls == 1
+
+
+def test_existing_instance_opens_url_and_exits_cleanly(monkeypatch) -> None:
+    from services.desktop_lifecycle import desktop_lifecycle
+
+    desktop_lifecycle.reset()
+    opened: list[str] = []
+    lock = _FakeLock()
+    record = RuntimeRecord(
+        app_name="PVWorkbench",
+        version=None,
+        pid=999,
+        host="127.0.0.1",
+        port=8050,
+        app_url="http://127.0.0.1:8050/",
+        startup_ts=1.0,
+        instance_token="existing-tok",
+        frozen=True,
+    )
+
+    monkeypatch.setattr(desktop_launcher, "single_instance_enabled", lambda: True)
+    monkeypatch.setattr(desktop_launcher, "auto_shutdown_enabled", lambda: False)
+    monkeypatch.setattr(desktop_launcher, "acquire_startup_lock", lambda timeout_s=10.0: lock)
+    monkeypatch.setattr(desktop_launcher, "load_runtime_record", lambda: record)
+    monkeypatch.setattr(desktop_launcher, "validate_runtime_record", lambda current: {"status": "ok", "instance_token": "existing-tok"})
+    monkeypatch.setattr(desktop_launcher, "create_local_server", lambda *args, **kwargs: pytest.fail("should not start server"))
+    monkeypatch.setattr(desktop_launcher.webbrowser, "open", lambda url, new=0, autoraise=True: opened.append(url) or True)
+    monkeypatch.setattr(desktop_launcher.multiprocessing, "freeze_support", lambda: None)
+
+    desktop_launcher.main()
+
+    assert opened == ["http://127.0.0.1:8050/"]
+    assert lock.release_calls == 1
+
+
+def test_normal_startup_writes_runtime_record(monkeypatch) -> None:
+    from services.desktop_lifecycle import desktop_lifecycle
+
+    desktop_lifecycle.reset()
+    lock = _FakeLock()
+    server = _FakeServer()
+    written_records: list[RuntimeRecord] = []
+
+    class _ImmediateThread:
+        def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+            self._target = target
+            self._args = args
+            self._kwargs = kwargs or {}
+
+        def start(self):
+            if self._target is not None:
+                self._target(*self._args, **self._kwargs)
+
+        def join(self, timeout=None):
+            return None
+
+    monkeypatch.setattr(desktop_launcher, "single_instance_enabled", lambda: True)
+    monkeypatch.setattr(desktop_launcher, "auto_shutdown_enabled", lambda: False)
+    monkeypatch.setattr(desktop_launcher, "acquire_startup_lock", lambda timeout_s=10.0: lock)
+    monkeypatch.setattr(desktop_launcher, "load_runtime_record", lambda: None)
+    monkeypatch.setattr(desktop_launcher, "remove_runtime_record", lambda expected_token=None: True)
+    monkeypatch.setattr(desktop_launcher, "create_local_server", lambda *args, **kwargs: (server, 8050))
+    monkeypatch.setattr(desktop_launcher, "wait_for_desktop_health", lambda *args, **kwargs: {"status": "ok", "instance_token": kwargs["expected_token"]})
+    monkeypatch.setattr(desktop_launcher, "write_runtime_record", lambda record: written_records.append(record))
+    monkeypatch.setattr(desktop_launcher.webbrowser, "open", lambda *args, **kwargs: True)
+    monkeypatch.setattr(desktop_launcher, "Thread", _ImmediateThread)
+    monkeypatch.setattr(desktop_launcher, "_new_instance_token", lambda: "new-token")
+    monkeypatch.setattr(desktop_launcher.multiprocessing, "freeze_support", lambda: None)
+
+    server.shutdown()
+    desktop_launcher.main()
+
+    assert len(written_records) == 1
+    assert written_records[0].instance_token == "new-token"
+    assert written_records[0].port == 8050
+    assert lock.release_calls >= 1
+
+
 def test_pyinstaller_spec_includes_launcher_assets_pages_and_workbook() -> None:
     spec = (ROOT / "pv_app.spec").read_text(encoding="utf-8")
 

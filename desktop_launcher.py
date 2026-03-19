@@ -191,7 +191,12 @@ def main() -> None:
             return
         remove_runtime_record()
 
-    server, port = create_local_server(dash_app, host=HOST, start_port=PREFERRED_PORT, max_attempts=PORT_ATTEMPTS)
+    try:
+        server, port = create_local_server(dash_app, host=HOST, start_port=PREFERRED_PORT, max_attempts=PORT_ATTEMPTS)
+    except BaseException:
+        if startup_lock is not None:
+            startup_lock.release()
+        raise
     app_url = f"http://{HOST}:{port}/"
     instance_token = _new_instance_token() if (use_single_instance or use_auto_shutdown) else ""
     if use_single_instance or use_auto_shutdown:
