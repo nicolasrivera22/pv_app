@@ -18,6 +18,7 @@ def selected_candidate_deep_dive_section() -> html.Div:
                         className="section-head",
                         children=[html.H3(tr("workbench.deep_dive.title", "es"), id="selected-candidate-deep-dive-title")],
                     ),
+                    html.P(tr("workbench.deep_dive.note", "es"), id="selected-candidate-deep-dive-note", className="section-copy"),
                     html.Div(
                         className="chart-grid",
                         children=[

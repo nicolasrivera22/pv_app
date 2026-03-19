@@ -6,9 +6,18 @@ import pandas as pd
 
 from .i18n import tr
 from .types import MonteCarloRunResult, RiskViewBundle, ScenarioRecord, ScenarioSessionState
-from .ui_schema import format_metric, metric_label
+from .ui_schema import FIELD_SCHEMAS, format_metric, metric_label
 
 RATIO_METRICS = {"self_consumption_ratio", "self_sufficiency_ratio"}
+
+
+def _field_display_label(field_key: str, lang: str) -> str:
+    schema = FIELD_SCHEMAS.get(field_key)
+    if schema is None:
+        return field_key
+    if lang == "en":
+        return schema.label_en or schema.label_es or field_key
+    return schema.label_es or schema.label_en or field_key
 
 
 def ready_risk_scenarios(state: ScenarioSessionState) -> list[ScenarioRecord]:
@@ -108,12 +117,20 @@ def build_risk_metadata_rows(
     lang: str = "en",
 ) -> pd.DataFrame:
     active_uncertainty = ", ".join(
-        f"{name}={100.0 * value:.1f}%" for name, value in result.active_uncertainty.items() if float(value or 0.0) > 0
+        f"{_field_display_label(name, lang)}={100.0 * value:.1f}%"
+        for name, value in result.active_uncertainty.items()
+        if float(value or 0.0) > 0
     ) or tr("risk.metadata.none_active", lang)
+    design_summary = " · ".join(
+        [
+            format_metric("kWp", result.selected_kWp, lang),
+            format_metric("selected_battery", result.selected_battery, lang),
+        ]
+    )
     return pd.DataFrame(
         [
             {"label": tr("risk.metadata.scenario", lang), "value": scenario_record.name},
-            {"label": tr("risk.metadata.candidate", lang), "value": result.selected_candidate_key},
+            {"label": tr("risk.metadata.design", lang), "value": design_summary},
             {"label": tr("risk.metadata.kwp", lang), "value": format_metric("kWp", result.selected_kWp, lang)},
             {"label": tr("risk.metadata.battery", lang), "value": format_metric("selected_battery", result.selected_battery, lang)},
             {"label": tr("risk.metadata.n_simulations", lang), "value": f"{int(result.n_simulations):,}"},
@@ -131,6 +148,7 @@ def build_risk_result_store_payload(
     n_simulations: int | None,
     seed: int | None,
     retain_samples: bool,
+    mc_settings: dict[str, Any] | None = None,
     status: str | None = None,
     errors: list[str] | None = None,
     warnings: list[str] | None = None,
@@ -142,6 +160,7 @@ def build_risk_result_store_payload(
         "n_simulations": n_simulations,
         "seed": seed,
         "retain_samples": retain_samples,
+        "mc_settings": dict(mc_settings or {}),
         "status": status,
         "errors": list(errors or []),
         "warnings": list(warnings or []),
@@ -157,6 +176,7 @@ def clear_missing_risk_result_payload(payload: dict[str, Any] | None, *, lang: s
         n_simulations=payload.get("n_simulations"),
         seed=payload.get("seed"),
         retain_samples=bool(payload.get("retain_samples")),
+        mc_settings=dict(payload.get("mc_settings") or {}),
         status=tr("risk.status.rerun_needed", lang),
         errors=[tr("risk.error.result_missing", lang)],
     )

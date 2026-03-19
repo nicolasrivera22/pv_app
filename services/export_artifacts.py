@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from .runtime_paths import configure_runtime_environment, user_root
+from .runtime_paths import configure_runtime_environment, internal_results_root, is_frozen_runtime, user_root
 
 configure_runtime_environment()
 
@@ -51,7 +51,10 @@ def _safe_name(value: str) -> str:
 def _resolve_output_root(output_root: Path) -> Path:
     root = Path(output_root).expanduser()
     if not root.is_absolute():
-        root = user_root() / root
+        if is_frozen_runtime() and root == Path("Resultados"):
+            root = internal_results_root()
+        else:
+            root = user_root() / root
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve()
 

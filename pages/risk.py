@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from dash import Input, Output, State, callback, dcc, html, register_page, ctx
+from dash import ALL, Input, Output, State, callback, dcc, html, register_page, ctx
 from dash.exceptions import PreventUpdate
 
 from components import (
@@ -12,6 +13,7 @@ from components import (
     empty_risk_figure,
     render_message_list,
     render_metadata_table,
+    render_risk_monte_carlo_fields,
     render_risk_summary_cards,
     risk_charts_section,
     risk_controls_section,
@@ -19,15 +21,22 @@ from components import (
 )
 from services import (
     clear_missing_risk_result_payload,
+    commit_client_session,
     export_risk_artifacts,
+    build_config_fields,
     get_risk_result,
+    internal_results_root,
+    open_export_folder,
+    publish_export_artifacts,
     project_exports_root,
     resolve_client_session,
     resolve_scenario_session,
     run_monte_carlo,
     store_risk_result,
+    update_scenario_risk_config,
 )
 from services.i18n import tr
+from services.config_metadata import update_config_table_values
 from services.risk_ui import (
     build_risk_candidate_options,
     build_risk_metadata_rows,
@@ -38,8 +47,16 @@ from services.risk_ui import (
     resolve_default_risk_scenario,
     validate_risk_run_inputs,
 )
+from services.ui_schema import coerce_config_value, parse_assumption_input_value
 
 register_page(__name__, path="/risk", name="Risk")
+
+RISK_MONTE_CARLO_FIELDS = (
+    "mc_PR_std",
+    "mc_buy_std",
+    "mc_sell_std",
+    "mc_demand_std",
+)
 
 def _lang(value: str | None) -> str:
     return value if value in {"en", "es"} else "es"
@@ -63,6 +80,7 @@ def _safe_int(value: Any) -> int | None:
 layout = html.Div(
     className="page",
     children=[
+        dcc.Store(id="risk-latest-export-folder", storage_type="memory", data=""),
         dcc.Store(id="risk-result-store", storage_type="memory"),
         html.Div(
             className="main-stack",
@@ -88,6 +106,8 @@ layout = html.Div(
     Output("risk-page-title", "children"),
     Output("risk-page-intro", "children"),
     Output("risk-mode-note", "children"),
+    Output("risk-monte-carlo-title", "children"),
+    Output("risk-monte-carlo-help", "children"),
     Output("risk-scenario-label", "children"),
     Output("risk-candidate-label", "children"),
     Output("risk-n-simulations-label", "children"),
@@ -98,8 +118,10 @@ layout = html.Div(
     Output("risk-retain-samples-help", "children"),
     Output("risk-run-btn", "children"),
     Output("risk-export-artifacts-btn", "children"),
+    Output("risk-open-exports-btn", "children"),
     Output("risk-export-progress", "children"),
     Output("risk-summary-title", "children"),
+    Output("risk-summary-note", "children"),
     Output("risk-distributions-title", "children"),
     Output("risk-metadata-title", "children"),
     Output("risk-percentiles-title", "children"),
@@ -115,6 +137,8 @@ def translate_risk_page(language_value):
         tr("risk.page_title", lang),
         tr("risk.page_intro", lang),
         tr("risk.mode_note", lang),
+        tr("risk.monte_carlo_settings.title", lang),
+        tr("risk.monte_carlo_settings.help", lang),
         tr("risk.scenario.label", lang),
         tr("risk.candidate.label", lang),
         tr("risk.n_simulations.label", lang),
@@ -125,8 +149,10 @@ def translate_risk_page(language_value):
         tr("risk.retain_samples.help", lang),
         tr("risk.run", lang),
         tr("risk.export_artifacts", lang),
+        tr("common.open_exports_folder", lang),
         tr("risk.export_artifacts_running", lang),
         tr("risk.summary.title", lang),
+        tr("risk.summary.note", lang),
         tr("risk.distributions.title", lang),
         tr("risk.metadata.title", lang),
         tr("risk.percentiles.title", lang),
@@ -152,9 +178,18 @@ def populate_risk_scenarios(session_payload, current_value):
 
 
 @callback(
+    Output("risk-open-exports-btn", "disabled"),
+    Input("risk-latest-export-folder", "data"),
+)
+def sync_risk_export_folder_button(folder_path):
+    return not bool(folder_path)
+
+
+@callback(
     Output("risk-candidate-dropdown", "options"),
     Output("risk-candidate-dropdown", "value"),
     Output("risk-n-simulations-input", "value"),
+    Output("risk-monte-carlo-fields", "children"),
     Input("scenario-session-store", "data"),
     Input("risk-scenario-dropdown", "value"),
     Input("language-selector", "value"),
@@ -166,18 +201,89 @@ def populate_risk_candidates(session_payload, scenario_id, language_value, curre
     _, state = resolve_scenario_session(session_payload, scenario_id=scenario_id, ensure_scan=True, language=lang)
     scenario = state.get_scenario(scenario_id)
     if scenario is None or scenario.scan_result is None or scenario.dirty:
-        return [], None, current_n_simulations
+        return [], None, current_n_simulations, render_risk_monte_carlo_fields([], empty_message=tr("risk.monte_carlo_settings.empty", lang))
 
     options = build_risk_candidate_options(scenario, lang)
     option_values = {option["value"] for option in options}
     candidate_key = current_candidate_key if current_candidate_key in option_values else resolve_default_risk_candidate(scenario)
+    mc_fields = build_config_fields(scenario.config_bundle, RISK_MONTE_CARLO_FIELDS, lang=lang)
 
     default_n = int(scenario.config_bundle.config.get("mc_n_simulations", 1000) or 1000)
     n_simulations = current_n_simulations
     if ctx.triggered_id in {"risk-scenario-dropdown", "scenario-session-store"} or n_simulations in (None, ""):
         n_simulations = default_n
 
-    return options, candidate_key, n_simulations
+    return options, candidate_key, n_simulations, render_risk_monte_carlo_fields(mc_fields, empty_message=tr("risk.monte_carlo_settings.empty", lang))
+
+
+def _collect_risk_mc_settings(base_config, n_simulations, field_ids, field_values) -> dict[str, Any]:
+    updates = {
+        "mc_n_simulations": coerce_config_value(
+            "mc_n_simulations",
+            parse_assumption_input_value("mc_n_simulations", n_simulations),
+            base_config,
+        )
+    }
+    for component_id, value in zip(field_ids or [], field_values or []):
+        field_key = str(component_id.get("field", "")).strip()
+        if not field_key:
+            continue
+        updates[field_key] = coerce_config_value(
+            field_key,
+            parse_assumption_input_value(field_key, value),
+            base_config,
+        )
+    return updates
+
+
+def _bundle_with_mc_settings(config_bundle, mc_settings):
+    updated_config = dict(config_bundle.config)
+    updated_config.update(mc_settings)
+    return replace(
+        config_bundle,
+        config=updated_config,
+        config_table=update_config_table_values(config_bundle.config_table, updated_config),
+    )
+
+
+@callback(
+    Output("scenario-session-store", "data", allow_duplicate=True),
+    Input("risk-n-simulations-input", "value"),
+    Input({"type": "risk-mc-input", "field": ALL}, "value"),
+    State("risk-scenario-dropdown", "value"),
+    State({"type": "risk-mc-input", "field": ALL}, "id"),
+    State("scenario-session-store", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def persist_risk_settings(
+    n_simulations,
+    mc_field_values,
+    scenario_id,
+    mc_field_ids,
+    session_payload,
+    language_value,
+):
+    if scenario_id in (None, ""):
+        raise PreventUpdate
+    lang = _lang(language_value)
+    client_state, state = resolve_client_session(session_payload, language=lang)
+    scenario = state.get_scenario(scenario_id)
+    if scenario is None:
+        raise PreventUpdate
+
+    updates = _collect_risk_mc_settings(
+        scenario.config_bundle.config,
+        n_simulations,
+        mc_field_ids,
+        mc_field_values,
+    )
+    if all(scenario.config_bundle.config.get(field) == value for field, value in updates.items()):
+        raise PreventUpdate
+
+    state = update_scenario_risk_config(state, scenario_id, updates)
+    client_state = commit_client_session(client_state, state)
+    return client_state.to_payload()
 
 
 @callback(
@@ -205,6 +311,8 @@ def clear_missing_risk_result(result_payload, language_value):
     State("risk-n-simulations-input", "value"),
     State("risk-seed-input", "value"),
     State("risk-retain-samples", "value"),
+    State({"type": "risk-mc-input", "field": ALL}, "id"),
+    State({"type": "risk-mc-input", "field": ALL}, "value"),
     State("language-selector", "value"),
     prevent_initial_call=True,
     running=[(Output("risk-run-btn", "disabled"), True, False)],
@@ -217,6 +325,8 @@ def run_risk_analysis(
     n_simulations,
     seed,
     retain_samples_values,
+    mc_field_ids,
+    mc_field_values,
     language_value,
 ):
     if not n_clicks:
@@ -226,6 +336,12 @@ def run_risk_analysis(
     _, state = resolve_scenario_session(session_payload, scenario_id=scenario_id, ensure_scan=True, language=lang)
     scenario = state.get_scenario(scenario_id)
     retain_samples = _retain_samples(retain_samples_values)
+    mc_settings = _collect_risk_mc_settings(
+        scenario.config_bundle.config if scenario is not None else {},
+        n_simulations,
+        mc_field_ids,
+        mc_field_values,
+    )
     errors = validate_risk_run_inputs(scenario, candidate_key, n_simulations, seed, lang=lang)
     if errors:
         return build_risk_result_store_payload(
@@ -235,19 +351,22 @@ def run_risk_analysis(
             n_simulations=_safe_int(n_simulations),
             seed=_safe_int(seed),
             retain_samples=retain_samples,
+            mc_settings=mc_settings,
             status=tr("risk.status.failed", lang),
             errors=errors,
         )
 
     assert scenario is not None and scenario.scan_result is not None
     try:
+        effective_bundle = _bundle_with_mc_settings(scenario.config_bundle, mc_settings)
         result = run_monte_carlo(
-            scenario.config_bundle,
+            effective_bundle,
             selected_candidate_key=candidate_key,
             seed=int(seed),
             n_simulations=int(n_simulations),
             return_samples=retain_samples,
             baseline_scan=scenario.scan_result,
+            lang=lang,
         )
         result_id = store_risk_result(result)
         return build_risk_result_store_payload(
@@ -257,6 +376,7 @@ def run_risk_analysis(
             n_simulations=result.n_simulations,
             seed=result.seed,
             retain_samples=retain_samples,
+            mc_settings=mc_settings,
             status=tr("risk.status.completed", lang),
             warnings=list(result.warnings),
         )
@@ -268,6 +388,7 @@ def run_risk_analysis(
             n_simulations=_safe_int(n_simulations),
             seed=_safe_int(seed),
             retain_samples=retain_samples,
+            mc_settings=mc_settings,
             status=tr("risk.status.failed", lang),
             errors=[str(exc)],
         )
@@ -280,6 +401,8 @@ def run_risk_analysis(
     Input("risk-n-simulations-input", "value"),
     Input("risk-seed-input", "value"),
     Input("risk-retain-samples", "value"),
+    Input({"type": "risk-mc-input", "field": ALL}, "value"),
+    State({"type": "risk-mc-input", "field": ALL}, "id"),
     State("risk-result-store", "data"),
     State("language-selector", "value"),
     prevent_initial_call=True,
@@ -290,12 +413,15 @@ def invalidate_risk_result(
     n_simulations,
     seed,
     retain_samples_values,
+    mc_field_values,
+    mc_field_ids,
     result_payload,
     language_value,
 ):
     if not result_payload or not result_payload.get("result_id"):
         raise PreventUpdate
 
+    current_mc_settings = _collect_risk_mc_settings({}, n_simulations, mc_field_ids, mc_field_values)
     current_n = _safe_int(n_simulations)
     current_seed = _safe_int(seed)
     current_retain = _retain_samples(retain_samples_values)
@@ -305,6 +431,7 @@ def invalidate_risk_result(
         and current_n == result_payload.get("n_simulations")
         and current_seed == result_payload.get("seed")
         and current_retain == bool(result_payload.get("retain_samples"))
+        and current_mc_settings == dict(result_payload.get("mc_settings") or {})
     ):
         raise PreventUpdate
 
@@ -315,6 +442,7 @@ def invalidate_risk_result(
         n_simulations=current_n,
         seed=current_seed,
         retain_samples=current_retain,
+        mc_settings=current_mc_settings,
         status=tr("risk.status.inputs_changed", _lang(language_value)),
     )
 
@@ -479,6 +607,7 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
 
 @callback(
     Output("risk-status", "children", allow_duplicate=True),
+    Output("risk-latest-export-folder", "data"),
     Input("risk-export-artifacts-btn", "n_clicks"),
     State("risk-result-store", "data"),
     State("scenario-session-store", "data"),
@@ -499,11 +628,50 @@ def export_risk_result_artifacts(n_clicks, result_payload, session_payload, lang
         raise PreventUpdate
     result = get_risk_result(str(result_id))
     if result is None:
-        return tr("risk.error.result_missing", lang)
+        return tr("risk.error.result_missing", lang), ""
     _, state = resolve_client_session(session_payload, language=lang)
     scenario = state.get_scenario(payload.get("scenario_id"))
     if scenario is None:
-        return tr("risk.error.scenario_unavailable", lang)
+        return tr("risk.error.scenario_unavailable", lang), ""
     output_root = project_exports_root(state.project_slug) if state.project_slug else None
-    paths = export_risk_artifacts(scenario, result, output_root=output_root or Path("Resultados"))
-    return tr("risk.export_done", lang, path=str(paths[0].parent.resolve()))
+    paths = export_risk_artifacts(scenario, result, output_root=output_root or internal_results_root())
+    publish_result = publish_export_artifacts(
+        paths,
+        project_slug=state.project_slug,
+        scenario_slug=scenario.name or scenario.scenario_id,
+        export_kind="risk",
+    )
+    if publish_result.published_root is not None:
+        published_path = str(publish_result.published_root.resolve())
+        return tr("risk.export_done", lang, path=published_path), published_path
+    if publish_result.publish_error:
+        return (
+            tr(
+                "risk.export_partial",
+                lang,
+                path=str(publish_result.internal_root.resolve()),
+                error=publish_result.publish_error,
+            ),
+            "",
+        )
+    return tr("risk.export_done", lang, path=str(publish_result.display_root.resolve())), ""
+
+
+@callback(
+    Output("risk-status", "children", allow_duplicate=True),
+    Input("risk-open-exports-btn", "n_clicks"),
+    State("risk-latest-export-folder", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def open_risk_exports_folder(n_clicks, folder_path, language_value):
+    if not n_clicks:
+        raise PreventUpdate
+    lang = _lang(language_value)
+    if not folder_path:
+        return tr("common.exports_folder_unavailable", lang, error=tr("common.exports_folder_none", lang))
+    try:
+        open_export_folder(folder_path)
+    except (FileNotFoundError, OSError, RuntimeError) as exc:
+        return tr("common.exports_folder_unavailable", lang, error=str(exc))
+    return tr("common.exports_folder_opened", lang, path=folder_path)

@@ -1,0 +1,36 @@
+{
+  "format_version": 1,
+  "name": "Demo 1",
+  "slug": "demo_1",
+  "active_scenario_id": "scenario-3cf3eee7",
+  "comparison_scenario_ids": [],
+  "design_comparison_candidate_keys": {
+    "scenario-9f9d2e1d": [
+      "42.000::BAT-32",
+      "42.000::None"
+    ]
+  },
+  "scenarios": [
+    {
+      "scenario_id": "scenario-9f9d2e1d",
+      "name": "Escenario 1",
+      "source_name": "PV_inputs.xlsx",
+      "selected_candidate_key": "42.600::BAT-29",
+      "dirty": false,
+      "last_run_at": "2026-03-15T22:20:57",
+      "scan_fingerprint": "554d20a72e6917c1863c1f41248adac177b98c9ce917cff3f7c96303a9d5abeb"
+    },
+    {
+      "scenario_id": "scenario-3cf3eee7",
+      "name": "Escenario 2",
+      "source_name": "PV_inputs.xlsx",
+      "selected_candidate_key": "24.600::BAT-20",
+      "dirty": false,
+      "last_run_at": "2026-03-19T18:57:12",
+      "scan_fingerprint": "4f95d9e628b04073e7bf0c048c4ea3b04c3b0ca6dafd3d5a6ba269e9b30fe92f"
+    }
+  ],
+  "ui_prefs": {
+    "language": "es"
+  }
+}

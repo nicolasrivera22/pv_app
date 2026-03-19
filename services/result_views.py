@@ -158,7 +158,7 @@ def _module_annotation(k_wp: float | None, module_power_w: float | None, *, lang
     panel_count = _module_count(k_wp, module_power_w)
     if panel_count is None:
         return None
-    label = "# módulos" if lang == "es" else "# panels"
+    label = f"# {tr('common.chart.panels', lang).lower()}"
     return {
         "text": f"{label}={panel_count}",
         "xref": "paper",
@@ -321,9 +321,8 @@ def build_npv_figure(
     figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
     figure = go.Figure()
     hover_template = (
-        f"{'Candidato' if lang == 'es' else 'Candidate'}: %{{customdata[0]}}<br>"
         f"{'kWp' if lang == 'es' else 'kWp'}: %{{x:.3f}}<br>"
-        f"{'Paneles' if lang == 'es' else 'Panels'}: %{{customdata[1]}}<br>"
+        f"{tr('common.chart.panels', lang)}: %{{customdata[1]}}<br>"
         f"{'Batería' if lang == 'es' else 'Battery'}: %{{customdata[2]}}<br>"
         f"{metric_label('NPV_COP', lang)}: %{{y:,.0f}}<br>"
         f"{metric_label('payback_years', lang)}: %{{customdata[3]:.2f}}<br>"
@@ -350,18 +349,18 @@ def build_npv_figure(
                 y=selected_row["NPV_COP"],
                 mode="markers",
                 marker={"size": 14, "color": "#b91c1c"},
-                name="Candidato seleccionado" if lang == "es" else "Selected candidate",
+                name=tr("common.chart.selected_design", lang),
                 customdata=selected_row[["candidate_key", "panel_count"]],
                 hovertemplate=(
-                    ("Seleccionado" if lang == "es" else "Selected")
-                    + ": %{customdata[0]}<br>"
-                    + ("Paneles" if lang == "es" else "Panels")
+                    tr("common.chart.selected_design", lang)
+                    + "<br>"
+                    + tr("common.chart.panels", lang)
                     + ": %{customdata[1]}<extra></extra>"
                 ),
             )
     figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified", margin={"t": 88})
     figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f")
-    figure.update_xaxes(title="kWp instalado" if lang == "es" else "Installed kWp")
+    figure.update_xaxes(title=tr("common.chart.installed_kwp", lang))
     panel_axis = _build_panel_count_axis(curve, module_power_w)
     if panel_axis is not None:
         tickvals, ticktext = panel_axis
@@ -369,7 +368,7 @@ def build_npv_figure(
             xaxis2={
                 "overlaying": "x",
                 "side": "top",
-                "title": {"text": ("Número de paneles" if lang == "es" else "Panel count"), "standoff": 8},
+                "title": {"text": tr("common.chart.panel_count", lang), "standoff": 8},
                 "tickvals": tickvals,
                 "ticktext": ticktext,
                 "showgrid": False,
@@ -398,7 +397,7 @@ def build_monthly_balance_figure(
         title=figure_title,
     )
     figure.update_xaxes(
-        title="Mes" if lang == "es" else "Month",
+        title=tr("common.chart.month", lang),
         tickmode="array",
         tickvals=month_values,
         ticktext=month_labels,
@@ -428,7 +427,7 @@ def build_annual_coverage_figure(
     monthly = detail.get("monthly")
     if not isinstance(monthly, pd.DataFrame) or monthly.empty:
         return _deep_dive_empty(title, lang=lang)
-    prepared = prepare_autoconsumo_anual_series(monthly, export_allowed=export_allowed)
+    prepared = prepare_autoconsumo_anual_series(monthly, export_allowed=export_allowed, lang=lang)
     month_values = prepared["xlabels"]
     month_labels = abbreviated_month_labels(month_values, lang=lang)
     figure = go.Figure()
@@ -446,7 +445,7 @@ def build_annual_coverage_figure(
         annotations=[annotation] if (annotation := _module_annotation(detail.get("kWp"), config.get("P_mod_W"), lang=lang)) else [],
     )
     figure.update_xaxes(
-        title="Mes" if lang == "es" else "Month",
+        title=tr("common.chart.month", lang),
         tickmode="array",
         tickvals=month_values,
         ticktext=month_labels,
@@ -468,14 +467,22 @@ def build_battery_load_figure(
     required = {"PV_a_Carga_kWh", "Bateria_a_Carga_kWh", "Importacion_Red_kWh"}
     if not isinstance(monthly, pd.DataFrame) or monthly.empty or not required.issubset(monthly.columns):
         return _deep_dive_empty(title, lang=lang)
-    prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy())
+    prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy(), lang=lang)
     month_values = prepared["xlabels"]
     month_labels = abbreviated_month_labels(month_values, lang=lang)
-    color_map = {
-        "PV → Carga": "#57eb36",
-        "Batería → Carga": "#6fa8dc",
-        "Importación Red": "#f26c4f",
-    }
+    color_map = (
+        {
+            "PV → Carga": "#57eb36",
+            "Batería → Carga": "#6fa8dc",
+            "Importación Red": "#f26c4f",
+        }
+        if lang == "es"
+        else {
+            "PV to load": "#57eb36",
+            "Battery to load": "#6fa8dc",
+            "Grid import": "#f26c4f",
+        }
+    )
     figure = go.Figure()
     for series in prepared["coverage_series"]:
         figure.add_bar(
@@ -491,14 +498,14 @@ def build_battery_load_figure(
         annotations=[annotation] if (annotation := _module_annotation(detail.get("kWp"), config.get("P_mod_W"), lang=lang)) else [],
     )
     figure.update_xaxes(
-        title="Mes" if lang == "es" else "Month",
+        title=tr("common.chart.month", lang),
         tickmode="array",
         tickvals=month_values,
         ticktext=month_labels,
         categoryorder="array",
         categoryarray=month_values,
     )
-    figure.update_yaxes(title="Energía [kWh]" if lang == "es" else "Energy [kWh]", tickformat=",.0f")
+    figure.update_yaxes(title=tr("common.chart.energy_kwh", lang), tickformat=",.0f")
     return figure
 
 
@@ -513,13 +520,22 @@ def build_pv_destination_figure(
     required = {"PV_a_Carga_kWh", "PV_a_Bateria_kWh", "Exportacion_kWh"}
     if not isinstance(monthly, pd.DataFrame) or monthly.empty or not required.issubset(monthly.columns):
         return _deep_dive_empty(title, lang=lang)
-    prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy())
-    color_map = {
-        "PV → Carga": "#57eb36",
-        "PV → Batería": "#6fa8dc",
-        "Exportación": "#f7b32b",
-        "Curtailment": "#94a3b8",
-    }
+    prepared = prepare_battery_monthly_series(monthly.iloc[:12].copy(), lang=lang)
+    color_map = (
+        {
+            "PV → Carga": "#57eb36",
+            "PV → Batería": "#6fa8dc",
+            "Exportación": "#f7b32b",
+            "Recorte": "#94a3b8",
+        }
+        if lang == "es"
+        else {
+            "PV to load": "#57eb36",
+            "PV to battery": "#6fa8dc",
+            "Export": "#f7b32b",
+            "Curtailment": "#94a3b8",
+        }
+    )
     figure = go.Figure()
     for series in prepared["destination_series"]:
         values = list(series["values"])
@@ -537,8 +553,8 @@ def build_pv_destination_figure(
         barmode="stack",
         annotations=[annotation] if (annotation := _module_annotation(detail.get("kWp"), config.get("P_mod_W"), lang=lang)) else [],
     )
-    figure.update_xaxes(title="Mes" if lang == "es" else "Month")
-    figure.update_yaxes(title="Energía [kWh]" if lang == "es" else "Energy [kWh]", tickformat=",.0f")
+    figure.update_xaxes(title=tr("common.chart.month", lang))
+    figure.update_yaxes(title=tr("common.chart.energy_kwh", lang), tickformat=",.0f")
     return figure
 
 
@@ -560,41 +576,77 @@ def build_typical_day_figure(
         scenario.config_bundle.solar_profile,
         scenario.config_bundle.hsp_month,
         scenario.config_bundle.demand_month_factor,
+        battery=detail.get("battery"),
+        export_allowed=export_allowed,
     )
     figure = make_subplots(specs=[[{"secondary_y": True}]])
     figure.add_bar(
         x=prepared["hours"],
         y=prepared["demand_kw"],
-        name="Consumo" if lang == "es" else "Demand",
+        name=tr("common.chart.demand", lang),
         marker_color="red",
         offsetgroup="demand",
     )
     figure.add_bar(
         x=prepared["hours"],
         y=prepared["pv_ac_kw"],
-        name="FV" if lang == "es" else "PV",
+        name=tr("common.chart.pv", lang),
         marker_color="#57eb36",
         offsetgroup="pv",
     )
+    if prepared.get("has_battery"):
+        figure.add_trace(
+            go.Scatter(
+                x=prepared["hours"],
+                y=prepared["battery_to_load_kw"],
+                mode="lines+markers",
+                name=tr("common.chart.battery_to_load", lang),
+                line={"color": "#2563eb", "width": 3},
+                marker={"size": 6, "color": "#2563eb"},
+            ),
+            secondary_y=False,
+        )
+        figure.add_trace(
+            go.Scatter(
+                x=prepared["hours"],
+                y=prepared["pv_to_battery_kw"],
+                mode="lines+markers",
+                name=tr("common.chart.pv_to_battery", lang),
+                line={"color": "#f59e0b", "width": 2.5, "dash": "dash"},
+                marker={"size": 5, "color": "#f59e0b"},
+            ),
+            secondary_y=False,
+        )
+        if any(abs(float(value)) > 1e-6 for value in prepared["grid_import_kw"]):
+            figure.add_trace(
+                go.Scatter(
+                    x=prepared["hours"],
+                    y=prepared["grid_import_kw"],
+                    mode="lines",
+                    name=tr("common.chart.grid_import", lang),
+                    line={"color": "#6b7280", "width": 2, "dash": "dot"},
+                ),
+                secondary_y=False,
+            )
     figure.add_trace(
         go.Scatter(
             x=prepared["hours"],
             y=prepared["solar_factor_pct"],
             mode="lines",
-            name="Factor Solar" if lang == "es" else "Solar factor",
+            name=tr("common.chart.solar_factor", lang),
             line={"color": "#f2bb4b", "width": 2.5},
         ),
         secondary_y=True,
     )
     figure.update_layout(
         template="plotly_white",
-        title=title + (" (Cero inyección)" if lang == "es" and export_allowed is False else (" (Zero export)" if export_allowed is False else "")),
+        title=title + (f" ({tr('common.chart.zero_export_suffix', lang)})" if export_allowed is False else ""),
         barmode="group",
         annotations=[annotation] if (annotation := _module_annotation(detail.get("kWp"), scenario.config_bundle.config.get("P_mod_W"), lang=lang)) else [],
     )
-    figure.update_xaxes(title="Hora" if lang == "es" else "Hour", tickmode="linear", dtick=1, range=[-0.5, 23.5])
-    figure.update_yaxes(title="Potencia [kW]" if lang == "es" else "Power [kW]", secondary_y=False)
-    figure.update_yaxes(title="Factor solar [%]" if lang == "es" else "Solar factor [%]", secondary_y=True)
+    figure.update_xaxes(title=tr("common.chart.hour", lang), tickmode="linear", dtick=1, range=[-0.5, 23.5])
+    figure.update_yaxes(title=tr("common.chart.power_kw", lang), secondary_y=False)
+    figure.update_yaxes(title=f"{tr('common.chart.solar_factor', lang)} [%]", secondary_y=True)
     return figure
 
 
@@ -639,7 +691,7 @@ def build_cash_flow_figure(
                     + ": "
                     + tr("timeline.project_year", lang, year="%{customdata[2]:.0f}")
                     + "<br>"
-                    + ("VPN acumulado" if lang == "es" else "Cumulative NPV")
+                    + tr("common.chart.cumulative_npv", lang)
                     + ": %{y:,.0f}<br>"
                     + tr("timeline.hover.monthly_savings", lang)
                     + ": %{customdata[3]:,.0f}<extra></extra>"
@@ -800,8 +852,6 @@ def build_comparison_figures(scenarios: list[ScenarioRecord], lang: str = "es") 
                     "%{fullData.name}<br>"
                     + f"{tr('compare.axis.kwp', lang)}=%{{x:.3f}}<br>"
                     + f"{metric_label('NPV_COP', lang)}=%{{y:,.0f}}<br>"
-                    + ("Candidato" if lang == "es" else "Candidate")
-                    + "=%{customdata[0]}<br>"
                     + metric_label("battery", lang)
                     + "=%{customdata[1]}<extra></extra>"
                 ),

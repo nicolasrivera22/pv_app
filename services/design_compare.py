@@ -12,7 +12,7 @@ from plotly.subplots import make_subplots
 from .i18n import tr
 from .result_views import abbreviated_month_labels, build_project_timeline
 from .types import ScenarioRecord, ScenarioSessionState
-from .ui_schema import format_metric
+from .ui_schema import format_metric, metric_label
 
 MAX_COMPARE_DESIGNS = 10
 
@@ -583,16 +583,14 @@ def build_annual_demand_coverage_figure(
             y=subset["value_kwh"],
             name=_metric_name(metric, lang),
             marker_color=_metric_color(metric),
-            customdata=subset[["candidate_key"]],
-            hovertemplate=(
-                ("Diseño" if lang == "es" else "Design")
-                + ": %{x}<br>"
-                + ("Candidato" if lang == "es" else "Candidate")
-                + ": %{customdata[0]}<br>"
-                + ("Energía" if lang == "es" else "Energy")
-                + ": %{y:,.0f} kWh<extra></extra>"
-            ),
-        )
+                customdata=subset[["candidate_key"]],
+                hovertemplate=(
+                    ("Diseño" if lang == "es" else "Design")
+                    + ": %{x}<br>"
+                    + ("Energía" if lang == "es" else "Energy")
+                    + ": %{y:,.0f} kWh<extra></extra>"
+                ),
+            )
     figure.update_layout(template="plotly_white", title=tr("compare.figure.annual_coverage", lang), barmode="stack")
     figure.update_xaxes(title=tr("compare.axis.design", lang))
     figure.update_yaxes(title="kWh", tickformat=",.0f")
@@ -637,8 +635,6 @@ def build_monthly_pv_destination_figure(
                         + ": %{customdata[0]}<br>"
                         + ("Diseño" if lang == "es" else "Design")
                         + ": %{customdata[1]}<br>"
-                        + ("Candidato" if lang == "es" else "Candidate")
-                        + ": %{customdata[2]}<br>"
                         + ("Energía" if lang == "es" else "Energy")
                         + ": %{y:,.0f} kWh<extra></extra>"
                     ),
@@ -684,8 +680,6 @@ def build_monthly_pv_destination_figure(
                     + ": %{customdata[0]}<br>"
                     + ("Diseño" if lang == "es" else "Design")
                     + ": %{customdata[1]}<br>"
-                    + ("Candidato" if lang == "es" else "Candidate")
-                    + ": %{customdata[2]}<br>"
                     + ("Energía" if lang == "es" else "Energy")
                     + ": %{y:,.0f} kWh<extra></extra>"
                 ),
@@ -834,8 +828,6 @@ def build_npv_projection_figure(
         hovertemplate=(
             ("Diseño" if lang == "es" else "Design")
             + ": %{fullData.name}<br>"
-            + ("Candidato" if lang == "es" else "Candidate")
-            + ": %{customdata[0]}<br>"
             + "kWp: %{customdata[1]:.3f}<br>"
             + ("Paneles" if lang == "es" else "Panels")
             + ": %{customdata[2]}<br>"
@@ -851,7 +843,8 @@ def build_npv_projection_figure(
             + "<br>"
             + tr("timeline.hover.project_month", lang)
             + ": %{customdata[7]:.0f}<br>"
-            + "VPN: %{y:,.0f}<extra></extra>"
+            + metric_label("NPV_COP", lang)
+            + ": %{y:,.0f}<extra></extra>"
         )
     )
     if {"month_index", "calendar_year", "project_year"}.issubset(display.columns):

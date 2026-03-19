@@ -5,6 +5,7 @@ from dataclasses import replace
 from datetime import datetime
 from uuid import uuid4
 
+from .config_metadata import update_config_table_values
 from .cache import fingerprint_deterministic_input
 from .scenario_runner import resolve_deterministic_scan
 from .types import LoadedConfigBundle, ScenarioRecord, ScenarioSessionState
@@ -167,6 +168,45 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
         selected_candidate_key=None,
         dirty=True,
         last_run_at=None,
+    )
+    return _mark_project_dirty(_replace_scenario(state, updated))
+
+
+def update_scenario_risk_config(
+    state: ScenarioSessionState,
+    scenario_id: str,
+    config_updates: dict[str, object],
+) -> ScenarioSessionState:
+    scenario = state.get_scenario(scenario_id)
+    if scenario is None:
+        raise KeyError(f"No existe el escenario '{scenario_id}'.")
+    if not config_updates:
+        return state
+
+    updated_config = dict(scenario.config_bundle.config)
+    changed = False
+    for field, value in config_updates.items():
+        if updated_config.get(field) != value:
+            updated_config[field] = value
+            changed = True
+    if not changed:
+        return state
+
+    updated_bundle = replace(
+        scenario.config_bundle,
+        config=updated_config,
+        config_table=update_config_table_values(scenario.config_bundle.config_table, updated_config),
+    )
+    updated_fingerprint = (
+        fingerprint_deterministic_input(updated_bundle)
+        if scenario.scan_result is not None and not scenario.dirty
+        else scenario.scan_fingerprint
+    )
+    updated = replace(
+        scenario,
+        config_bundle=updated_bundle,
+        source_name=updated_bundle.source_name,
+        scan_fingerprint=updated_fingerprint,
     )
     return _mark_project_dirty(_replace_scenario(state, updated))
 

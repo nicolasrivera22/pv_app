@@ -80,10 +80,12 @@ The app supports both source and packaged execution through `services/runtime_pa
 Important path behaviour:
 
 - source mode uses the repo root as the default runtime root
-- project-bound sessions export into `proyectos/<slug>/exports/Resultados/`
-- unbound sessions default to top-level `Resultados/`
-- packaged mode resolves a writable user/runtime root beside the executable
+- project-bound sessions export into the active project workspace (`proyectos/<slug>/exports/Resultados/` in source mode, `%LOCALAPPDATA%/PVWorkbench/projects/<slug>/exports/Resultados/` in packaged Windows mode)
+- unbound sessions default to top-level `Resultados/` in source mode and `%LOCALAPPDATA%/PVWorkbench/results/` in packaged Windows mode
+- packaged Windows mode stores writable internal state under `%LOCALAPPDATA%/PVWorkbench/`
+- packaged Windows mode keeps user-facing published exports under `%USERPROFILE%/Documents/PVWorkbench Exports/`
 - `MPLCONFIGDIR` is forced into a writable runtime cache path to keep matplotlib safe in packaged and worker contexts
+- legacy top-level `Resultados/` / `Resultados_rel/` beside the executable are treated as old export output and are intentionally not migrated into LocalAppData
 
 ### 6. Multiprocessing
 

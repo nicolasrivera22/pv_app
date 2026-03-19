@@ -111,6 +111,7 @@ layout = html.Div(
                             ],
                         ),
                         html.P(tr("compare.intro", "es"), id="compare-page-intro"),
+                        html.P(tr("compare.flow_note", "es"), id="compare-flow-note", className="section-copy section-copy-wide"),
                         html.Div(className="scenario-meta", children=[html.Span(tr("compare.active_scenario", "es"), id="compare-active-scenario-label"), html.Span(" — ", className="scenario-sep"), html.Span("", id="compare-active-scenario-value")]),
                         html.Div("", id="comparison-export-progress", className="status-line", style={"display": "none"}),
                         html.Div(tr("compare.state.no_active", "es"), id="compare-status", className="status-line"),
@@ -174,6 +175,7 @@ layout = html.Div(
                                 className="panel",
                                 children=[
                                     html.H3(tr("compare.summary", "es"), id="comparison-summary-title"),
+                                    html.P(tr("compare.summary.note", "es"), id="compare-summary-note", className="section-copy section-copy-wide"),
                                     dash_table.DataTable(
                                         id="comparison-summary-table",
                                         data=[],
@@ -206,10 +208,12 @@ layout = html.Div(
 @callback(
     Output("compare-page-title", "children"),
     Output("compare-page-intro", "children"),
+    Output("compare-flow-note", "children"),
     Output("compare-active-scenario-label", "children"),
     Output("compare-available-title", "children"),
     Output("compare-selected-title", "children"),
     Output("comparison-summary-title", "children"),
+    Output("compare-summary-note", "children"),
     Output("compare-add-btn", "children"),
     Output("compare-clear-btn", "children"),
     Output("comparison-export-btn", "children"),
@@ -222,10 +226,12 @@ def translate_compare_page(language_value):
     return (
         tr("compare.title", lang),
         tr("compare.intro", lang),
+        tr("compare.flow_note", lang),
         tr("compare.active_scenario", lang),
         tr("compare.available", lang),
         tr("compare.selected", lang),
         tr("compare.summary", lang),
+        tr("compare.summary.note", lang),
         tr("compare.add", lang),
         tr("compare.clear", lang),
         tr("compare.export", lang),

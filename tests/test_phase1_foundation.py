@@ -34,6 +34,7 @@ from services import (
     save_project,
     set_active_scenario,
     set_design_comparison_candidates,
+    update_scenario_risk_config,
     update_selected_candidate,
     update_scenario_bundle,
 )
@@ -142,7 +143,18 @@ def test_deterministic_fingerprint_tracks_material_inputs_and_ignores_monte_carl
     bundle = _fast_bundle()
     baseline = fingerprint_deterministic_input(bundle)
 
-    noisy = replace(bundle, config={**bundle.config, "mc_PR_std": 0.9, "mc_buy_std": 0.8, "mc_n_simulations": 999})
+    noisy = replace(
+        bundle,
+        config={
+            **bundle.config,
+            "mc_PR_std": 0.9,
+            "mc_buy_std": 0.8,
+            "mc_n_simulations": 999,
+            "mc_use_manual_kWp": True,
+            "mc_manual_kWp": 22.5,
+            "mc_battery_name": "BAT-TEST",
+        },
+    )
     assert fingerprint_deterministic_input(noisy) == baseline
 
     repriced = replace(bundle, cop_kwp_table=bundle.cop_kwp_table.assign(PRECIO_POR_KWP=bundle.cop_kwp_table["PRECIO_POR_KWP"] + 1))
@@ -286,6 +298,76 @@ def test_apply_no_battery_edit_persists_through_project_save_and_reopen(tmp_path
     assert reloaded_active is not None
     assert reloaded_active.config_bundle.config["include_battery"] is False
     assert reloaded_active.config_bundle.config["battery_name"] == ""
+
+
+def test_workbench_assumptions_can_hide_monte_carlo_group() -> None:
+    sections = build_assumption_sections(
+        load_example_config(),
+        lang="en",
+        show_all=True,
+        exclude_groups={"Monte Carlo"},
+    )
+
+    groups = {section["group"] for section in sections}
+    fields = {
+        field["field"]
+        for section in sections
+        for bucket in ("basic", "advanced")
+        for field in section.get(bucket, [])
+    }
+
+    assert "Monte Carlo" not in groups
+    assert "mc_PR_std" not in fields
+    assert "mc_n_simulations" not in fields
+
+
+def test_risk_config_updates_preserve_scan_and_round_trip(tmp_path, monkeypatch) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    clean = state.get_scenario()
+    assert clean is not None and clean.scan_result is not None
+
+    original_scan = clean.scan_result
+    original_candidate = clean.selected_candidate_key
+    original_run_at = clean.last_run_at
+    battery_name = str(clean.config_bundle.battery_catalog.iloc[0]["name"])
+
+    updated = update_scenario_risk_config(
+        state,
+        clean.scenario_id,
+        {
+            "mc_PR_std": 0.12,
+            "mc_buy_std": 0.08,
+            "mc_n_simulations": 250,
+            "mc_use_manual_kWp": True,
+            "mc_manual_kWp": 18.5,
+            "mc_battery_name": battery_name,
+        },
+    )
+    updated_scenario = updated.get_scenario(clean.scenario_id)
+    assert updated_scenario is not None
+
+    assert updated_scenario.dirty is False
+    assert updated_scenario.scan_result is original_scan
+    assert updated_scenario.selected_candidate_key == original_candidate
+    assert updated_scenario.last_run_at == original_run_at
+    assert updated_scenario.config_bundle.config["mc_manual_kWp"] == pytest.approx(18.5)
+    assert updated_scenario.config_bundle.config["mc_battery_name"] == battery_name
+    assert updated.project_dirty is True
+
+    saved = save_project(updated, project_name="Risk Config Demo", language="en")
+    reopened = open_project(saved.project_slug)
+    reopened_scenario = reopened.get_scenario(clean.scenario_id)
+    assert reopened_scenario is not None
+    assert reopened_scenario.dirty is False
+    assert reopened_scenario.scan_result is None
+    assert reopened_scenario.config_bundle.config["mc_PR_std"] == pytest.approx(0.12)
+    assert reopened_scenario.config_bundle.config["mc_n_simulations"] == 250
+    assert reopened_scenario.config_bundle.config["mc_use_manual_kWp"] is True
+    assert reopened_scenario.config_bundle.config["mc_manual_kWp"] == pytest.approx(18.5)
+    assert reopened_scenario.config_bundle.config["mc_battery_name"] == battery_name
 
 
 def test_project_dirty_only_tracks_persisted_workspace_state(tmp_path, monkeypatch) -> None:

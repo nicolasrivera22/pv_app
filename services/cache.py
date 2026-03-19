@@ -16,17 +16,23 @@ from .types import LoadedConfigBundle, ScanRunResult
 
 DETERMINISTIC_CACHE_SCHEMA_VERSION = 1
 MAX_DETERMINISTIC_CACHE_ENTRIES = 16
-_MONTE_CARLO_CONFIG_FIELDS = ("mc_PR_std", "mc_buy_std", "mc_sell_std", "mc_demand_std", "mc_n_simulations")
+_MONTE_CARLO_CONFIG_DEFAULTS = {
+    "mc_PR_std": 0.0,
+    "mc_buy_std": 0.0,
+    "mc_sell_std": 0.0,
+    "mc_demand_std": 0.0,
+    "mc_n_simulations": 0,
+    "mc_use_manual_kWp": False,
+    "mc_manual_kWp": 0.0,
+    "mc_battery_name": "",
+}
 
 
 def _normalize_deterministic_config(config: dict[str, Any]) -> dict[str, Any]:
     normalized = deepcopy(config)
-    for field in _MONTE_CARLO_CONFIG_FIELDS:
+    for field, default_value in _MONTE_CARLO_CONFIG_DEFAULTS.items():
         if field in normalized:
-            if field == "mc_n_simulations":
-                normalized[field] = 0
-            else:
-                normalized[field] = 0.0
+            normalized[field] = default_value
     return normalized
 
 
