@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dash import dash_table, html
+from dash import dcc, dash_table, html
 
 from services.i18n import tr
 
@@ -37,7 +37,38 @@ def _profile_title(title_key: str, title_id: str, tooltip_key: str, tooltip_id: 
     )
 
 
+def _profile_chart_panel(
+    *,
+    panel_id: str,
+    title_id: str,
+    subtitle_id: str,
+    graph_id: str,
+) -> html.Div:
+    return html.Div(
+        id=panel_id,
+        className="subpanel profile-chart-panel",
+        style={"display": "none"},
+        children=[
+            html.Div(
+                className="profile-chart-head",
+                children=[
+                    html.H4("", id=title_id),
+                    html.P("", id=subtitle_id, className="section-copy profile-chart-subtitle"),
+                ],
+            ),
+            dcc.Graph(
+                id=graph_id,
+                className="profile-chart-graph",
+                figure={},
+                config={"displayModeBar": False, "responsive": True},
+                responsive=True,
+            ),
+        ],
+    )
+
+
 def _profile_panel(
+    card_id: str,
     title_key: str,
     title_id: str,
     tooltip_key: str,
@@ -49,6 +80,13 @@ def _profile_panel(
     page_size: int = 8,
     add_row_button_id: str | None = None,
 ) -> html.Div:
+    activator = html.Button(
+        tr("workbench.profiles.preview_chart", "es"),
+        id={"type": "profile-table-activate", "table": table_id},
+        n_clicks=0,
+        className="action-btn tertiary profile-table-activator",
+        type="button",
+    )
     button = (
         html.Button(
             tr("workbench.profiles.add_row", "es"),
@@ -59,21 +97,31 @@ def _profile_panel(
         if add_row_button_id
         else None
     )
-    class_name = " ".join(part for part in ["subpanel", panel_class_name] if part)
-    head_children = [_profile_title(title_key, title_id, tooltip_key, tooltip_id)]
+    class_name = " ".join(part for part in ["subpanel", "profile-table-card", panel_class_name] if part)
+    action_children = [activator]
     if button is not None:
-        head_children.append(button)
+        action_children.append(button)
+    head_children = [
+        _profile_title(title_key, title_id, tooltip_key, tooltip_id),
+        html.Div(className="profile-table-actions", children=action_children),
+    ]
     div_kwargs = {"className": class_name}
     if panel_id is not None:
         div_kwargs["id"] = panel_id
     return html.Div(
-        **div_kwargs,
+        id=card_id,
+        className="profile-table-card-shell",
         children=[
             html.Div(
-                className="section-head profile-table-head",
-                children=head_children,
+                **div_kwargs,
+                children=[
+                    html.Div(
+                        className="section-head profile-table-head",
+                        children=head_children,
+                    ),
+                    _profile_table(table_id, page_size=page_size),
+                ],
             ),
-            _profile_table(table_id, page_size=page_size),
         ],
     )
 
@@ -89,6 +137,7 @@ def profile_editor_section() -> html.Div:
                 className="profile-main-grid",
                 children=[
                     _profile_panel(
+                        "month-profile-card",
                         "workbench.profiles.month",
                         "month-profile-title",
                         "workbench.profiles.tooltip.month",
@@ -98,6 +147,7 @@ def profile_editor_section() -> html.Div:
                         page_size=12,
                     ),
                     _profile_panel(
+                        "sun-profile-card",
                         "workbench.profiles.sun",
                         "sun-profile-title",
                         "workbench.profiles.tooltip.sun",
@@ -107,6 +157,7 @@ def profile_editor_section() -> html.Div:
                         page_size=12,
                     ),
                     _profile_panel(
+                        "demand-profile-weights-card",
                         "workbench.profiles.demand_weights",
                         "demand-profile-weights-title",
                         "workbench.profiles.tooltip.demand_weights",
@@ -118,11 +169,18 @@ def profile_editor_section() -> html.Div:
                     ),
                 ],
             ),
+            _profile_chart_panel(
+                panel_id="profile-main-chart-panel",
+                title_id="profile-main-chart-title",
+                subtitle_id="profile-main-chart-subtitle",
+                graph_id="profile-main-chart-graph",
+            ),
             html.Div(
                 id="profile-secondary-grid",
                 className="profile-secondary-grid",
                 children=[
                     _profile_panel(
+                        "price-kwp-card",
                         "workbench.profiles.price",
                         "price-kwp-title",
                         "workbench.profiles.tooltip.price",
@@ -132,6 +190,7 @@ def profile_editor_section() -> html.Div:
                         add_row_button_id="add-price-kwp-row-btn",
                     ),
                     _profile_panel(
+                        "price-kwp-others-card",
                         "workbench.profiles.price_others",
                         "price-kwp-others-title",
                         "workbench.profiles.tooltip.price_others",
@@ -141,6 +200,7 @@ def profile_editor_section() -> html.Div:
                         add_row_button_id="add-price-kwp-others-row-btn",
                     ),
                     _profile_panel(
+                        "demand-profile-card",
                         "workbench.profiles.demand_weekday",
                         "demand-profile-title",
                         "workbench.profiles.tooltip.demand_weekday",
@@ -149,6 +209,7 @@ def profile_editor_section() -> html.Div:
                         panel_id="demand-profile-panel",
                     ),
                     _profile_panel(
+                        "demand-profile-general-card",
                         "workbench.profiles.demand_general",
                         "demand-profile-general-title",
                         "workbench.profiles.tooltip.demand_general",
@@ -157,6 +218,12 @@ def profile_editor_section() -> html.Div:
                         panel_id="demand-profile-general-panel",
                     ),
                 ],
+            ),
+            _profile_chart_panel(
+                panel_id="profile-secondary-chart-panel",
+                title_id="profile-secondary-chart-title",
+                subtitle_id="profile-secondary-chart-subtitle",
+                graph_id="profile-secondary-chart-graph",
             ),
         ],
     )

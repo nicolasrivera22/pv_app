@@ -561,8 +561,23 @@ body {
     min-width: 0;
 }
 
+.profile-table-card-shell {
+    min-width: 0;
+}
+
+.profile-table-card {
+    min-width: 0;
+    transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.profile-table-card-shell.profile-table-card-active > .profile-table-card {
+    border-color: rgba(37, 99, 235, 0.38);
+    box-shadow: 0 18px 40px rgba(37, 99, 235, 0.08), inset 0 0 0 1px rgba(191, 219, 254, 0.9);
+}
+
 .profile-table-head {
     margin-bottom: 0.7rem;
+    align-items: flex-start;
 }
 
 .profile-table-title {
@@ -575,11 +590,68 @@ body {
     margin: 0;
 }
 
+.profile-table-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.profile-table-activator {
+    padding: 0.45rem 0.8rem;
+    font-size: 0.84rem;
+    line-height: 1.1;
+    background: #e2e8f0;
+    color: #0f172a;
+    border: 1px solid rgba(148, 163, 184, 0.55);
+}
+
+.profile-table-card-shell.profile-table-card-active .profile-table-activator {
+    background: #dbeafe;
+    border-color: rgba(96, 165, 250, 0.72);
+    color: #1d4ed8;
+}
+
 .profile-inline-btn {
     padding: 0.45rem 0.8rem;
     font-size: 0.88rem;
     line-height: 1.1;
     white-space: nowrap;
+}
+
+.profile-chart-panel {
+    display: grid;
+    gap: 0.7rem;
+    margin-bottom: 1rem;
+    padding: 0.9rem 1rem 0.75rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.98) 100%);
+    border: 1px solid rgba(191, 219, 254, 0.9);
+    box-shadow: 0 16px 32px rgba(15, 23, 42, 0.06);
+}
+
+.profile-chart-head {
+    display: grid;
+    gap: 0.2rem;
+}
+
+.profile-chart-head h4 {
+    margin: 0;
+}
+
+.profile-chart-subtitle {
+    margin: 0;
+}
+
+.profile-chart-graph {
+    min-width: 0;
+}
+
+.profile-chart-panel .js-plotly-plot,
+.profile-chart-panel .plot-container,
+.profile-chart-panel .svg-container {
+    width: 100% !important;
 }
 
 .compare-grid > .panel {
@@ -854,6 +926,11 @@ body {
 
     .profile-main-panel-wide {
         grid-column: auto;
+    }
+
+    .profile-table-actions {
+        margin-left: 0;
+        justify-content: flex-start;
     }
 
     .assumption-input-shell {

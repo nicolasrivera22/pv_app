@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from dash import dcc
+from dash.exceptions import PreventUpdate
 import pandas as pd
 import pytest
 
@@ -91,6 +92,21 @@ def _find_component(node, component_id: str):
                 return found
         return None
     return _find_component(children, component_id)
+
+
+def _find_components(node, predicate) -> list:
+    matches = []
+    if predicate(node):
+        matches.append(node)
+    children = getattr(node, "children", None)
+    if children is None:
+        return matches
+    if isinstance(children, (list, tuple)):
+        for child in children:
+            matches.extend(_find_components(child, predicate))
+        return matches
+    matches.extend(_find_components(children, predicate))
+    return matches
 
 
 def _find_component_with_class(node, class_name: str):
@@ -324,16 +340,48 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
 def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_controls() -> None:
     section = profile_editor_section()
     main_grid = _find_component(section, "profile-main-grid")
+    main_chart = _find_component(section, "profile-main-chart-panel")
     secondary_grid = _find_component(section, "profile-secondary-grid")
+    secondary_chart = _find_component(section, "profile-secondary-chart-panel")
+    activators = _find_components(
+        section,
+        lambda node: isinstance(getattr(node, "id", None), dict) and node.id.get("type") == "profile-table-activate",
+    )
 
     assert main_grid is not None
+    assert main_chart is not None
     assert secondary_grid is not None
+    assert secondary_chart is not None
+    assert _find_component(workbench_page.layout, "active-profile-table-state") is not None
     assert len(main_grid.children) == 3
     assert len(secondary_grid.children) == 4
+    assert [getattr(child, "id", None) for child in section.children[2:6]] == [
+        "profile-main-grid",
+        "profile-main-chart-panel",
+        "profile-secondary-grid",
+        "profile-secondary-chart-panel",
+    ]
+    assert len(activators) == 7
+    assert {component.id["table"] for component in activators} == {
+        "month-profile-editor",
+        "sun-profile-editor",
+        "demand-profile-weights-editor",
+        "price-kwp-editor",
+        "price-kwp-others-editor",
+        "demand-profile-editor",
+        "demand-profile-general-editor",
+    }
+    assert _find_component(section, "month-profile-card") is not None
+    assert _find_component(section, "sun-profile-card") is not None
+    assert _find_component(section, "demand-profile-weights-card") is not None
+    assert _find_component(section, "price-kwp-card") is not None
+    assert _find_component(section, "price-kwp-others-card") is not None
+    assert _find_component(section, "demand-profile-card") is not None
+    assert _find_component(section, "demand-profile-general-card") is not None
     assert _find_component(main_grid.children[0], "month-profile-title").children == tr("workbench.profiles.month", "es")
     assert _find_component(main_grid.children[1], "sun-profile-title").children == tr("workbench.profiles.sun", "es")
     assert _find_component(main_grid.children[2], "demand-profile-weights-title").children == tr("workbench.profiles.demand_weights", "es")
-    assert "profile-main-panel-wide" in str(main_grid.children[2].className)
+    assert "profile-main-panel-wide" in str(_find_component(main_grid.children[2], "demand-profile-weights-panel").className)
     assert _find_component(section, "month-profile-editor").page_size == 12
     assert _find_component(section, "sun-profile-editor").page_size == 12
     assert _find_component(section, "demand-profile-weights-editor").page_size == 12
@@ -527,6 +575,9 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert "minmax(0, 1.35fr)" in css_source
     assert ".profile-secondary-grid" in css_source
     assert ".profile-inline-btn" in css_source
+    assert ".profile-table-activator" in css_source
+    assert ".profile-chart-panel" in css_source
+    assert ".profile-table-card-active" in css_source
 
 
 def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
@@ -580,6 +631,176 @@ def test_run_scan_choice_dialog_disables_save_until_project_name_exists() -> Non
     assert named[0]["display"] == "flex"
     assert named[4] is False
     assert "Guárdala como 'Demo'" in named[2]
+
+
+def test_profile_table_activator_translation_uses_current_language() -> None:
+    assert workbench_page.translate_profile_table_activators("en") == ["Preview chart"] * 7
+    assert workbench_page.translate_profile_table_activators("es") == ["Ver gráfica"] * 7
+
+
+def test_profile_table_header_click_toggles_the_active_chart(monkeypatch) -> None:
+    monkeypatch.setattr(
+        workbench_page,
+        "ctx",
+        SimpleNamespace(triggered_id={"type": "profile-table-activate", "table": "sun-profile-editor"}),
+    )
+
+    activated = workbench_page.sync_active_profile_table([], None, None, None, None, None, None, None, {"table_id": None})
+    cleared = workbench_page.sync_active_profile_table([], None, None, None, None, None, None, None, {"table_id": "sun-profile-editor"})
+
+    assert activated == {"table_id": "sun-profile-editor"}
+    assert cleared == {"table_id": None}
+
+
+def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -> None:
+    monkeypatch.setattr(workbench_page, "ctx", SimpleNamespace(triggered_id="sun-profile-editor"))
+
+    activated = workbench_page.sync_active_profile_table(
+        [],
+        None,
+        {"row": 2, "column": 1},
+        None,
+        None,
+        None,
+        None,
+        None,
+        {"table_id": None},
+    )
+
+    assert activated == {"table_id": "sun-profile-editor"}
+
+    with pytest.raises(PreventUpdate):
+        workbench_page.sync_active_profile_table(
+            [],
+            None,
+            {"row": 2, "column": 1},
+            None,
+            None,
+            None,
+            None,
+            None,
+            {"table_id": "sun-profile-editor"},
+        )
+
+
+def test_hidden_profile_table_sanitization_clears_active_chart() -> None:
+    cleared = workbench_page.sanitize_active_profile_table(
+        {"table_id": "demand-profile-editor"},
+        {"display": "block"},
+        {"display": "block"},
+        {"display": "none"},
+        {"display": "block"},
+        {"display": "block"},
+    )
+
+    assert cleared == {"table_id": None}
+
+
+def test_profile_chart_render_routes_main_and_secondary_tables_and_marks_one_active_card() -> None:
+    bundle = load_example_config()
+    month_columns, _ = build_table_display_columns("month_profile", list(bundle.month_profile_table.columns), "en")
+    sun_columns, _ = build_table_display_columns("sun_profile", list(bundle.sun_profile_table.columns), "en")
+    demand_weights_columns, _ = build_table_display_columns("demand_profile_weights", list(bundle.demand_profile_weights_table.columns), "en")
+    price_columns, _ = build_table_display_columns("cop_kwp", list(bundle.cop_kwp_table.columns), "en")
+    price_others_columns, _ = build_table_display_columns("cop_kwp_others", list(bundle.cop_kwp_table_others.columns), "en")
+    demand_columns, _ = build_table_display_columns("demand_profile", list(bundle.demand_profile_table.columns), "en")
+    demand_general_columns, _ = build_table_display_columns("demand_profile_general", list(bundle.demand_profile_general_table.columns), "en")
+
+    main = workbench_page.render_active_profile_chart(
+        {"table_id": "sun-profile-editor"},
+        bundle.month_profile_table.to_dict("records"),
+        month_columns,
+        bundle.sun_profile_table.to_dict("records"),
+        sun_columns,
+        bundle.demand_profile_weights_table.to_dict("records"),
+        demand_weights_columns,
+        bundle.cop_kwp_table.to_dict("records"),
+        price_columns,
+        bundle.cop_kwp_table_others.to_dict("records"),
+        price_others_columns,
+        bundle.demand_profile_table.to_dict("records"),
+        demand_columns,
+        bundle.demand_profile_general_table.to_dict("records"),
+        demand_general_columns,
+        "en",
+        {"display": "block"},
+        {"display": "block"},
+        {"display": "block"},
+        {"display": "block"},
+        {"display": "block"},
+    )
+    secondary = workbench_page.render_active_profile_chart(
+        {"table_id": "price-kwp-editor"},
+        bundle.month_profile_table.to_dict("records"),
+        month_columns,
+        bundle.sun_profile_table.to_dict("records"),
+        sun_columns,
+        bundle.demand_profile_weights_table.to_dict("records"),
+        demand_weights_columns,
+        bundle.cop_kwp_table.to_dict("records"),
+        price_columns,
+        bundle.cop_kwp_table_others.to_dict("records"),
+        price_others_columns,
+        bundle.demand_profile_table.to_dict("records"),
+        demand_columns,
+        bundle.demand_profile_general_table.to_dict("records"),
+        demand_general_columns,
+        "en",
+        {"display": "block"},
+        {"display": "block"},
+        {"display": "block"},
+        {"display": "block"},
+        {"display": "block"},
+    )
+
+    assert main[0]["display"] == "grid"
+    assert main[1] == tr("workbench.profiles.sun", "en")
+    assert main[4]["display"] == "none"
+    assert sum("profile-table-card-active" in class_name for class_name in main[8:]) == 1
+
+    assert secondary[0]["display"] == "none"
+    assert secondary[4]["display"] == "grid"
+    assert secondary[5] == tr("workbench.profiles.price", "en")
+    assert sum("profile-table-card-active" in class_name for class_name in secondary[8:]) == 1
+
+
+def test_hidden_active_profile_table_hides_chart_shells_and_active_classes() -> None:
+    bundle = load_example_config()
+    month_columns, _ = build_table_display_columns("month_profile", list(bundle.month_profile_table.columns), "es")
+    sun_columns, _ = build_table_display_columns("sun_profile", list(bundle.sun_profile_table.columns), "es")
+    demand_weights_columns, _ = build_table_display_columns("demand_profile_weights", list(bundle.demand_profile_weights_table.columns), "es")
+    price_columns, _ = build_table_display_columns("cop_kwp", list(bundle.cop_kwp_table.columns), "es")
+    price_others_columns, _ = build_table_display_columns("cop_kwp_others", list(bundle.cop_kwp_table_others.columns), "es")
+    demand_columns, _ = build_table_display_columns("demand_profile", list(bundle.demand_profile_table.columns), "es")
+    demand_general_columns, _ = build_table_display_columns("demand_profile_general", list(bundle.demand_profile_general_table.columns), "es")
+
+    rendered = workbench_page.render_active_profile_chart(
+        {"table_id": "demand-profile-editor"},
+        bundle.month_profile_table.to_dict("records"),
+        month_columns,
+        bundle.sun_profile_table.to_dict("records"),
+        sun_columns,
+        bundle.demand_profile_weights_table.to_dict("records"),
+        demand_weights_columns,
+        bundle.cop_kwp_table.to_dict("records"),
+        price_columns,
+        bundle.cop_kwp_table_others.to_dict("records"),
+        price_others_columns,
+        bundle.demand_profile_table.to_dict("records"),
+        demand_columns,
+        bundle.demand_profile_general_table.to_dict("records"),
+        demand_general_columns,
+        "es",
+        {"display": "block"},
+        {"display": "block"},
+        {"display": "none"},
+        {"display": "block"},
+        {"display": "block"},
+    )
+
+    assert rendered[0]["display"] == "none"
+    assert rendered[4]["display"] == "none"
+    assert all("profile-table-card-active" not in class_name for class_name in rendered[8:])
 
 
 def test_apply_button_auto_saves_bound_project_after_rebuild(monkeypatch) -> None:

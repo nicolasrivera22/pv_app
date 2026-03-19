@@ -25,6 +25,7 @@ from services import (
     apply_workbench_editor_state,
     build_assumption_sections,
     build_display_columns,
+    build_profile_chart,
     build_schematic_legend,
     build_table_display_columns,
     build_unifilar_model,
@@ -136,6 +137,38 @@ def _run_choice_state(*, open_dialog: bool = False) -> dict[str, bool]:
     return {"open": open_dialog}
 
 
+PROFILE_MAIN_TABLE_IDS = (
+    "month-profile-editor",
+    "sun-profile-editor",
+    "demand-profile-weights-editor",
+)
+PROFILE_SECONDARY_TABLE_IDS = (
+    "price-kwp-editor",
+    "price-kwp-others-editor",
+    "demand-profile-editor",
+    "demand-profile-general-editor",
+)
+PROFILE_TABLE_IDS = (*PROFILE_MAIN_TABLE_IDS, *PROFILE_SECONDARY_TABLE_IDS)
+PROFILE_CARD_IDS = {
+    "month-profile-editor": "month-profile-card",
+    "sun-profile-editor": "sun-profile-card",
+    "demand-profile-weights-editor": "demand-profile-weights-card",
+    "price-kwp-editor": "price-kwp-card",
+    "price-kwp-others-editor": "price-kwp-others-card",
+    "demand-profile-editor": "demand-profile-card",
+    "demand-profile-general-editor": "demand-profile-general-card",
+}
+PROFILE_TABLE_VISIBILITY_PANELS = {
+    "price-kwp-editor": "price-kwp-panel",
+    "price-kwp-others-editor": "price-kwp-others-panel",
+    "demand-profile-editor": "demand-profile-panel",
+    "demand-profile-general-editor": "demand-profile-general-panel",
+    "demand-profile-weights-editor": "demand-profile-weights-panel",
+}
+PROFILE_CARD_BASE_CLASS = "profile-table-card-shell"
+PROFILE_CARD_ACTIVE_CLASS = f"{PROFILE_CARD_BASE_CLASS} profile-table-card-active"
+
+
 def _blank_table_row(table_columns, table_rows=None) -> dict[str, str]:
     column_ids = [
         str(column.get("id", "")).strip()
@@ -245,12 +278,54 @@ def _autosave_bound_project(state, project_name_value, *, lang: str) -> tuple[ob
     return save_project(state, project_name=_resolved_project_name(project_name_value, state), language=lang), True
 
 
+def _active_profile_table_state(table_id: str | None = None) -> dict[str, str | None]:
+    if table_id is None:
+        return {"table_id": None}
+    normalized = str(table_id).strip()
+    return {"table_id": normalized or None}
+
+
+def _is_hidden_style(style: dict | None) -> bool:
+    return str((style or {}).get("display", "block")).strip().lower() == "none"
+
+
+def _hidden_profile_tables(
+    price_kwp_style: dict | None,
+    price_kwp_others_style: dict | None,
+    demand_profile_style: dict | None,
+    demand_profile_general_style: dict | None,
+    demand_profile_weights_style: dict | None,
+) -> set[str]:
+    panel_styles = {
+        "price-kwp-panel": price_kwp_style,
+        "price-kwp-others-panel": price_kwp_others_style,
+        "demand-profile-panel": demand_profile_style,
+        "demand-profile-general-panel": demand_profile_general_style,
+        "demand-profile-weights-panel": demand_profile_weights_style,
+    }
+    return {
+        table_id
+        for table_id, panel_id in PROFILE_TABLE_VISIBILITY_PANELS.items()
+        if _is_hidden_style(panel_styles.get(panel_id))
+    }
+
+
+def _profile_card_class_names(active_table_id: str | None, hidden_tables: set[str] | None = None) -> tuple[str, ...]:
+    hidden = hidden_tables or set()
+    classes: list[str] = []
+    for table_id in PROFILE_TABLE_IDS:
+        is_active = table_id == active_table_id and table_id not in hidden
+        classes.append(PROFILE_CARD_ACTIVE_CLASS if is_active else PROFILE_CARD_BASE_CLASS)
+    return tuple(classes)
+
+
 layout = html.Div(
     className="page",
     children=[
         dcc.Download(id="scenario-download"),
         dcc.Store(id="workbench-latest-export-folder", storage_type="memory", data=""),
         dcc.Store(id="run-scan-choice-state", storage_type="memory", data=_run_choice_state()),
+        dcc.Store(id="active-profile-table-state", storage_type="memory", data=_active_profile_table_state()),
         run_scan_choice_dialog(),
         html.Div(
             className="workbench-grid",
@@ -437,6 +512,15 @@ def translate_workbench_page(language_value):
 
 
 @callback(
+    Output({"type": "profile-table-activate", "table": ALL}, "children"),
+    Input("language-selector", "value"),
+)
+def translate_profile_table_activators(language_value):
+    lang = _lang(language_value)
+    return [tr("workbench.profiles.preview_chart", lang)] * len(PROFILE_TABLE_IDS)
+
+
+@callback(
     Output("run-scan-choice-dialog", "style"),
     Output("run-scan-choice-title", "children"),
     Output("run-scan-choice-copy", "children"),
@@ -606,7 +690,8 @@ def toggle_pricing_table_visibility(session_payload):
     _, state = _session(session_payload, None)
     active = state.get_scenario()
     if active is None:
-        raise PreventUpdate
+        hidden = {"display": "none"}
+        return hidden, hidden
 
     cfg = active.config_bundle.config
     pricing_mode = str(cfg.get("pricing_mode", "variable")).strip().lower()
@@ -721,6 +806,227 @@ def populate_editors(session_payload, language_value):
         visibility["demand-profile-panel"],
         visibility["demand-profile-general-panel"],
         visibility["demand-profile-weights-panel"],
+    )
+
+
+@callback(
+    Output("active-profile-table-state", "data"),
+    Input({"type": "profile-table-activate", "table": ALL}, "n_clicks"),
+    Input("month-profile-editor", "active_cell"),
+    Input("sun-profile-editor", "active_cell"),
+    Input("demand-profile-weights-editor", "active_cell"),
+    Input("price-kwp-editor", "active_cell"),
+    Input("price-kwp-others-editor", "active_cell"),
+    Input("demand-profile-editor", "active_cell"),
+    Input("demand-profile-general-editor", "active_cell"),
+    State("active-profile-table-state", "data"),
+    prevent_initial_call=True,
+)
+def sync_active_profile_table(
+    _activator_clicks,
+    month_active_cell,
+    sun_active_cell,
+    demand_weights_active_cell,
+    price_active_cell,
+    price_others_active_cell,
+    demand_weekday_active_cell,
+    demand_general_active_cell,
+    active_state,
+):
+    trigger = ctx.triggered_id
+    current_table_id = str((active_state or {}).get("table_id") or "").strip() or None
+    active_cells = {
+        "month-profile-editor": month_active_cell,
+        "sun-profile-editor": sun_active_cell,
+        "demand-profile-weights-editor": demand_weights_active_cell,
+        "price-kwp-editor": price_active_cell,
+        "price-kwp-others-editor": price_others_active_cell,
+        "demand-profile-editor": demand_weekday_active_cell,
+        "demand-profile-general-editor": demand_general_active_cell,
+    }
+
+    if isinstance(trigger, dict) and trigger.get("type") == "profile-table-activate":
+        table_id = str(trigger.get("table", "")).strip() or None
+        if table_id is None:
+            raise PreventUpdate
+        if table_id == current_table_id:
+            return _active_profile_table_state()
+        return _active_profile_table_state(table_id)
+
+    if isinstance(trigger, str) and trigger in active_cells:
+        if not active_cells.get(trigger):
+            raise PreventUpdate
+        if trigger == current_table_id:
+            raise PreventUpdate
+        return _active_profile_table_state(trigger)
+
+    raise PreventUpdate
+
+
+@callback(
+    Output("active-profile-table-state", "data", allow_duplicate=True),
+    Input("active-profile-table-state", "data"),
+    Input("price-kwp-panel", "style"),
+    Input("price-kwp-others-panel", "style"),
+    Input("demand-profile-panel", "style"),
+    Input("demand-profile-general-panel", "style"),
+    Input("demand-profile-weights-panel", "style"),
+    prevent_initial_call=True,
+)
+def sanitize_active_profile_table(
+    active_state,
+    price_kwp_style,
+    price_kwp_others_style,
+    demand_profile_style,
+    demand_profile_general_style,
+    demand_profile_weights_style,
+):
+    active_table_id = str((active_state or {}).get("table_id") or "").strip() or None
+    if active_table_id is None:
+        raise PreventUpdate
+    hidden_tables = _hidden_profile_tables(
+        price_kwp_style,
+        price_kwp_others_style,
+        demand_profile_style,
+        demand_profile_general_style,
+        demand_profile_weights_style,
+    )
+    if active_table_id in hidden_tables:
+        return _active_profile_table_state()
+    raise PreventUpdate
+
+
+@callback(
+    Output("profile-main-chart-panel", "style"),
+    Output("profile-main-chart-title", "children"),
+    Output("profile-main-chart-subtitle", "children"),
+    Output("profile-main-chart-graph", "figure"),
+    Output("profile-secondary-chart-panel", "style"),
+    Output("profile-secondary-chart-title", "children"),
+    Output("profile-secondary-chart-subtitle", "children"),
+    Output("profile-secondary-chart-graph", "figure"),
+    Output("month-profile-card", "className"),
+    Output("sun-profile-card", "className"),
+    Output("demand-profile-weights-card", "className"),
+    Output("price-kwp-card", "className"),
+    Output("price-kwp-others-card", "className"),
+    Output("demand-profile-card", "className"),
+    Output("demand-profile-general-card", "className"),
+    Input("active-profile-table-state", "data"),
+    Input("month-profile-editor", "data"),
+    Input("month-profile-editor", "columns"),
+    Input("sun-profile-editor", "data"),
+    Input("sun-profile-editor", "columns"),
+    Input("demand-profile-weights-editor", "data"),
+    Input("demand-profile-weights-editor", "columns"),
+    Input("price-kwp-editor", "data"),
+    Input("price-kwp-editor", "columns"),
+    Input("price-kwp-others-editor", "data"),
+    Input("price-kwp-others-editor", "columns"),
+    Input("demand-profile-editor", "data"),
+    Input("demand-profile-editor", "columns"),
+    Input("demand-profile-general-editor", "data"),
+    Input("demand-profile-general-editor", "columns"),
+    Input("language-selector", "value"),
+    Input("price-kwp-panel", "style"),
+    Input("price-kwp-others-panel", "style"),
+    Input("demand-profile-panel", "style"),
+    Input("demand-profile-general-panel", "style"),
+    Input("demand-profile-weights-panel", "style"),
+)
+def render_active_profile_chart(
+    active_state,
+    month_rows,
+    month_columns,
+    sun_rows,
+    sun_columns,
+    demand_weights_rows,
+    demand_weights_columns,
+    price_rows,
+    price_columns,
+    price_others_rows,
+    price_others_columns,
+    demand_weekday_rows,
+    demand_weekday_columns,
+    demand_general_rows,
+    demand_general_columns,
+    language_value,
+    price_kwp_style,
+    price_kwp_others_style,
+    demand_profile_style,
+    demand_profile_general_style,
+    demand_profile_weights_style,
+):
+    lang = _lang(language_value)
+    hidden_tables = _hidden_profile_tables(
+        price_kwp_style,
+        price_kwp_others_style,
+        demand_profile_style,
+        demand_profile_general_style,
+        demand_profile_weights_style,
+    )
+    active_table_id = str((active_state or {}).get("table_id") or "").strip() or None
+    if active_table_id in hidden_tables:
+        active_table_id = None
+
+    card_classes = _profile_card_class_names(active_table_id, hidden_tables)
+    hidden_style = {"display": "none"}
+    empty_figure = go.Figure()
+    if active_table_id is None:
+        return (
+            hidden_style,
+            "",
+            "",
+            empty_figure,
+            hidden_style,
+            "",
+            "",
+            empty_figure,
+            *card_classes,
+        )
+
+    table_rows = {
+        "month-profile-editor": month_rows,
+        "sun-profile-editor": sun_rows,
+        "demand-profile-weights-editor": demand_weights_rows,
+        "price-kwp-editor": price_rows,
+        "price-kwp-others-editor": price_others_rows,
+        "demand-profile-editor": demand_weekday_rows,
+        "demand-profile-general-editor": demand_general_rows,
+    }
+    table_columns = {
+        "month-profile-editor": month_columns,
+        "sun-profile-editor": sun_columns,
+        "demand-profile-weights-editor": demand_weights_columns,
+        "price-kwp-editor": price_columns,
+        "price-kwp-others-editor": price_others_columns,
+        "demand-profile-editor": demand_weekday_columns,
+        "demand-profile-general-editor": demand_general_columns,
+    }
+    render = build_profile_chart(active_table_id, table_rows.get(active_table_id), table_columns.get(active_table_id), lang)
+    visible_style = {"display": "grid"}
+    if render.row_target == "main":
+        return (
+            visible_style,
+            render.title,
+            render.subtitle,
+            render.figure,
+            hidden_style,
+            "",
+            "",
+            empty_figure,
+            *card_classes,
+        )
+    return (
+        hidden_style,
+        "",
+        "",
+        empty_figure,
+        visible_style,
+        render.title,
+        render.subtitle,
+        render.figure,
+        *card_classes,
     )
 
 

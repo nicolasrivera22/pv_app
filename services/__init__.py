@@ -36,6 +36,7 @@ from .export_artifacts import (
 from .export_excel import export_comparison_workbook, export_design_comparison_workbook, export_scenario_workbook
 from .io_excel import TABLE_FILE_MAP, ensure_template, load_bundle_from_tables, load_config_from_excel, load_example_config, rebuild_config_bundle
 from .project_io import list_projects, load_project_bundle_from_tables, open_project, read_project_manifest, save_project, save_project_as
+from .profile_charts import ProfileChartRender, build_profile_chart
 from .runtime_paths import (
     assets_dir,
     bundled_workbook_path,
@@ -173,6 +174,7 @@ __all__ = [
     "MonteCarloRunResult",
     "MonteCarloSummary",
     "PercentileSummary",
+    "ProfileChartRender",
     "ExportPublishResult",
     "ProjectManifest",
     "ProjectScenarioManifest",
@@ -198,6 +200,7 @@ __all__ = [
     "build_design_comparison_figures",
     "build_design_comparison_rows",
     "build_display_columns",
+    "build_profile_chart",
     "build_table_display_columns",
     "build_monthly_pv_destination_frame",
     "bootstrap_client_session",
