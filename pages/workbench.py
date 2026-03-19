@@ -4,6 +4,7 @@ import base64
 from pathlib import Path
 from dash import ALL, Input, Output, State, callback, ctx, dcc, html, no_update, register_page
 from dash.exceptions import PreventUpdate
+import pandas as pd
 import plotly.graph_objects as go
 
 from components import (
@@ -343,6 +344,134 @@ def _assumption_card_class(field_key: str, *, disabled: bool = False, emphasize:
     return " ".join(dict.fromkeys(classes))
 
 
+def _normalize_state_compare_value(value):
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = float(value)
+        return int(number) if number.is_integer() else round(number, 10)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped == "":
+            return ""
+        lowered = stripped.lower()
+        if lowered in {"true", "false"}:
+            return lowered == "true"
+        numeric_text = stripped.replace(",", "")
+        try:
+            number = float(numeric_text)
+        except ValueError:
+            return stripped
+        return int(number) if number.is_integer() else round(number, 10)
+    return value
+
+
+def _normalized_records(rows, columns: list[str]) -> list[tuple]:
+    frame = frame_from_rows(rows, columns)
+    return [
+        tuple(_normalize_state_compare_value(record.get(column)) for column in columns)
+        for record in frame.to_dict("records")
+    ]
+
+
+def _config_has_unapplied_changes(current_config: dict, base_config: dict) -> bool:
+    keys = set(base_config) | set(current_config)
+    return any(
+        _normalize_state_compare_value(current_config.get(key)) != _normalize_state_compare_value(base_config.get(key))
+        for key in keys
+    )
+
+
+def _table_has_unapplied_changes(rows, base_frame) -> bool:
+    columns = list(base_frame.columns)
+    return _normalized_records(rows, columns) != _normalized_records(base_frame.to_dict("records"), columns)
+
+
+def _has_unapplied_workbench_changes(
+    active,
+    *,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    price_kwp_rows,
+    price_kwp_others_rows,
+    demand_profile_rows,
+    demand_profile_general_rows,
+    demand_profile_weights_rows,
+) -> bool:
+    if active is None or not assumption_input_ids:
+        return False
+
+    bundle = active.config_bundle
+    raw_rows = [
+        inverter_rows,
+        battery_rows,
+        month_profile_rows,
+        sun_profile_rows,
+        price_kwp_rows,
+        price_kwp_others_rows,
+        demand_profile_rows,
+        demand_profile_general_rows,
+        demand_profile_weights_rows,
+    ]
+    base_frames = [
+        bundle.inverter_catalog,
+        bundle.battery_catalog,
+        bundle.month_profile_table,
+        bundle.sun_profile_table,
+        bundle.cop_kwp_table,
+        bundle.cop_kwp_table_others,
+        bundle.demand_profile_table,
+        bundle.demand_profile_general_table,
+        bundle.demand_profile_weights_table,
+    ]
+    if all(rows in (None, []) for rows in raw_rows) and any(not frame.empty for frame in base_frames):
+        return False
+
+    current_config = collect_config_updates(assumption_input_ids, assumption_values, bundle.config)
+    if _config_has_unapplied_changes(current_config, bundle.config):
+        return True
+
+    return any(
+        _table_has_unapplied_changes(rows, base_frame)
+        for rows, base_frame in zip(raw_rows, base_frames)
+    )
+
+
+def _workbench_state_chip(label: str, tone: str) -> html.Span:
+    return html.Span(label, className=f"workbench-state-chip workbench-state-chip-{tone}")
+
+
+def _workbench_state_strip_children(state, active, *, lang: str, has_unapplied_changes: bool) -> list[html.Span]:
+    if active is None:
+        return [_workbench_state_chip(tr("workbench.state.no_active", lang), "neutral")]
+
+    project_saved = _project_is_bound(state) and not state.project_dirty and not has_unapplied_changes
+    scan_current = not active.dirty and not has_unapplied_changes
+    return [
+        _workbench_state_chip(
+            tr("workbench.state.pending_apply", lang) if has_unapplied_changes else tr("workbench.state.applied", lang),
+            "warning" if has_unapplied_changes else "neutral",
+        ),
+        _workbench_state_chip(
+            tr("workbench.state.project_saved", lang) if project_saved else tr("workbench.state.project_unsaved", lang),
+            "success" if project_saved else "warning",
+        ),
+        _workbench_state_chip(
+            tr("workbench.state.ready_to_run", lang) if scan_current else tr("workbench.state.scan_outdated", lang),
+            "info" if scan_current else "warning",
+        ),
+    ]
+
+
 layout = html.Div(
     className="page",
     children=[
@@ -372,6 +501,16 @@ layout = html.Div(
                                                 html.Div(tr("workbench.run_pending", "es"), id="active-run-status", className="status-line active-summary-meta"),
                                                 html.Div(tr("workbench.run_running", "es"), id="active-run-progress", className="status-line active-summary-meta", style={"display": "none"}),
                                                 html.P(tr("workbench.scan_guidance", "es"), id="active-scan-guidance", className="active-summary-copy"),
+                                                html.Div(
+                                                    id="workbench-state-strip",
+                                                    className="workbench-state-strip",
+                                                    children=[
+                                                        html.Span(
+                                                            tr("workbench.state.no_active", "es"),
+                                                            className="workbench-state-chip workbench-state-chip-neutral",
+                                                        )
+                                                    ],
+                                                ),
                                             ],
                                         ),
                                         html.Div(
@@ -693,6 +832,57 @@ def populate_assumptions(session_payload, show_all_values, language_value):
         empty_message=tr("workbench.assumptions.none", lang),
         advanced_label=tr("workbench.assumptions.advanced", lang),
     )
+
+
+@callback(
+    Output("workbench-state-strip", "children"),
+    Input("scenario-session-store", "data"),
+    Input({"type": "assumption-input", "field": ALL}, "id"),
+    Input({"type": "assumption-input", "field": ALL}, "value"),
+    Input("inverter-table-editor", "data"),
+    Input("battery-table-editor", "data"),
+    Input("month-profile-editor", "data"),
+    Input("sun-profile-editor", "data"),
+    Input("price-kwp-editor", "data"),
+    Input("price-kwp-others-editor", "data"),
+    Input("demand-profile-editor", "data"),
+    Input("demand-profile-general-editor", "data"),
+    Input("demand-profile-weights-editor", "data"),
+    Input("language-selector", "value"),
+)
+def sync_workbench_state_strip(
+    session_payload,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    price_kwp_rows,
+    price_kwp_others_rows,
+    demand_profile_rows,
+    demand_profile_general_rows,
+    demand_profile_weights_rows,
+    language_value,
+):
+    lang = _lang(language_value)
+    _, state = _session(session_payload, lang)
+    active = state.get_scenario()
+    has_unapplied_changes = _has_unapplied_workbench_changes(
+        active,
+        assumption_input_ids=assumption_input_ids,
+        assumption_values=assumption_values,
+        inverter_rows=inverter_rows,
+        battery_rows=battery_rows,
+        month_profile_rows=month_profile_rows,
+        sun_profile_rows=sun_profile_rows,
+        price_kwp_rows=price_kwp_rows,
+        price_kwp_others_rows=price_kwp_others_rows,
+        demand_profile_rows=demand_profile_rows,
+        demand_profile_general_rows=demand_profile_general_rows,
+        demand_profile_weights_rows=demand_profile_weights_rows,
+    )
+    return _workbench_state_strip_children(state, active, lang=lang, has_unapplied_changes=has_unapplied_changes)
 
 
 @callback(

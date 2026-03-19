@@ -279,6 +279,51 @@ body {
     margin-bottom: 0;
 }
 
+.workbench-state-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.7rem;
+}
+
+.workbench-state-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
+    padding: 0.35rem 0.8rem;
+    border-radius: 999px;
+    border: 1px solid rgba(203, 213, 225, 0.85);
+    background: rgba(248, 250, 252, 0.96);
+    color: #334155;
+    font-size: 0.86rem;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.workbench-state-chip-neutral {
+    border-color: rgba(203, 213, 225, 0.9);
+    background: rgba(248, 250, 252, 0.98);
+    color: #334155;
+}
+
+.workbench-state-chip-info {
+    border-color: rgba(147, 197, 253, 0.95);
+    background: rgba(239, 246, 255, 0.95);
+    color: #1d4ed8;
+}
+
+.workbench-state-chip-success {
+    border-color: rgba(167, 243, 208, 0.95);
+    background: rgba(236, 253, 245, 0.97);
+    color: #047857;
+}
+
+.workbench-state-chip-warning {
+    border-color: rgba(253, 230, 138, 0.95);
+    background: rgba(255, 251, 235, 0.97);
+    color: #b45309;
+}
+
 .validation-box {
     background: rgba(255, 255, 255, 0.85);
     border-radius: 14px;

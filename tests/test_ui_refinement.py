@@ -718,11 +718,14 @@ def test_active_summary_uses_copy_and_meta_classes_for_hierarchy() -> None:
     source_status = _find_component(workbench_page.layout, "active-source-status")
     run_status = _find_component(workbench_page.layout, "active-run-status")
     run_button = _find_component(workbench_page.layout, "run-active-scan-btn")
+    state_strip = _find_component(workbench_page.layout, "workbench-state-strip")
 
     assert "active-summary-copy" in guidance.className
     assert "active-summary-meta" in source_status.className
     assert "active-summary-meta" in run_status.className
     assert run_button is not None
+    assert state_strip is not None
+    assert "workbench-state-strip" in state_strip.className
 
 
 def test_active_summary_uses_two_column_layout_with_dedicated_content_and_action_areas() -> None:
@@ -734,7 +737,70 @@ def test_active_summary_uses_two_column_layout_with_dedicated_content_and_action
     assert content is not None
     assert actions is not None
     assert _find_component(content, "active-scan-guidance") is not None
+    assert _find_component(content, "workbench-state-strip") is not None
     assert _find_component(actions, "run-active-scan-btn") is not None
+
+
+def test_workbench_state_strip_reflects_saved_clean_scenario() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    state = save_project(state, project_name="Demo", language="en")
+    active = state.get_scenario()
+    payload = _session_payload(state, lang="en")
+
+    chips = workbench_page.sync_workbench_state_strip(
+        payload,
+        [],
+        [],
+        active.config_bundle.inverter_catalog.to_dict("records"),
+        active.config_bundle.battery_catalog.to_dict("records"),
+        active.config_bundle.month_profile_table.to_dict("records"),
+        active.config_bundle.sun_profile_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table_others.to_dict("records"),
+        active.config_bundle.demand_profile_table.to_dict("records"),
+        active.config_bundle.demand_profile_general_table.to_dict("records"),
+        active.config_bundle.demand_profile_weights_table.to_dict("records"),
+        "en",
+    )
+
+    assert [chip.children for chip in chips] == [
+        tr("workbench.state.applied", "en"),
+        tr("workbench.state.project_saved", "en"),
+        tr("workbench.state.ready_to_run", "en"),
+    ]
+    assert chips[1].className.endswith("workbench-state-chip-success")
+
+
+def test_workbench_state_strip_reflects_pending_unsaved_and_outdated_state() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    state = save_project(state, project_name="Demo", language="es")
+    active = state.get_scenario()
+    payload = _session_payload(state, lang="es")
+
+    chips = workbench_page.sync_workbench_state_strip(
+        payload,
+        [{"type": "assumption-input", "field": "E_month_kWh"}],
+        [float(active.config_bundle.config["E_month_kWh"]) + 25.0],
+        active.config_bundle.inverter_catalog.to_dict("records"),
+        active.config_bundle.battery_catalog.to_dict("records"),
+        active.config_bundle.month_profile_table.to_dict("records"),
+        active.config_bundle.sun_profile_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table_others.to_dict("records"),
+        active.config_bundle.demand_profile_table.to_dict("records"),
+        active.config_bundle.demand_profile_general_table.to_dict("records"),
+        active.config_bundle.demand_profile_weights_table.to_dict("records"),
+        "es",
+    )
+
+    assert [chip.children for chip in chips] == [
+        tr("workbench.state.pending_apply", "es"),
+        tr("workbench.state.project_unsaved", "es"),
+        tr("workbench.state.scan_outdated", "es"),
+    ]
+    assert all("workbench-state-chip-warning" in chip.className for chip in chips)
 
 
 def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
@@ -758,6 +824,8 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".profile-table-activator" in css_source
     assert ".profile-chart-panel" in css_source
     assert ".profile-table-card-active" in css_source
+    assert ".workbench-state-strip" in css_source
+    assert ".workbench-state-chip" in css_source
 
 
 def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:

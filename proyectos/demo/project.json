@@ -2,21 +2,21 @@
   "format_version": 1,
   "name": "Demo",
   "slug": "demo",
-  "active_scenario_id": "scenario-12e13806",
+  "active_scenario_id": "scenario-545dab5f",
   "comparison_scenario_ids": [],
   "design_comparison_candidate_keys": {},
   "scenarios": [
     {
-      "scenario_id": "scenario-12e13806",
+      "scenario_id": "scenario-545dab5f",
       "name": "Base",
       "source_name": "PV_inputs.xlsx",
-      "selected_candidate_key": null,
-      "dirty": true,
-      "last_run_at": null,
-      "scan_fingerprint": null
+      "selected_candidate_key": "15.600::BAT-32",
+      "dirty": false,
+      "last_run_at": "2026-03-19T18:55:50",
+      "scan_fingerprint": "8ef1baa947d99a6ee9062ea34621c10efbf1856af3a22ec0019afcb2e3fb6a8b"
     }
   ],
   "ui_prefs": {
-    "language": "en"
+    "language": "es"
   }
 }
