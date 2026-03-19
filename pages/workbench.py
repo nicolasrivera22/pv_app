@@ -390,14 +390,12 @@ layout = html.Div(
     Output("open-project-btn", "children"),
     Output("scenario-upload-prefix", "children"),
     Output("scenario-upload-link", "children"),
-    Output("load-example-btn", "children"),
     Output("new-scenario-btn", "children"),
     Output("duplicate-scenario-btn", "children"),
     Output("delete-scenario-btn", "children"),
     Output("active-scenario-label", "children"),
-    Output("scenario-dropdown", "placeholder"),
-    Output("set-active-scenario-btn", "children"),
     Output("rename-scenario-input", "placeholder"),
+    Output("rename-scenario-note", "children"),
     Output("rename-scenario-btn", "children"),
     Output("active-scenario-panel-title", "children"),
     Output("run-active-scan-btn", "children"),
@@ -457,14 +455,12 @@ def translate_workbench_page(language_value):
         tr("workbench.project.open", lang),
         tr("workbench.upload.prefix", lang),
         tr("workbench.upload.link", lang),
-        tr("workbench.load_example", lang),
         tr("workbench.new_scenario", lang),
         tr("workbench.duplicate", lang),
         tr("workbench.delete", lang),
         tr("workbench.active_scenario", lang),
-        tr("workbench.no_scenarios_loaded", lang),
-        tr("workbench.set_active", lang),
         tr("workbench.rename_placeholder", lang),
+        tr("workbench.rename_active_note", lang),
         tr("workbench.rename", lang),
         tr("workbench.section.active", lang),
         tr("workbench.run_scan", lang),
@@ -557,8 +553,6 @@ def sync_run_scan_choice_dialog(dialog_state, project_name_value, language_value
     Output("project-dropdown", "value"),
     Output("project-name-input", "value"),
     Output("project-status", "children"),
-    Output("scenario-dropdown", "options"),
-    Output("scenario-dropdown", "value"),
     Output("rename-scenario-input", "value"),
     Output("scenario-overview-list", "children"),
     Output("active-source-status", "children"),
@@ -579,7 +573,6 @@ def populate_scenario_shell(session_payload, language_value):
         if state.project_slug
         else tr("workbench.project.unbound", lang)
     )
-    options = [{"label": scenario.name, "value": scenario.scenario_id} for scenario in state.scenarios]
     active = state.get_scenario()
     pills = []
     for scenario in state.scenarios:
@@ -588,8 +581,11 @@ def populate_scenario_shell(session_payload, language_value):
         if lang == "en":
             status = "not run yet" if scenario.dirty and scenario.scan_result is None else ("rerun required" if scenario.dirty else "ready")
         pills.append(
-            html.Div(
+            html.Button(
+                id={"type": "scenario-pill", "scenario_id": scenario.scenario_id},
                 className=css,
+                n_clicks=0,
+                type="button",
                 children=[
                     html.Div(scenario.name),
                     html.Div(f"{scenario.source_name} · {status}", className="scenario-meta"),
@@ -603,8 +599,6 @@ def populate_scenario_shell(session_payload, language_value):
             state.project_slug,
             state.project_name or "",
             project_status,
-            options,
-            None,
             "",
             pills,
             tr("workbench.no_active_scenario", lang),
@@ -627,8 +621,6 @@ def populate_scenario_shell(session_payload, language_value):
         state.project_slug,
         state.project_name or "",
         project_status,
-        options,
-        active.scenario_id,
         active.name,
         pills,
         tr("workbench.source_status", lang, value=active.source_name),
@@ -1099,20 +1091,18 @@ def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
     Output("workbench-status", "children"),
     Output("run-scan-choice-state", "data"),
     Input("scenario-upload", "contents"),
-    Input("load-example-btn", "n_clicks"),
     Input("new-scenario-btn", "n_clicks"),
     Input("duplicate-scenario-btn", "n_clicks"),
     Input("rename-scenario-btn", "n_clicks"),
     Input("delete-scenario-btn", "n_clicks"),
+    Input({"type": "scenario-pill", "scenario_id": ALL}, "n_clicks"),
     Input("apply-edits-btn", "n_clicks"),
     Input("run-active-scan-btn", "n_clicks"),
-    Input("set-active-scenario-btn", "n_clicks"),
     Input("save-project-btn", "n_clicks"),
     Input("save-project-as-btn", "n_clicks"),
     Input("open-project-btn", "n_clicks"),
     State("scenario-upload", "filename"),
     State("rename-scenario-input", "value"),
-    State("scenario-dropdown", "value"),
     State("project-name-input", "value"),
     State("project-dropdown", "value"),
     State("scenario-session-store", "data"),
@@ -1136,20 +1126,18 @@ def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
 )
 def mutate_session_state(
     upload_contents,
-    _example_clicks,
     _new_scenario_clicks,
     _duplicate_clicks,
     _rename_clicks,
     _delete_clicks,
+    _scenario_pill_clicks,
     _apply_clicks,
     _run_clicks,
-    _set_active_clicks,
     _save_project_clicks,
     _save_project_as_clicks,
     _open_project_clicks,
     upload_filename,
     rename_value,
-    scenario_dropdown_value,
     project_name_value,
     project_dropdown_value,
     session_payload,
@@ -1183,14 +1171,6 @@ def mutate_session_state(
             client_state = commit_client_session(client_state, state)
             return client_state.to_payload(), tr("workbench.loaded_workbook", lang, name=record.name), closed_dialog
 
-        if trigger == "load-example-btn":
-            bundle = load_example_config()
-            name = default_scenario_name(state, prefix="Escenario" if lang == "es" else "Scenario")
-            record = create_scenario_record(name, bundle, source_name=bundle.source_name)
-            state = add_scenario(state, record, make_active=True)
-            client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.loaded_example", lang, name=record.name), closed_dialog
-
         if trigger == "new-scenario-btn":
             bundle = load_example_config()
             name = default_scenario_name(state, prefix="Escenario" if lang == "es" else "Scenario")
@@ -1210,7 +1190,7 @@ def mutate_session_state(
                 closed_dialog,
             )
 
-        if trigger in {"save-project-btn", "save-project-as-btn"}:
+        if isinstance(trigger, str) and trigger in {"save-project-btn", "save-project-as-btn"}:
             resolved_name = (project_name_value or state.project_name or "").strip()
             if not resolved_name:
                 raise ValueError(tr("workbench.project.name_required", lang))
@@ -1244,10 +1224,11 @@ def mutate_session_state(
             client_state = commit_client_session(client_state, state)
             return client_state.to_payload(), tr("workbench.deleted", lang), closed_dialog
 
-        if trigger == "set-active-scenario-btn":
-            if scenario_dropdown_value == state.active_scenario_id:
+        if isinstance(trigger, dict) and trigger.get("type") == "scenario-pill":
+            selected_scenario_id = str(trigger.get("scenario_id", "")).strip()
+            if not selected_scenario_id or selected_scenario_id == state.active_scenario_id:
                 raise PreventUpdate
-            state = set_active_scenario(state, scenario_dropdown_value)
+            state = set_active_scenario(state, selected_scenario_id)
             selected = state.get_scenario()
             client_state = commit_client_session(client_state, state)
             return (

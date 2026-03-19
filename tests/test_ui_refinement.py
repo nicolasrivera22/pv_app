@@ -156,14 +156,17 @@ def test_help_page_renders_real_product_help_content() -> None:
 
 def test_first_render_placeholders_are_spanish_first() -> None:
     sidebar = scenario_sidebar()
-    scenario_dropdown = _find_component(sidebar, "scenario-dropdown")
     rename_input = _find_component(sidebar, "rename-scenario-input")
+    rename_note = _find_component(sidebar, "rename-scenario-note")
     risk_controls = risk_controls_section()
     risk_scenario_dropdown = _find_component(risk_controls, "risk-scenario-dropdown")
     risk_candidate_dropdown = _find_component(risk_controls, "risk-candidate-dropdown")
 
-    assert scenario_dropdown.placeholder == "No hay escenarios cargados"
+    assert _find_component(sidebar, "load-example-btn") is None
+    assert _find_component(sidebar, "scenario-dropdown") is None
+    assert _find_component(sidebar, "set-active-scenario-btn") is None
     assert rename_input.placeholder == "Nombre del escenario"
+    assert rename_note.children == tr("workbench.rename_active_note", "es")
     assert risk_scenario_dropdown.placeholder == "Selecciona un escenario completado"
     assert risk_candidate_dropdown.placeholder == "Selecciona un diseño factible"
 
@@ -815,20 +818,18 @@ def test_apply_button_auto_saves_bound_project_after_rebuild(monkeypatch) -> Non
 
     _, status, dialog = workbench_page.mutate_session_state(
         upload_contents=None,
-        _example_clicks=0,
         _new_scenario_clicks=0,
         _duplicate_clicks=0,
         _rename_clicks=0,
         _delete_clicks=0,
+        _scenario_pill_clicks=[],
         _apply_clicks=1,
         _run_clicks=0,
-        _set_active_clicks=0,
         _save_project_clicks=0,
         _save_project_as_clicks=0,
         _open_project_clicks=0,
         upload_filename=None,
         rename_value=None,
-        scenario_dropdown_value=state.active_scenario_id,
         project_name_value="Demo",
         project_dropdown_value=None,
         session_payload=payload,
@@ -864,20 +865,18 @@ def test_run_scan_applies_then_prompts_when_project_is_unbound(monkeypatch) -> N
 
     _, status, dialog = workbench_page.mutate_session_state(
         upload_contents=None,
-        _example_clicks=0,
         _new_scenario_clicks=0,
         _duplicate_clicks=0,
         _rename_clicks=0,
         _delete_clicks=0,
+        _scenario_pill_clicks=[],
         _apply_clicks=0,
         _run_clicks=1,
-        _set_active_clicks=0,
         _save_project_clicks=0,
         _save_project_as_clicks=0,
         _open_project_clicks=0,
         upload_filename=None,
         rename_value=None,
-        scenario_dropdown_value=state.active_scenario_id,
         project_name_value="",
         project_dropdown_value=None,
         session_payload=payload,
@@ -914,20 +913,18 @@ def test_run_scan_applies_saves_and_runs_for_bound_project(monkeypatch) -> None:
 
     _, status, dialog = workbench_page.mutate_session_state(
         upload_contents=None,
-        _example_clicks=0,
         _new_scenario_clicks=0,
         _duplicate_clicks=0,
         _rename_clicks=0,
         _delete_clicks=0,
+        _scenario_pill_clicks=[],
         _apply_clicks=0,
         _run_clicks=1,
-        _set_active_clicks=0,
         _save_project_clicks=0,
         _save_project_as_clicks=0,
         _open_project_clicks=0,
         upload_filename=None,
         rename_value=None,
-        scenario_dropdown_value=state.active_scenario_id,
         project_name_value="Demo",
         project_dropdown_value=None,
         session_payload=payload,
@@ -949,6 +946,57 @@ def test_run_scan_applies_saves_and_runs_for_bound_project(monkeypatch) -> None:
     assert "Current edits applied." in status
     assert "Project saved." in status
     assert "Deterministic scan completed for 'Base'." in status
+    assert dialog == {"open": False}
+
+
+def test_clicking_a_scenario_pill_sets_it_active_immediately(monkeypatch) -> None:
+    base_state = ScenarioSessionState.empty()
+    first = create_scenario_record("Base", _fast_bundle())
+    second = create_scenario_record("Alt", _fast_bundle())
+    state = add_scenario(base_state, first, make_active=True)
+    state = add_scenario(state, second, make_active=False)
+    payload = _session_payload(state, lang="en")
+
+    monkeypatch.setattr(
+        workbench_page,
+        "ctx",
+        SimpleNamespace(triggered_id={"type": "scenario-pill", "scenario_id": second.scenario_id}),
+    )
+
+    next_payload, status, dialog = workbench_page.mutate_session_state(
+        upload_contents=None,
+        _new_scenario_clicks=0,
+        _duplicate_clicks=0,
+        _rename_clicks=0,
+        _delete_clicks=0,
+        _scenario_pill_clicks=[0, 1],
+        _apply_clicks=0,
+        _run_clicks=0,
+        _save_project_clicks=0,
+        _save_project_as_clicks=0,
+        _open_project_clicks=0,
+        upload_filename=None,
+        rename_value=None,
+        project_name_value="",
+        project_dropdown_value=None,
+        session_payload=payload,
+        assumption_input_ids=[],
+        assumption_values=[],
+        inverter_rows=[],
+        battery_rows=[],
+        month_profile_rows=[],
+        sun_profile_rows=[],
+        price_kwp_rows=[],
+        price_kwp_others_rows=[],
+        demand_profile_rows=[],
+        demand_profile_general_rows=[],
+        demand_profile_weights_rows=[],
+        language_value="en",
+    )
+    _, next_state = workbench_page._session(next_payload, "en")
+
+    assert next_state.active_scenario_id == second.scenario_id
+    assert "Active scenario set to 'Alt'." in status
     assert dialog == {"open": False}
 
 

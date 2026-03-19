@@ -436,11 +436,29 @@ body {
     padding: 0.75rem 0.9rem;
     background: #f8fafc;
     border: 1px solid #dbeafe;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 .scenario-pill.active {
     border-color: #0f766e;
     background: #ecfeff;
+    box-shadow: 0 10px 24px rgba(15, 118, 110, 0.08);
+}
+
+.scenario-pill:hover {
+    border-color: #93c5fd;
+    background: #eff6ff;
+}
+
+.sidebar-note {
+    margin-top: 0.25rem;
+    color: #475569;
+    font-size: 0.88rem;
 }
 
 .scenario-meta {

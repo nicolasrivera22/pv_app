@@ -104,23 +104,16 @@ def scenario_sidebar() -> html.Div:
                         className="controls",
                         children=[
                             html.Button(tr("workbench.new_scenario", "es"), id="new-scenario-btn", n_clicks=0, className="action-btn"),
-                            html.Button(tr("workbench.load_example", "es"), id="load-example-btn", n_clicks=0, className="action-btn secondary"),
                             html.Button(tr("workbench.duplicate", "es"), id="duplicate-scenario-btn", n_clicks=0, className="action-btn tertiary"),
                             html.Button(tr("workbench.delete", "es"), id="delete-scenario-btn", n_clicks=0, className="action-btn tertiary"),
                         ],
                     ),
-                    html.Div(
-                        className="rename-row",
-                        children=[
-                            dcc.Dropdown(id="scenario-dropdown", placeholder=tr("workbench.no_scenarios_loaded", "es")),
-                            html.Button(tr("workbench.set_active", "es"), id="set-active-scenario-btn", n_clicks=0, className="action-btn tertiary"),
-                        ],
-                    ),
+                    html.Div(id="scenario-overview-list", className="scenario-list"),
+                    html.Div(tr("workbench.rename_active_note", "es"), id="rename-scenario-note", className="status-line sidebar-note"),
                     html.Div(className="rename-row", children=[
                         dcc.Input(id="rename-scenario-input", type="text", placeholder=tr("workbench.rename_placeholder", "es"), className="text-input"),
                         html.Button(tr("workbench.rename", "es"), id="rename-scenario-btn", n_clicks=0, className="action-btn tertiary"),
                     ]),
-                    html.Div(id="scenario-overview-list", className="scenario-list"),
                     html.Div(tr("workbench.run_pending", "es"), id="workbench-status", className="status-line"),
                 ],
             ),
