@@ -147,6 +147,7 @@ from .ui_schema import (
 from .validation import (
     normalize_battery_catalog_rows,
     normalize_inverter_catalog_rows,
+    normalize_price_table_rows,
     refresh_bundle_issues,
     validate_config,
 )
@@ -250,6 +251,7 @@ __all__ = [
     "open_project",
     "normalize_battery_catalog_rows",
     "normalize_inverter_catalog_rows",
+    "normalize_price_table_rows",
     "pages_dir",
     "publish_export_artifacts",
     "project_exports_root",

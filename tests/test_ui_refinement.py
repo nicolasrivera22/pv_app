@@ -36,6 +36,7 @@ from services import (
     legacy_risk_export_manifest,
     load_config_from_excel,
     load_example_config,
+    normalize_price_table_rows,
     rebuild_bundle_from_ui,
     run_monte_carlo,
     run_scan,
@@ -197,6 +198,11 @@ def test_translation_helper_prefers_spanish_fallback_for_workbench_labels() -> N
     assert tr("nav.compare", "fr") == "Comparar"
     assert tr("risk.placeholder.scenario", "fr") == "Selecciona un escenario completado"
     assert tr("risk.chart.payback_hist.description", "fr").startswith("Muestra con qué frecuencia")
+    assert tr("workbench.profiles.price_others", "es") == "Otros precios variables"
+    assert tr("workbench.profiles.price_others", "en") == "Other variable prices"
+    assert tr("workbench.profiles.add_row", "es") == "Añadir fila"
+    assert "redistribuye la demanda anual" in tr("workbench.profiles.tooltip.month", "es")
+    assert "redistributes annual demand" in tr("workbench.profiles.tooltip.month", "en")
 
 
 def test_extract_config_metadata_preserves_workbook_order_and_groups() -> None:
@@ -305,6 +311,35 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
     assert profile_table.tooltip_duration is None
     assert catalog_table.tooltip_delay == 0
     assert catalog_table.tooltip_duration is None
+
+
+def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_controls() -> None:
+    section = profile_editor_section()
+    main_grid = _find_component(section, "profile-main-grid")
+    secondary_grid = _find_component(section, "profile-secondary-grid")
+
+    assert main_grid is not None
+    assert secondary_grid is not None
+    assert len(main_grid.children) == 3
+    assert len(secondary_grid.children) == 4
+    assert _find_component(main_grid.children[0], "month-profile-title").children == tr("workbench.profiles.month", "es")
+    assert _find_component(main_grid.children[1], "sun-profile-title").children == tr("workbench.profiles.sun", "es")
+    assert _find_component(main_grid.children[2], "demand-profile-weights-title").children == tr("workbench.profiles.demand_weights", "es")
+    assert "profile-main-panel-wide" in str(main_grid.children[2].className)
+    assert _find_component(section, "month-profile-editor").page_size == 12
+    assert _find_component(section, "sun-profile-editor").page_size == 12
+    assert _find_component(section, "demand-profile-weights-editor").page_size == 12
+    assert _find_component(section, "price-kwp-editor").page_size == 8
+    assert _find_component(section, "price-kwp-others-editor").page_size == 8
+    assert _find_component(section, "month-profile-tooltip").children == tr("workbench.profiles.tooltip.month", "es")
+    assert _find_component(section, "sun-profile-tooltip").children == tr("workbench.profiles.tooltip.sun", "es")
+    assert _find_component(section, "price-kwp-tooltip").children == tr("workbench.profiles.tooltip.price", "es")
+    assert _find_component(section, "price-kwp-others-tooltip").children == tr("workbench.profiles.tooltip.price_others", "es")
+    assert _find_component(section, "demand-profile-tooltip").children == tr("workbench.profiles.tooltip.demand_weekday", "es")
+    assert _find_component(section, "demand-profile-general-tooltip").children == tr("workbench.profiles.tooltip.demand_general", "es")
+    assert _find_component(section, "demand-profile-weights-tooltip").children == tr("workbench.profiles.tooltip.demand_weights", "es")
+    assert _find_component(section, "add-price-kwp-row-btn").children == tr("workbench.profiles.add_row", "es")
+    assert _find_component(section, "add-price-kwp-others-row-btn").children == tr("workbench.profiles.add_row", "es")
 
 
 def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
@@ -476,6 +511,10 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert "grid-template-columns: minmax(0, 1fr) auto;" in css_source
     assert ".active-summary-top" in css_source
     assert ".active-summary-actions" in css_source
+    assert ".profile-main-grid" in css_source
+    assert "minmax(0, 1.35fr)" in css_source
+    assert ".profile-secondary-grid" in css_source
+    assert ".profile-inline-btn" in css_source
 
 
 def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
@@ -502,6 +541,72 @@ def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
 
     assert float(rebuilt.month_profile_table.loc[0, "Demand_month"]) == 1.15
     assert float(rebuilt.demand_month_factor[0]) == 1.15
+
+
+def test_profile_pricing_add_row_callbacks_use_current_column_ids() -> None:
+    columns = [{"id": "MIN"}, {"id": "MAX"}, {"id": "PRECIO_POR_KWP"}]
+    rows = [{"MIN": 1.0, "MAX": 5.0, "PRECIO_POR_KWP": 5_500_000}]
+
+    price_rows = workbench_page.add_price_kwp_row(1, rows, columns)
+    other_rows = workbench_page.add_price_kwp_others_row(1, rows, columns)
+
+    assert price_rows[-1] == {"MIN": "", "MAX": "", "PRECIO_POR_KWP": ""}
+    assert other_rows[-1] == {"MIN": "", "MAX": "", "PRECIO_POR_KWP": ""}
+
+
+def test_price_table_normalizer_ignores_fully_blank_draft_rows_and_preserves_bundle_shape() -> None:
+    bundle = _fast_bundle()
+    rows = [*bundle.cop_kwp_table.to_dict("records"), {"MIN": "", "MAX": "", "PRECIO_POR_KWP": ""}]
+
+    normalized, issues = normalize_price_table_rows(rows, "Precios_kWp_relativos")
+    rebuilt = rebuild_bundle_from_ui(
+        bundle,
+        config_updates=dict(bundle.config),
+        inverter_catalog=bundle.inverter_catalog,
+        battery_catalog=bundle.battery_catalog,
+        demand_profile=bundle.demand_profile_table,
+        demand_profile_weights=bundle.demand_profile_weights_table,
+        demand_profile_general=bundle.demand_profile_general_table,
+        month_profile=bundle.month_profile_table,
+        sun_profile=bundle.sun_profile_table,
+        cop_kwp_table=frame_from_rows(normalized.to_dict("records"), list(bundle.cop_kwp_table.columns)),
+        cop_kwp_table_others=bundle.cop_kwp_table_others,
+    )
+
+    assert not issues
+    assert len(normalized) == len(bundle.cop_kwp_table)
+    assert list(rebuilt.cop_kwp_table.columns) == list(bundle.cop_kwp_table.columns)
+    assert len(rebuilt.cop_kwp_table) == len(bundle.cop_kwp_table)
+
+
+def test_price_table_normalizer_reports_partial_and_non_numeric_rows_without_crashing_rebuild() -> None:
+    bundle = _fast_bundle()
+    draft_row_number = len(bundle.cop_kwp_table) + 1
+    rows = [
+        *bundle.cop_kwp_table.to_dict("records"),
+        {"MIN": "10", "MAX": "", "PRECIO_POR_KWP": "oops"},
+    ]
+
+    normalized, issues = normalize_price_table_rows(rows, "Precios_kWp_relativos")
+    rebuilt = rebuild_bundle_from_ui(
+        bundle,
+        config_updates=dict(bundle.config),
+        inverter_catalog=bundle.inverter_catalog,
+        battery_catalog=bundle.battery_catalog,
+        demand_profile=bundle.demand_profile_table,
+        demand_profile_weights=bundle.demand_profile_weights_table,
+        demand_profile_general=bundle.demand_profile_general_table,
+        month_profile=bundle.month_profile_table,
+        sun_profile=bundle.sun_profile_table,
+        cop_kwp_table=frame_from_rows(normalized.to_dict("records"), list(bundle.cop_kwp_table.columns)),
+        cop_kwp_table_others=bundle.cop_kwp_table_others,
+    )
+
+    messages = {issue.message for issue in issues}
+    assert f"Fila {draft_row_number}: el campo 'MAX' es obligatorio." in messages
+    assert f"Fila {draft_row_number}: 'PRECIO_POR_KWP' debe ser numérico." in messages
+    assert len(normalized) == len(bundle.cop_kwp_table) + 1
+    assert rebuilt.cop_kwp_table.shape[1] == bundle.cop_kwp_table.shape[1]
 
 
 def test_npv_chart_adds_top_axis_for_panel_count() -> None:

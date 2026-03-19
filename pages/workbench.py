@@ -44,6 +44,7 @@ from services import (
     list_projects,
     normalize_battery_catalog_rows,
     normalize_inverter_catalog_rows,
+    normalize_price_table_rows,
     open_export_folder,
     open_project,
     publish_export_artifacts,
@@ -118,6 +119,17 @@ def _scenario_name_from_filename(filename: str | None, fallback: str) -> str:
 
 def _project_options():
     return [{"label": manifest.name, "value": manifest.slug} for manifest in list_projects()]
+
+
+def _blank_table_row(table_columns, table_rows=None) -> dict[str, str]:
+    column_ids = [
+        str(column.get("id", "")).strip()
+        for column in (table_columns or [])
+        if str(column.get("id", "")).strip()
+    ]
+    if not column_ids and table_rows:
+        column_ids = [str(column).strip() for column in table_rows[0].keys() if str(column).strip()]
+    return {column_id: "" for column_id in column_ids}
 
 
 def _candidate_table_styles(selected_key: str, best_key: str) -> list[dict]:
@@ -262,12 +274,21 @@ layout = html.Div(
     Output("profile-editor-title", "children"),
     Output("profile-editor-note", "children"),
     Output("month-profile-title", "children"),
+    Output("month-profile-tooltip", "children"),
     Output("sun-profile-title", "children"),
+    Output("sun-profile-tooltip", "children"),
     Output("price-kwp-title", "children"),
+    Output("price-kwp-tooltip", "children"),
     Output("price-kwp-others-title", "children"),
+    Output("price-kwp-others-tooltip", "children"),
     Output("demand-profile-title", "children"),
+    Output("demand-profile-tooltip", "children"),
     Output("demand-profile-general-title", "children"),
+    Output("demand-profile-general-tooltip", "children"),
     Output("demand-profile-weights-title", "children"),
+    Output("demand-profile-weights-tooltip", "children"),
+    Output("add-price-kwp-row-btn", "children"),
+    Output("add-price-kwp-others-row-btn", "children"),
     Output("catalog-editor-title", "children"),
     Output("inverter-editor-title", "children"),
     Output("battery-editor-title", "children"),
@@ -319,12 +340,21 @@ def translate_workbench_page(language_value):
         tr("workbench.profiles", lang),
         tr("workbench.profiles.note", lang),
         tr("workbench.profiles.month", lang),
+        tr("workbench.profiles.tooltip.month", lang),
         tr("workbench.profiles.sun", lang),
+        tr("workbench.profiles.tooltip.sun", lang),
         tr("workbench.profiles.price", lang),
+        tr("workbench.profiles.tooltip.price", lang),
         tr("workbench.profiles.price_others", lang),
+        tr("workbench.profiles.tooltip.price_others", lang),
         tr("workbench.profiles.demand_weekday", lang),
+        tr("workbench.profiles.tooltip.demand_weekday", lang),
         tr("workbench.profiles.demand_general", lang),
+        tr("workbench.profiles.tooltip.demand_general", lang),
         tr("workbench.profiles.demand_weights", lang),
+        tr("workbench.profiles.tooltip.demand_weights", lang),
+        tr("workbench.profiles.add_row", lang),
+        tr("workbench.profiles.add_row", lang),
         tr("workbench.catalogs", lang),
         tr("workbench.catalogs.inverters", lang),
         tr("workbench.catalogs.batteries", lang),
@@ -602,6 +632,42 @@ def add_battery_row(n_clicks, table_rows):
 
 
 @callback(
+    Output("price-kwp-editor", "data", allow_duplicate=True),
+    Input("add-price-kwp-row-btn", "n_clicks"),
+    State("price-kwp-editor", "data"),
+    State("price-kwp-editor", "columns"),
+    prevent_initial_call=True,
+)
+def add_price_kwp_row(n_clicks, table_rows, table_columns):
+    if not n_clicks:
+        raise PreventUpdate
+    blank_row = _blank_table_row(table_columns, table_rows)
+    if not blank_row:
+        raise PreventUpdate
+    rows = list(table_rows or [])
+    rows.append(blank_row)
+    return rows
+
+
+@callback(
+    Output("price-kwp-others-editor", "data", allow_duplicate=True),
+    Input("add-price-kwp-others-row-btn", "n_clicks"),
+    State("price-kwp-others-editor", "data"),
+    State("price-kwp-others-editor", "columns"),
+    prevent_initial_call=True,
+)
+def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
+    if not n_clicks:
+        raise PreventUpdate
+    blank_row = _blank_table_row(table_columns, table_rows)
+    if not blank_row:
+        raise PreventUpdate
+    rows = list(table_rows or [])
+    rows.append(blank_row)
+    return rows
+
+
+@callback(
     Output("scenario-session-store", "data"),
     Output("workbench-status", "children"),
     Input("scenario-upload", "contents"),
@@ -743,6 +809,11 @@ def mutate_session_state(
             config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
             inverter_catalog, inverter_issues = normalize_inverter_catalog_rows(inverter_rows)
             battery_catalog, battery_issues = normalize_battery_catalog_rows(battery_rows)
+            price_kwp_table, price_kwp_issues = normalize_price_table_rows(price_kwp_rows, "Precios_kWp_relativos")
+            price_kwp_table_others, price_kwp_others_issues = normalize_price_table_rows(
+                price_kwp_others_rows,
+                "Precios_kWp_relativos_Otros",
+            )
 
             bundle = rebuild_bundle_from_ui(
                 active.config_bundle,
@@ -754,10 +825,16 @@ def mutate_session_state(
                 demand_profile_general=frame_from_rows(demand_profile_general_rows, list(active.config_bundle.demand_profile_general_table.columns)),
                 month_profile=frame_from_rows(month_profile_rows, list(active.config_bundle.month_profile_table.columns)),
                 sun_profile=frame_from_rows(sun_profile_rows, list(active.config_bundle.sun_profile_table.columns)),
-                cop_kwp_table=frame_from_rows(price_kwp_rows, list(active.config_bundle.cop_kwp_table.columns)),
-                cop_kwp_table_others=frame_from_rows(price_kwp_others_rows, list(active.config_bundle.cop_kwp_table_others.columns)),
+                cop_kwp_table=frame_from_rows(price_kwp_table.to_dict("records"), list(active.config_bundle.cop_kwp_table.columns)),
+                cop_kwp_table_others=frame_from_rows(
+                    price_kwp_table_others.to_dict("records"),
+                    list(active.config_bundle.cop_kwp_table_others.columns),
+                ),
             )
-            bundle = refresh_bundle_issues(bundle, extra_issues=[*inverter_issues, *battery_issues])
+            bundle = refresh_bundle_issues(
+                bundle,
+                extra_issues=[*inverter_issues, *battery_issues, *price_kwp_issues, *price_kwp_others_issues],
+            )
             state = update_scenario_bundle(state, active.scenario_id, bundle)
             client_state = commit_client_session(client_state, state)
             return client_state.to_payload(), tr("workbench.applied_edits", lang)

@@ -21,6 +21,8 @@ INVERTER_REQUIRED_COLUMNS = ["name", "AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max
 BATTERY_REQUIRED_COLUMNS = ["name", "nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"]
 INVERTER_NUMERIC_COLUMNS = ["AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max", "Imax_mppt", "n_mppt", "price_COP"]
 BATTERY_NUMERIC_COLUMNS = ["nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"]
+PRICE_TABLE_REQUIRED_COLUMNS = ["MIN", "MAX", "PRECIO_POR_KWP"]
+PRICE_TABLE_NUMERIC_COLUMNS = ["MIN", "MAX", "PRECIO_POR_KWP"]
 
 _ROW_REQUIRED_RE = re.compile(r"Fila (\d+): el campo '([^']+)' es obligatorio\.")
 _ROW_NUMERIC_RE = re.compile(r"Fila (\d+): '([^']+)' debe ser numérico\.")
@@ -46,6 +48,9 @@ _TABLE_COLUMN_LABELS = {
     "max_kW": {"es": "Potencia máxima", "en": "Maximum power"},
     "max_ch_kW": {"es": "Potencia máxima de carga", "en": "Maximum charge power"},
     "max_dis_kW": {"es": "Potencia máxima de descarga", "en": "Maximum discharge power"},
+    "MIN": {"es": "kWp mínimo", "en": "Minimum kWp"},
+    "MAX": {"es": "kWp máximo", "en": "Maximum kWp"},
+    "PRECIO_POR_KWP": {"es": "Precio por kWp", "en": "Price per kWp"},
 }
 
 
@@ -107,6 +112,52 @@ def normalize_catalog_rows(
         frame[column] = series
 
     return frame, issues
+
+
+def normalize_price_table_rows(
+    rows: list[dict] | None,
+    field_prefix: str,
+) -> tuple[pd.DataFrame, list[ValidationIssue]]:
+    frame = pd.DataFrame(rows or [])
+    issues: list[ValidationIssue] = []
+
+    for column in PRICE_TABLE_REQUIRED_COLUMNS:
+        if column not in frame.columns:
+            frame[column] = np.nan
+
+    frame = frame[PRICE_TABLE_REQUIRED_COLUMNS].copy()
+    frame["_source_row"] = range(1, len(frame) + 1)
+    frame[PRICE_TABLE_REQUIRED_COLUMNS] = frame[PRICE_TABLE_REQUIRED_COLUMNS].replace(r"^\s*$", np.nan, regex=True)
+    frame = frame.loc[~frame[PRICE_TABLE_REQUIRED_COLUMNS].isna().all(axis=1)].reset_index(drop=True)
+
+    if frame.empty:
+        return frame[PRICE_TABLE_REQUIRED_COLUMNS], issues
+
+    for column in PRICE_TABLE_REQUIRED_COLUMNS:
+        missing = frame[column].isna()
+        for index in frame.index[missing]:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    field_prefix,
+                    f"Fila {int(frame.at[index, '_source_row'])}: el campo '{column}' es obligatorio.",
+                )
+            )
+
+    for column in PRICE_TABLE_NUMERIC_COLUMNS:
+        series = pd.to_numeric(frame[column], errors="coerce")
+        invalid = frame[column].notna() & series.isna()
+        for index in frame.index[invalid]:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    field_prefix,
+                    f"Fila {int(frame.at[index, '_source_row'])}: '{column}' debe ser numérico.",
+                )
+            )
+        frame[column] = series
+
+    return frame[PRICE_TABLE_REQUIRED_COLUMNS], issues
 
 
 def _table_column_label(column: str, lang: str) -> str:

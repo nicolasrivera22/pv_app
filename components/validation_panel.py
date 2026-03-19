@@ -23,7 +23,7 @@ def _pretty_field(field: str, *, lang: str = "es") -> str:
         "SUN_HSP_PROFILE": {"es": "Perfil solar", "en": "Solar profile"},
         "scan_range": {"es": "Rango de escaneo", "en": "Scan range"},
         "Precios_kWp_relativos": {"es": "Precio base por kWp", "en": "Base kWp pricing"},
-        "Precios_kWp_relativos_Otros": {"es": "Costos variables adicionales", "en": "Additional variable costs"},
+        "Precios_kWp_relativos_Otros": {"es": "Otros precios variables", "en": "Other variable prices"},
     }
     if field in labels:
         return labels[field]["en" if lang == "en" else "es"]
@@ -78,7 +78,7 @@ def _section_label(field: str, *, lang: str = "es") -> str:
         "profile_month": {"es": "Perfiles > Demanda mensual / HSP", "en": "Profiles > Monthly demand / HSP"},
         "profile_solar": {"es": "Perfiles > Perfil solar", "en": "Profiles > Solar profile"},
         "profile_price": {"es": "Perfiles > Precio variable por kWp", "en": "Profiles > Variable kWp pricing"},
-        "profile_price_others": {"es": "Perfiles > Costos variables adicionales", "en": "Profiles > Additional variable costs"},
+        "profile_price_others": {"es": "Perfiles > Otros precios variables", "en": "Profiles > Other variable prices"},
         "catalog_inverters": {"es": "Catálogos > Inversores", "en": "Catalogs > Inverters"},
         "catalog_batteries": {"es": "Catálogos > Baterías", "en": "Catalogs > Batteries"},
     }
