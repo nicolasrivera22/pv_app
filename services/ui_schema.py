@@ -329,7 +329,7 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     ),
     "price_per_kWp_COP": FieldUiSchema(
         "number",
-        "advanced",
+        "hidden",
         "Precio por kWp",
         "Base price per kWp",
         "Precio base aplicado por cada kWp instalado cuando usas precio variable.",
@@ -634,6 +634,20 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
     ),
     "profile_type": FieldUiSchema("text", "hidden", "Tipo de perfil", "Profile type"),
 }
+
+GROUP_ORDER: list[str] = [
+    "Demanda y Perfil",
+    "Sol y módulos",
+    "Inversor",
+    "Semilla",
+    "Economía",
+    "Restricción de Proporción Pico",
+    "Controles de Batería y Exporte",
+    "Monte Carlo",
+    "Precios",
+]
+
+CURRENCY_INPUT_FIELDS: set[str] = {"price_total_COP", "price_others_total"}
 
 GROUP_LABELS = {
     "Demanda y Perfil": {"es": "Demanda y Perfil", "en": "Demand and Profile"},
@@ -1026,7 +1040,17 @@ def display_assumption_value(field_key: str, value: Any) -> Any:
 
 def parse_assumption_input_value(field_key: str, value: Any) -> Any:
     schema = FIELD_SCHEMAS.get(field_key)
-    if schema is None or schema.kind != "number" or _is_missing_config_input(value):
+    if schema is None or _is_missing_config_input(value):
+        return value
+    if field_key in CURRENCY_INPUT_FIELDS:
+        cleaned = str(value).replace(",", "").replace(".", "").strip()
+        if not cleaned:
+            return value
+        try:
+            return float(cleaned)
+        except ValueError:
+            return value
+    if schema.kind != "number":
         return value
     numeric = float(value)
     if schema.ui_scale is not None:
@@ -1096,6 +1120,7 @@ def build_assumption_sections(
 ) -> list[dict[str, Any]]:
     excluded = {str(group).strip() for group in (exclude_groups or set()) if str(group).strip()}
     sections_by_group: dict[str, dict[str, Any]] = {}
+    raw_key_for_group: dict[str, str] = {}
     for meta in extract_config_metadata(bundle.config_table, bundle.config):
         if meta.group in excluded:
             continue
@@ -1104,17 +1129,29 @@ def build_assumption_sections(
             continue
         target = "all" if show_all or schema.visibility == "basic" else "advanced"
         group = group_label(meta.group, lang)
+        raw_key_for_group.setdefault(group, meta.group)
         bucket = sections_by_group.setdefault(
             group,
             {
                 "group": group,
+                "group_key": meta.group,
                 "help": section_help(meta.group, lang),
                 "basic": [],
                 "advanced": [],
             },
         )
-        bucket["basic" if target == "all" else target].append(_field_payload(meta, bundle, lang=lang))
-    return list(sections_by_group.values())
+        payload = _field_payload(meta, bundle, lang=lang)
+        if meta.config_key in CURRENCY_INPUT_FIELDS:
+            payload["currency_input"] = True
+        bucket["basic" if target == "all" else target].append(payload)
+
+    order_map = {name: index for index, name in enumerate(GROUP_ORDER)}
+    fallback = len(GROUP_ORDER)
+    sections = sorted(
+        sections_by_group.values(),
+        key=lambda section: order_map.get(section.get("group_key", ""), fallback),
+    )
+    return sections
 
 
 def _is_missing_config_input(value: Any) -> bool:

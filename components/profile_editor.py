@@ -128,6 +128,7 @@ def profile_editor_section() -> html.Div:
                         "workbench.profiles.tooltip.price",
                         "price-kwp-tooltip",
                         "price-kwp-editor",
+                        panel_id="price-kwp-panel",
                         add_row_button_id="add-price-kwp-row-btn",
                     ),
                     _profile_panel(
@@ -136,6 +137,7 @@ def profile_editor_section() -> html.Div:
                         "workbench.profiles.tooltip.price_others",
                         "price-kwp-others-tooltip",
                         "price-kwp-others-editor",
+                        panel_id="price-kwp-others-panel",
                         add_row_button_id="add-price-kwp-others-row-btn",
                     ),
                     _profile_panel(

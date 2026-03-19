@@ -10,6 +10,8 @@ def scenario_sidebar() -> html.Div:
         className="panel sidebar-panel",
         children=[
             html.H2(tr("workbench.sidebar.title", "es"), id="scenario-sidebar-title"),
+
+            # ── Project workspace subsection ──
             html.Div(
                 className="subpanel secondary-panel",
                 children=[
@@ -38,38 +40,49 @@ def scenario_sidebar() -> html.Div:
                     html.Div(tr("workbench.project.unbound", "es"), id="project-status", className="status-line"),
                 ],
             ),
-            dcc.Upload(
-                id="scenario-upload",
-                children=html.Div(
-                    [
-                        html.Span(tr("workbench.upload.prefix", "es"), id="scenario-upload-prefix"),
-                        html.Span(tr("workbench.upload.link", "es"), id="scenario-upload-link", className="link"),
-                    ]
-                ),
-                multiple=False,
-                className="upload-box",
-            ),
+
+            # ── Active scenario subsection ──
             html.Div(
-                className="controls",
+                className="subpanel secondary-panel sidebar-scenario-section",
                 children=[
-                    html.Button(tr("workbench.load_example", "es"), id="load-example-btn", n_clicks=0, className="action-btn secondary"),
-                    html.Button(tr("workbench.duplicate", "es"), id="duplicate-scenario-btn", n_clicks=0, className="action-btn tertiary"),
-                    html.Button(tr("workbench.delete", "es"), id="delete-scenario-btn", n_clicks=0, className="action-btn tertiary"),
+                    html.Div(
+                        className="section-head",
+                        children=[html.H3(tr("workbench.active_scenario", "es"), id="active-scenario-label")],
+                    ),
+                    dcc.Upload(
+                        id="scenario-upload",
+                        children=html.Div(
+                            [
+                                html.Span(tr("workbench.upload.prefix", "es"), id="scenario-upload-prefix"),
+                                html.Span(tr("workbench.upload.link", "es"), id="scenario-upload-link", className="link"),
+                            ]
+                        ),
+                        multiple=False,
+                        className="upload-box",
+                    ),
+                    html.Div(
+                        className="controls",
+                        children=[
+                            html.Button(tr("workbench.new_scenario", "es"), id="new-scenario-btn", n_clicks=0, className="action-btn"),
+                            html.Button(tr("workbench.load_example", "es"), id="load-example-btn", n_clicks=0, className="action-btn secondary"),
+                            html.Button(tr("workbench.duplicate", "es"), id="duplicate-scenario-btn", n_clicks=0, className="action-btn tertiary"),
+                            html.Button(tr("workbench.delete", "es"), id="delete-scenario-btn", n_clicks=0, className="action-btn tertiary"),
+                        ],
+                    ),
+                    html.Div(
+                        className="rename-row",
+                        children=[
+                            dcc.Dropdown(id="scenario-dropdown", placeholder=tr("workbench.no_scenarios_loaded", "es")),
+                            html.Button(tr("workbench.set_active", "es"), id="set-active-scenario-btn", n_clicks=0, className="action-btn tertiary"),
+                        ],
+                    ),
+                    html.Div(className="rename-row", children=[
+                        dcc.Input(id="rename-scenario-input", type="text", placeholder=tr("workbench.rename_placeholder", "es"), className="text-input"),
+                        html.Button(tr("workbench.rename", "es"), id="rename-scenario-btn", n_clicks=0, className="action-btn tertiary"),
+                    ]),
+                    html.Div(id="scenario-overview-list", className="scenario-list"),
+                    html.Div(tr("workbench.run_pending", "es"), id="workbench-status", className="status-line"),
                 ],
             ),
-            html.Label(tr("workbench.active_scenario", "es"), id="active-scenario-label", className="input-label"),
-            html.Div(
-                className="rename-row",
-                children=[
-                    dcc.Dropdown(id="scenario-dropdown", placeholder=tr("workbench.no_scenarios_loaded", "es")),
-                    html.Button(tr("workbench.set_active", "es"), id="set-active-scenario-btn", n_clicks=0, className="action-btn tertiary"),
-                ],
-            ),
-            html.Div(className="rename-row", children=[
-                dcc.Input(id="rename-scenario-input", type="text", placeholder=tr("workbench.rename_placeholder", "es"), className="text-input"),
-                html.Button(tr("workbench.rename", "es"), id="rename-scenario-btn", n_clicks=0, className="action-btn tertiary"),
-            ]),
-            html.Div(id="scenario-overview-list", className="scenario-list"),
-            html.Div(tr("workbench.run_pending", "es"), id="workbench-status", className="status-line"),
         ],
     )

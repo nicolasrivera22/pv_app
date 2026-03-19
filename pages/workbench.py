@@ -256,6 +256,7 @@ layout = html.Div(
     Output("scenario-upload-prefix", "children"),
     Output("scenario-upload-link", "children"),
     Output("load-example-btn", "children"),
+    Output("new-scenario-btn", "children"),
     Output("duplicate-scenario-btn", "children"),
     Output("delete-scenario-btn", "children"),
     Output("active-scenario-label", "children"),
@@ -322,6 +323,7 @@ def translate_workbench_page(language_value):
         tr("workbench.upload.prefix", lang),
         tr("workbench.upload.link", lang),
         tr("workbench.load_example", lang),
+        tr("workbench.new_scenario", lang),
         tr("workbench.duplicate", lang),
         tr("workbench.delete", lang),
         tr("workbench.active_scenario", lang),
@@ -503,6 +505,33 @@ def populate_assumptions(session_payload, show_all_values, language_value):
 
 
 @callback(
+    Output("price-kwp-panel", "style"),
+    Output("price-kwp-others-panel", "style"),
+    Input("scenario-session-store", "data"),
+)
+def toggle_pricing_table_visibility(session_payload):
+    """Hide/show pricing profile tables based on saved config values."""
+    _, state = _session(session_payload, None)
+    active = state.get_scenario()
+    if active is None:
+        raise PreventUpdate
+
+    cfg = active.config_bundle.config
+    pricing_mode = str(cfg.get("pricing_mode", "variable")).strip().lower()
+    include_others = cfg.get("include_var_others", False)
+
+    price_kwp_style = {"display": "block"}
+    if pricing_mode == "total":
+        price_kwp_style = {"display": "none"}
+
+    price_others_style = {"display": "block"}
+    if not include_others:
+        price_others_style = {"display": "none"}
+
+    return price_kwp_style, price_others_style
+
+
+@callback(
     Output("inverter-table-editor", "data"),
     Output("inverter-table-editor", "columns"),
     Output("inverter-table-editor", "tooltip_header"),
@@ -672,6 +701,7 @@ def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
     Output("workbench-status", "children"),
     Input("scenario-upload", "contents"),
     Input("load-example-btn", "n_clicks"),
+    Input("new-scenario-btn", "n_clicks"),
     Input("duplicate-scenario-btn", "n_clicks"),
     Input("rename-scenario-btn", "n_clicks"),
     Input("delete-scenario-btn", "n_clicks"),
@@ -708,6 +738,7 @@ def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
 def mutate_session_state(
     upload_contents,
     _example_clicks,
+    _new_scenario_clicks,
     _duplicate_clicks,
     _rename_clicks,
     _delete_clicks,
@@ -759,6 +790,14 @@ def mutate_session_state(
             state = add_scenario(state, record, make_active=True)
             client_state = commit_client_session(client_state, state)
             return client_state.to_payload(), tr("workbench.loaded_example", lang, name=record.name)
+
+        if trigger == "new-scenario-btn":
+            bundle = load_example_config()
+            name = default_scenario_name(state, prefix="Escenario" if lang == "es" else "Scenario")
+            record = create_scenario_record(name, bundle, source_name="default")
+            state = add_scenario(state, record, make_active=True)
+            client_state = commit_client_session(client_state, state)
+            return client_state.to_payload(), tr("workbench.new_scenario_created", lang, name=record.name)
 
         if trigger == "open-project-btn":
             if not project_dropdown_value:
