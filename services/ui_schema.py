@@ -1111,6 +1111,77 @@ def build_config_fields(
     return sorted(fields, key=lambda field: order.get(field["field"], len(order)))
 
 
+ASSUMPTION_CONTEXT_NOTE_IDS = {
+    "Controles de Batería y Exporte": "battery-export-context-note",
+    "Semilla": "seed-context-note",
+    "Restricción de Proporción Pico": "peak-ratio-context-note",
+    "Monte Carlo": "risk-context-note",
+}
+
+
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "si", "sí"}
+    return bool(value)
+
+
+def _assumption_context_note(config: dict[str, Any], group_key: str, *, lang: str = "es") -> str:
+    if group_key == "Controles de Batería y Exporte":
+        include_battery = _to_bool(config.get("include_battery"))
+        optimize_battery = _to_bool(config.get("optimize_battery"))
+        if not include_battery:
+            return tr("workbench.assumptions.context.battery.off", lang)
+        if optimize_battery:
+            return tr("workbench.assumptions.context.battery.optimize", lang)
+        return tr("workbench.assumptions.context.battery.fixed", lang)
+    if group_key == "Semilla" and str(config.get("kWp_seed_mode", "")).strip().lower() == "auto":
+        return tr("workbench.assumptions.context.seed.auto", lang)
+    if group_key == "Restricción de Proporción Pico":
+        if not _to_bool(config.get("limit_peak_ratio_enable")):
+            return tr("workbench.assumptions.context.peak.disabled", lang)
+        if str(config.get("limit_peak_month_mode", "")).strip().lower() == "max":
+            return tr("workbench.assumptions.context.peak.auto_month", lang)
+    return ""
+
+
+def assumption_context_map(config: dict[str, Any], *, lang: str = "es") -> dict[str, Any]:
+    include_battery = _to_bool(config.get("include_battery"))
+    optimize_battery = _to_bool(config.get("optimize_battery"))
+    pricing_mode = str(config.get("pricing_mode", "")).strip().lower()
+    peak_enabled = _to_bool(config.get("limit_peak_ratio_enable"))
+    seed_mode = str(config.get("kWp_seed_mode", "")).strip().lower()
+    peak_month_mode = str(config.get("limit_peak_month_mode", "")).strip().lower()
+    use_manual_risk_kwp = _to_bool(config.get("mc_use_manual_kWp"))
+
+    field_disabled = {
+        "price_total_COP": pricing_mode == "variable",
+        "optimize_battery": not include_battery,
+        "battery_name": (not include_battery) or optimize_battery,
+        "bat_DoD": not include_battery,
+        "bat_coupling": not include_battery,
+        "bat_eta_rt": not include_battery,
+        "kWp_seed_manual_kWp": seed_mode != "manual",
+        "limit_peak_ratio": not peak_enabled,
+        "limit_peak_year": not peak_enabled,
+        "limit_peak_month_mode": not peak_enabled,
+        "limit_peak_basis": not peak_enabled,
+        "limit_peak_month_fixed": (not peak_enabled) or peak_month_mode != "fixed",
+        "mc_manual_kWp": not use_manual_risk_kwp,
+    }
+    field_emphasis = {
+        "battery_name": include_battery and not optimize_battery,
+    }
+    notes = {
+        group_key: _assumption_context_note(config, group_key, lang=lang)
+        for group_key in ASSUMPTION_CONTEXT_NOTE_IDS
+    }
+    return {
+        "field_disabled": field_disabled,
+        "field_emphasis": field_emphasis,
+        "notes": notes,
+    }
+
+
 def build_assumption_sections(
     bundle,
     lang: str = "es",
@@ -1121,6 +1192,7 @@ def build_assumption_sections(
     excluded = {str(group).strip() for group in (exclude_groups or set()) if str(group).strip()}
     sections_by_group: dict[str, dict[str, Any]] = {}
     raw_key_for_group: dict[str, str] = {}
+    context = assumption_context_map(bundle.config, lang=lang)
     for meta in extract_config_metadata(bundle.config_table, bundle.config):
         if meta.group in excluded:
             continue
@@ -1136,6 +1208,8 @@ def build_assumption_sections(
                 "group": group,
                 "group_key": meta.group,
                 "help": section_help(meta.group, lang),
+                "context_note_id": ASSUMPTION_CONTEXT_NOTE_IDS.get(meta.group),
+                "context_note": context["notes"].get(meta.group, ""),
                 "basic": [],
                 "advanced": [],
             },
@@ -1143,6 +1217,8 @@ def build_assumption_sections(
         payload = _field_payload(meta, bundle, lang=lang)
         if meta.config_key in CURRENCY_INPUT_FIELDS:
             payload["currency_input"] = True
+        payload["disabled"] = bool(context["field_disabled"].get(meta.config_key, False))
+        payload["emphasize"] = bool(context["field_emphasis"].get(meta.config_key, False))
         bucket["basic" if target == "all" else target].append(payload)
 
     order_map = {name: index for index, name in enumerate(GROUP_ORDER)}

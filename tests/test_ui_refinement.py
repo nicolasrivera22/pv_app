@@ -296,6 +296,23 @@ def test_assumption_sections_apply_ui_scaling_suffixes_and_bounds() -> None:
     assert modules_span["suffix"] == "módulos"
 
 
+def test_assumption_sections_apply_contextual_disabled_states_and_notes() -> None:
+    bundle = load_example_config()
+    sections = build_assumption_sections(bundle, lang="es", show_all=True)
+
+    battery_section = next(section for section in sections if section["group_key"] == "Controles de Batería y Exporte")
+    peak_section = next(section for section in sections if section["group_key"] == "Restricción de Proporción Pico")
+
+    assert _find_field(sections, "price_total_COP")["disabled"] is True
+    assert _find_field(sections, "battery_name")["disabled"] is True
+    assert _find_field(sections, "kWp_seed_manual_kWp")["disabled"] is True
+    assert _find_field(sections, "limit_peak_month_fixed")["disabled"] is True
+    assert _find_field(sections, "mc_manual_kWp")["disabled"] is True
+    assert battery_section["context_note_id"] == "battery-export-context-note"
+    assert "catálogo" in battery_section["context_note"]
+    assert "automáticamente" in peak_section["context_note"]
+
+
 def test_display_schema_formats_metrics_and_labels() -> None:
     assert format_metric("NPV_COP", 12500000, "es") == "COP 12,500,000"
     assert format_metric("self_consumption_ratio", 0.456, "es") == "45.6%"
@@ -514,6 +531,50 @@ def test_assumption_editor_leaves_dropdowns_and_text_fields_without_numeric_affi
     assert "input-affix" not in markup
 
 
+def test_assumption_editor_renders_context_notes_and_contextual_card_ids() -> None:
+    sections = build_assumption_sections(load_example_config(), lang="es", show_all=True)
+    rendered = render_assumption_sections(
+        sections,
+        show_all=True,
+        empty_message="Sin datos",
+        advanced_label="Avanzado",
+    )
+
+    notes = []
+    cards = []
+    for node in rendered:
+        notes.extend(
+            _find_components(
+                node,
+                lambda item: isinstance(getattr(item, "id", None), dict)
+                and item.id.get("type") == "assumption-context-note",
+            )
+        )
+        cards.extend(
+            _find_components(
+                node,
+                lambda item: isinstance(getattr(item, "id", None), dict)
+                and item.id.get("type") == "assumption-field-card",
+            )
+        )
+
+    note_groups = {component.id["group"] for component in notes}
+    note_by_group = {component.id["group"]: component for component in notes}
+    card_by_field = {component.id["field"]: component for component in cards}
+
+    assert {
+        "Controles de Batería y Exporte",
+        "Semilla",
+        "Restricción de Proporción Pico",
+        "Monte Carlo",
+    }.issubset(note_groups)
+    assert note_by_group["Monte Carlo"].style == {"display": "none"}
+    assert "field-card-disabled" in card_by_field["battery_name"].className
+    assert "field-card-highlight" not in card_by_field["battery_name"].className
+    assert "precios-card" in card_by_field["price_total_COP"].className
+    assert "field-card-disabled" in card_by_field["price_total_COP"].className
+
+
 def test_assumption_sections_do_not_render_nan_like_helper_text() -> None:
     bundle = load_example_config()
     config_table = bundle.config_table.copy()
@@ -534,6 +595,122 @@ def test_assumption_sections_do_not_render_nan_like_helper_text() -> None:
     markup = str(rendered[0].to_plotly_json()).lower()
     assert field["unit"] == ""
     assert "nan" not in markup
+
+
+def test_workbench_assumption_context_callback_disables_dependent_controls_and_shows_notes() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = _session_payload(state, lang="en")
+    field_values = {
+        "pricing_mode": "variable",
+        "price_total_COP": 58000000,
+        "include_battery": False,
+        "optimize_battery": False,
+        "battery_name": "",
+        "bat_DoD": 90.0,
+        "bat_coupling": "dc",
+        "bat_eta_rt": 90.0,
+        "kWp_seed_mode": "auto",
+        "kWp_seed_manual_kWp": 15.0,
+        "limit_peak_ratio_enable": False,
+        "limit_peak_ratio": 2.5,
+        "limit_peak_year": 0,
+        "limit_peak_month_mode": "max",
+        "limit_peak_basis": "weighted_mean",
+        "limit_peak_month_fixed": 1,
+        "mc_use_manual_kWp": False,
+        "mc_manual_kWp": 15.0,
+    }
+    input_ids = [{"type": "assumption-input", "field": field} for field in field_values]
+    card_ids = [{"type": "assumption-field-card", "field": field} for field in field_values]
+    note_ids = [
+        {"type": "assumption-context-note", "group": "Controles de Batería y Exporte"},
+        {"type": "assumption-context-note", "group": "Semilla"},
+        {"type": "assumption-context-note", "group": "Restricción de Proporción Pico"},
+        {"type": "assumption-context-note", "group": "Monte Carlo"},
+    ]
+
+    disabled_values, card_classes, note_children, note_styles = workbench_page.sync_assumption_context_ui(
+        payload,
+        input_ids,
+        list(field_values.values()),
+        "en",
+        card_ids,
+        note_ids,
+    )
+
+    disabled_by_field = dict(zip(field_values.keys(), disabled_values))
+    class_by_field = dict(zip(field_values.keys(), card_classes))
+
+    assert disabled_by_field["price_total_COP"] is True
+    assert disabled_by_field["optimize_battery"] is True
+    assert disabled_by_field["battery_name"] is True
+    assert disabled_by_field["bat_DoD"] is True
+    assert disabled_by_field["bat_coupling"] is True
+    assert disabled_by_field["bat_eta_rt"] is True
+    assert disabled_by_field["kWp_seed_manual_kWp"] is True
+    assert disabled_by_field["limit_peak_ratio"] is True
+    assert disabled_by_field["limit_peak_year"] is True
+    assert disabled_by_field["limit_peak_month_mode"] is True
+    assert disabled_by_field["limit_peak_basis"] is True
+    assert disabled_by_field["limit_peak_month_fixed"] is True
+    assert disabled_by_field["mc_manual_kWp"] is True
+    assert "field-card-disabled" in class_by_field["battery_name"]
+    assert "field-card-disabled" in class_by_field["price_total_COP"]
+    assert note_children == [
+        tr("workbench.assumptions.context.battery.off", "en"),
+        tr("workbench.assumptions.context.seed.auto", "en"),
+        tr("workbench.assumptions.context.peak.disabled", "en"),
+        "",
+    ]
+    assert note_styles == [
+        {"display": "block"},
+        {"display": "block"},
+        {"display": "block"},
+        {"display": "none"},
+    ]
+
+
+def test_workbench_assumption_context_callback_highlights_fixed_battery_selection() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = _session_payload(state, lang="en")
+    field_values = {
+        "pricing_mode": "total",
+        "price_total_COP": 58000000,
+        "include_battery": True,
+        "optimize_battery": False,
+        "battery_name": "BAT-10",
+    }
+    input_ids = [{"type": "assumption-input", "field": field} for field in field_values]
+    card_ids = [{"type": "assumption-field-card", "field": field} for field in field_values]
+    note_ids = [{"type": "assumption-context-note", "group": "Controles de Batería y Exporte"}]
+
+    disabled_values, card_classes, note_children, note_styles = workbench_page.sync_assumption_context_ui(
+        payload,
+        input_ids,
+        list(field_values.values()),
+        "en",
+        card_ids,
+        note_ids,
+    )
+
+    disabled_by_field = dict(zip(field_values.keys(), disabled_values))
+    class_by_field = dict(zip(field_values.keys(), card_classes))
+
+    assert disabled_by_field["price_total_COP"] is False
+    assert disabled_by_field["battery_name"] is False
+    assert "field-card-highlight" in class_by_field["battery_name"]
+    assert "field-card-disabled" not in class_by_field["battery_name"]
+    assert note_children == [tr("workbench.assumptions.context.battery.fixed", "en")]
+    assert note_styles == [{"display": "block"}]
+
+
+def test_populate_assumptions_keeps_monte_carlo_group_visible_in_workbench() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = _session_payload(state, lang="es")
+
+    rendered = workbench_page.populate_assumptions(payload, [], "es")
+
+    assert any("Monte Carlo" in str(section.to_plotly_json()) for section in rendered)
 
 
 def test_active_summary_uses_copy_and_meta_classes_for_hierarchy() -> None:

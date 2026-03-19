@@ -65,7 +65,7 @@ def test_demand_weights_chart_includes_optional_base_traces_only_when_valid() ->
         "en",
     )
 
-    assert len(full_render.figure.data) == 5
+    assert len(full_render.figure.data) == 6
     assert len(no_base_render.figure.data) == 3
     assert all("base" not in str(trace.name).lower() for trace in no_base_render.figure.data)
 
@@ -92,6 +92,28 @@ def test_weekday_heatmap_builds_7x24_matrix_and_derives_total_when_missing() -> 
     assert len(trace.y) == 7
     assert len(trace.z) == 7
     assert len(trace.z[0]) == 24
+    assert trace.y[0] == tr("workbench.profile_chart.weekday.1", "es")
+
+
+def test_weekday_heatmap_accepts_textual_weekdays_from_dow_or_dia() -> None:
+    bundle = load_example_config()
+    rows = []
+    for row in bundle.demand_profile_table.to_dict("records"):
+        next_row = dict(row)
+        next_row["DOW"] = next_row["Dia"]
+        rows.append(next_row)
+
+    render = build_profile_chart(
+        "demand-profile-editor",
+        rows,
+        _columns("demand_profile", bundle.demand_profile_table, lang="es"),
+        "es",
+    )
+
+    trace = render.figure.data[0]
+    assert trace.type == "heatmap"
+    assert len(trace.x) == 24
+    assert len(trace.y) == 7
     assert trace.y[0] == tr("workbench.profile_chart.weekday.1", "es")
 
 

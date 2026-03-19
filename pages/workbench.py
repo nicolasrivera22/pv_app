@@ -23,6 +23,7 @@ from components import (
 from services import (
     add_scenario,
     apply_workbench_editor_state,
+    assumption_context_map,
     build_assumption_sections,
     build_display_columns,
     build_profile_chart,
@@ -30,6 +31,7 @@ from services import (
     build_table_display_columns,
     build_unifilar_model,
     commit_client_session,
+    collect_config_updates,
     create_scenario_record,
     default_schematic_inspector,
     internal_results_root,
@@ -167,6 +169,13 @@ PROFILE_TABLE_VISIBILITY_PANELS = {
 }
 PROFILE_CARD_BASE_CLASS = "profile-table-card-shell"
 PROFILE_CARD_ACTIVE_CLASS = f"{PROFILE_CARD_BASE_CLASS} profile-table-card-active"
+ASSUMPTION_PRECIOS_FIELDS = {
+    "pricing_mode",
+    "include_hw_in_price",
+    "include_var_others",
+    "price_total_COP",
+    "price_others_total",
+}
 
 
 def _blank_table_row(table_columns, table_rows=None) -> dict[str, str]:
@@ -317,6 +326,21 @@ def _profile_card_class_names(active_table_id: str | None, hidden_tables: set[st
         is_active = table_id == active_table_id and table_id not in hidden
         classes.append(PROFILE_CARD_ACTIVE_CLASS if is_active else PROFILE_CARD_BASE_CLASS)
     return tuple(classes)
+
+
+def _assumption_note_style(message: str) -> dict[str, str]:
+    return {"display": "block"} if str(message or "").strip() else {"display": "none"}
+
+
+def _assumption_card_class(field_key: str, *, disabled: bool = False, emphasize: bool = False) -> str:
+    classes = ["field-card"]
+    if field_key in ASSUMPTION_PRECIOS_FIELDS:
+        classes.append("precios-card")
+    if disabled:
+        classes.append("field-card-disabled")
+    if emphasize and not disabled:
+        classes.append("field-card-highlight")
+    return " ".join(dict.fromkeys(classes))
 
 
 layout = html.Div(
@@ -662,7 +686,6 @@ def populate_assumptions(session_payload, show_all_values, language_value):
         active.config_bundle,
         lang=lang,
         show_all="all" in (show_all_values or []),
-        exclude_groups={"Monte Carlo"},
     )
     return render_assumption_sections(
         sections,
@@ -670,6 +693,58 @@ def populate_assumptions(session_payload, show_all_values, language_value):
         empty_message=tr("workbench.assumptions.none", lang),
         advanced_label=tr("workbench.assumptions.advanced", lang),
     )
+
+
+@callback(
+    Output({"type": "assumption-input", "field": ALL}, "disabled"),
+    Output({"type": "assumption-field-card", "field": ALL}, "className"),
+    Output({"type": "assumption-context-note", "group": ALL}, "children"),
+    Output({"type": "assumption-context-note", "group": ALL}, "style"),
+    Input("scenario-session-store", "data"),
+    Input({"type": "assumption-input", "field": ALL}, "id"),
+    Input({"type": "assumption-input", "field": ALL}, "value"),
+    Input("language-selector", "value"),
+    State({"type": "assumption-field-card", "field": ALL}, "id"),
+    State({"type": "assumption-context-note", "group": ALL}, "id"),
+)
+def sync_assumption_context_ui(
+    session_payload,
+    assumption_input_ids,
+    assumption_values,
+    language_value,
+    assumption_card_ids,
+    note_ids,
+):
+    lang = _lang(language_value)
+    _, state = _session(session_payload, lang)
+    active = state.get_scenario()
+    if active is None:
+        return [], [], [], []
+
+    current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
+    context = assumption_context_map(current_config, lang=lang)
+    disabled_map = dict(context.get("field_disabled") or {})
+    emphasis_map = dict(context.get("field_emphasis") or {})
+    notes_map = dict(context.get("notes") or {})
+
+    disabled_values = [
+        bool(disabled_map.get((component_id or {}).get("field", ""), False))
+        for component_id in (assumption_input_ids or [])
+    ]
+    card_classes = [
+        _assumption_card_class(
+            str((component_id or {}).get("field", "")),
+            disabled=bool(disabled_map.get((component_id or {}).get("field", ""), False)),
+            emphasize=bool(emphasis_map.get((component_id or {}).get("field", ""), False)),
+        )
+        for component_id in (assumption_card_ids or [])
+    ]
+    note_children = [
+        notes_map.get(str((component_id or {}).get("group", "")), "")
+        for component_id in (note_ids or [])
+    ]
+    note_styles = [_assumption_note_style(message) for message in note_children]
+    return disabled_values, card_classes, note_children, note_styles
 
 
 def _resolve_pricing_inputs(assumption_input_ids, assumption_values, cfg):
@@ -734,26 +809,6 @@ def toggle_pricing_table_visibility(session_payload, assumption_input_ids, assum
         others_placeholder_children,
         others_placeholder_style,
     )
-
-
-@callback(
-    Output("price-total-card", "className"),
-    Input({"type": "assumption-input", "field": ALL}, "id"),
-    Input({"type": "assumption-input", "field": ALL}, "value"),
-    prevent_initial_call=True,
-)
-def toggle_price_total_disabled(assumption_input_ids, assumption_values):
-    """Immediately grey out the fixed-total card when pricing_mode is variable."""
-    pricing_mode = "variable"
-    for input_id, value in zip(assumption_input_ids or [], assumption_values or []):
-        field = (input_id or {}).get("field", "") if isinstance(input_id, dict) else ""
-        if field == "pricing_mode" and value is not None:
-            pricing_mode = str(value).strip().lower()
-            break
-    if pricing_mode == "variable":
-        return "field-card precios-card field-card-disabled"
-    return "field-card precios-card"
-
 
 @callback(
     Output("inverter-table-editor", "data"),

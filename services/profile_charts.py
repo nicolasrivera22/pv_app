@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable
+import unicodedata
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -144,6 +145,70 @@ def _weekday_label(day_number: int, lang: str) -> str:
     return tr(f"workbench.profile_chart.weekday.{int(day_number)}", lang)
 
 
+def _normalized_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(char for char in normalized if not unicodedata.combining(char))
+
+
+def _resolve_weekday_numbers(frame: pd.DataFrame) -> pd.Series:
+    if frame.empty:
+        return pd.Series(dtype=float)
+
+    dow_source = frame["DOW"] if "DOW" in frame else pd.Series(pd.NA, index=frame.index, dtype=object)
+    resolved = pd.to_numeric(dow_source, errors="coerce")
+
+    text_source = dow_source.astype("string")
+    if "Dia" in frame:
+        text_source = text_source.fillna(frame["Dia"].astype("string"))
+
+    weekday_map = {
+        "1": 1,
+        "mon": 1,
+        "monday": 1,
+        "lunes": 1,
+        "2": 2,
+        "tue": 2,
+        "tues": 2,
+        "tuesday": 2,
+        "martes": 2,
+        "3": 3,
+        "wed": 3,
+        "wednesday": 3,
+        "miercoles": 3,
+        "miércoles": 3,
+        "mie": 3,
+        "miec": 3,
+        "4": 4,
+        "thu": 4,
+        "thur": 4,
+        "thurs": 4,
+        "thursday": 4,
+        "jueves": 4,
+        "jue": 4,
+        "5": 5,
+        "fri": 5,
+        "friday": 5,
+        "viernes": 5,
+        "vie": 5,
+        "6": 6,
+        "sat": 6,
+        "saturday": 6,
+        "sabado": 6,
+        "sábado": 6,
+        "sab": 6,
+        "7": 7,
+        "sun": 7,
+        "sunday": 7,
+        "domingo": 7,
+        "dom": 7,
+    }
+    text_numbers = text_source.map(lambda value: weekday_map.get(_normalized_text(value)))
+    return resolved.fillna(pd.to_numeric(text_numbers, errors="coerce"))
+
+
 def _band_label(min_value: float | int | None, max_value: float | int | None) -> str:
     def _fmt(value: float | int | None) -> str:
         if value is None or pd.isna(value):
@@ -235,7 +300,7 @@ def _build_demand_weights_figure(rows: list[dict] | None, columns: list[dict] | 
         ("W_TOTAL", "#7c3aed", "solid", "scatter", False),
         ("W_RES_BASE", "#0f766e", "dash", "scatter", False),
         ("W_IND_BASE", "#2563eb", "dash", "scatter", False),
-        ("TOTAL_kWh", "#eb253c69", "dash", "bar", True),
+        ("TOTAL_kWh", "rgba(235, 37, 60, 0.41)", "dash", "bar", True),
     ]
     for key, color, dash, mode, secondary_y in traces:
         if key not in frame or not frame[key].notna().any():
@@ -271,20 +336,22 @@ def _build_demand_weights_figure(rows: list[dict] | None, columns: list[dict] | 
 
 def _build_demand_weekday_figure(rows: list[dict] | None, columns: list[dict] | None, lang: str) -> go.Figure:
     column_map = _column_name_map(columns)
-    frame = _coerce_numeric(_frame(rows), ["DOW", "HOUR", "TOTAL_kWh", "RES", "IND"])
+    frame = _replace_blank_with_na(_frame(rows), ["DOW", "Dia", "HOUR", "TOTAL_kWh", "RES", "IND"])
+    frame = _coerce_numeric(frame, ["HOUR", "TOTAL_kWh", "RES", "IND"])
+    frame["DOW_RESOLVED"] = _resolve_weekday_numbers(frame)
     if "TOTAL_kWh" not in frame:
         frame["TOTAL_kWh"] = pd.NA
     derived_total = frame["TOTAL_kWh"]
     if "RES" in frame or "IND" in frame:
         derived_total = derived_total.fillna(frame.get("RES", 0).fillna(0) + frame.get("IND", 0).fillna(0))
     frame["TOTAL_RESOLVED"] = derived_total
-    frame = frame.loc[frame["DOW"].notna() & frame["HOUR"].notna() & frame["TOTAL_RESOLVED"].notna()].copy()
+    frame = frame.loc[frame["DOW_RESOLVED"].notna() & frame["HOUR"].notna() & frame["TOTAL_RESOLVED"].notna()].copy()
     if frame.empty:
         return _empty_profile_figure(lang)
-    frame["DOW"] = frame["DOW"].astype(int)
+    frame["DOW_RESOLVED"] = frame["DOW_RESOLVED"].astype(int)
     frame["HOUR"] = frame["HOUR"].astype(int)
     matrix = (
-        frame.pivot_table(index="DOW", columns="HOUR", values="TOTAL_RESOLVED", aggfunc="mean")
+        frame.pivot_table(index="DOW_RESOLVED", columns="HOUR", values="TOTAL_RESOLVED", aggfunc="mean")
         .reindex(index=list(range(1, 8)), columns=list(range(24)))
     )
     if matrix.isna().all().all():

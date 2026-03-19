@@ -137,6 +137,7 @@ from .types import (
     ValidationIssue,
 )
 from .ui_schema import (
+    assumption_context_map,
     build_assumption_sections,
     build_config_fields,
     build_display_columns,
@@ -186,6 +187,7 @@ __all__ = [
     "ScenarioRunResult",
     "ScenarioSessionState",
     "ValidationIssue",
+    "assumption_context_map",
     "build_assumption_sections",
     "build_config_fields",
     "build_schematic_legend",

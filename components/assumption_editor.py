@@ -28,6 +28,7 @@ def _assumption_input(field: dict):
             value=field["value"],
             clearable=False,
             className="text-input",
+            disabled=field.get("disabled", False),
         )
     if field.get("currency_input"):
         input_control = dcc.Input(
@@ -37,6 +38,7 @@ def _assumption_input(field: dict):
             className="text-input text-input-affixed currency-text-input",
             inputMode="numeric",
             debounce=True,
+            disabled=field.get("disabled", False),
         )
         if field.get("suffix"):
             return html.Div(
@@ -56,6 +58,7 @@ def _assumption_input(field: dict):
             min=field.get("min"),
             max=field.get("max"),
             className="text-input text-input-affixed" if field.get("suffix") else "text-input",
+            disabled=field.get("disabled", False),
         )
         if field.get("suffix"):
             return html.Div(
@@ -66,7 +69,13 @@ def _assumption_input(field: dict):
                 ],
             )
         return input_control
-    return dcc.Input(id=component_id, type="text", value=field["value"], className="text-input")
+    return dcc.Input(
+        id=component_id,
+        type="text",
+        value=field["value"],
+        className="text-input",
+        disabled=field.get("disabled", False),
+    )
 
 
 def _field_card(field: dict, *, extra_class: str = "") -> html.Div:
@@ -84,10 +93,15 @@ def _field_card(field: dict, *, extra_class: str = "") -> html.Div:
     unit = html.Div(field["unit"], className="scenario-meta") if field.get("kind") != "number" and field.get("unit") else None
     if unit is not None:
         children.append(unit)
-    css = "field-card"
+    classes = ["field-card"]
     if extra_class:
-        css = f"field-card {extra_class}"
-    return html.Div(className=css, children=children)
+        classes.append(extra_class)
+    if field.get("disabled"):
+        classes.append("field-card-disabled")
+    if field.get("emphasize") and not field.get("disabled"):
+        classes.append("field-card-highlight")
+    css = " ".join(dict.fromkeys(classes))
+    return html.Div(id={"type": "assumption-field-card", "field": field["field"]}, className=css, children=children)
 
 
 _PRECIOS_ROW1_FIELDS = ["pricing_mode", "include_hw_in_price", "include_var_others"]
@@ -101,10 +115,7 @@ def _render_precios_section(section: dict, *, show_all: bool, advanced_label: st
     row2_fields = []
     other_fields = []
 
-    pricing_mode = "variable"
     for field in all_fields:
-        if field["field"] == "pricing_mode":
-            pricing_mode = str(field.get("value", "variable")).strip().lower()
         if field["field"] in _PRECIOS_ROW1_FIELDS:
             row1_fields.append(field)
         elif field["field"] in _PRECIOS_ROW2_FIELDS:
@@ -118,6 +129,16 @@ def _render_precios_section(section: dict, *, show_all: bool, advanced_label: st
     blocks: list = [html.H4(section["group"])]
     if section.get("help"):
         blocks.append(html.P(section["help"], className="section-copy"))
+    if section.get("context_note_id"):
+        note_group = section.get("group_key", section.get("group", ""))
+        blocks.append(
+            html.Div(
+                section.get("context_note", ""),
+                id={"type": "assumption-context-note", "group": note_group},
+                className="assumption-context-note",
+                style={"display": "block"} if section.get("context_note") else {"display": "none"},
+            )
+        )
     if row1_fields:
         blocks.append(
             html.Div(
@@ -126,16 +147,9 @@ def _render_precios_section(section: dict, *, show_all: bool, advanced_label: st
             )
         )
     if row2_fields:
-        disabled_total = pricing_mode == "variable"
         row2_cards = []
         for f in row2_fields:
-            extra = "precios-card"
-            if f["field"] == "price_total_COP" and disabled_total:
-                extra = "precios-card field-card-disabled"
-            card = _field_card(f, extra_class=extra)
-            if f["field"] == "price_total_COP":
-                card.id = "price-total-card"
-            row2_cards.append(card)
+            row2_cards.append(_field_card(f, extra_class="precios-card"))
         blocks.append(
             html.Div(
                 className="precios-row precios-row-2",
@@ -173,6 +187,16 @@ def render_assumption_sections(
         blocks = [html.H4(section["group"])]
         if section.get("help"):
             blocks.append(html.P(section["help"], className="section-copy"))
+        if section.get("context_note_id"):
+            note_group = section.get("group_key", section.get("group", ""))
+            blocks.append(
+                html.Div(
+                    section.get("context_note", ""),
+                    id={"type": "assumption-context-note", "group": note_group},
+                    className="assumption-context-note",
+                    style={"display": "block"} if section.get("context_note") else {"display": "none"},
+                )
+            )
         if basic_fields:
             blocks.append(
                 html.Div(
