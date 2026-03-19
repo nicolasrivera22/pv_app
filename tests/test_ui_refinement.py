@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 from dash import dcc
 import pandas as pd
@@ -27,6 +28,8 @@ from services import (
     build_assumption_sections,
     build_display_columns,
     build_table_display_columns,
+    bootstrap_client_session,
+    commit_client_session,
     create_scenario_record,
     export_deterministic_artifacts,
     export_risk_artifacts,
@@ -41,6 +44,7 @@ from services import (
     run_monte_carlo,
     run_scan,
     run_scenario_scan,
+    save_project,
     tr,
 )
 from services.result_views import (
@@ -68,6 +72,10 @@ def _fast_bundle():
         "mc_n_simulations": 8,
     }
     return replace(bundle, config=config)
+
+
+def _session_payload(state, *, lang: str = "es") -> dict:
+    return commit_client_session(bootstrap_client_session(lang), state).to_payload()
 
 
 def _find_component(node, component_id: str):
@@ -340,6 +348,10 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     assert _find_component(section, "demand-profile-weights-tooltip").children == tr("workbench.profiles.tooltip.demand_weights", "es")
     assert _find_component(section, "add-price-kwp-row-btn").children == tr("workbench.profiles.add_row", "es")
     assert _find_component(section, "add-price-kwp-others-row-btn").children == tr("workbench.profiles.add_row", "es")
+    assert _find_component(workbench_page.layout, "run-scan-choice-dialog") is not None
+    assert _find_component(workbench_page.layout, "run-scan-save-and-run-btn") is not None
+    assert _find_component(workbench_page.layout, "run-scan-run-unsaved-btn") is not None
+    assert _find_component(workbench_page.layout, "run-scan-cancel-btn") is not None
 
 
 def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
@@ -552,6 +564,179 @@ def test_profile_pricing_add_row_callbacks_use_current_column_ids() -> None:
 
     assert price_rows[-1] == {"MIN": "", "MAX": "", "PRECIO_POR_KWP": ""}
     assert other_rows[-1] == {"MIN": "", "MAX": "", "PRECIO_POR_KWP": ""}
+
+
+def test_run_scan_choice_dialog_disables_save_until_project_name_exists() -> None:
+    style, title, copy, save_label, disabled, unsaved_label, cancel_label = workbench_page.sync_run_scan_choice_dialog({"open": True}, "", "en")
+    named = workbench_page.sync_run_scan_choice_dialog({"open": True}, "Demo", "es")
+
+    assert style["display"] == "flex"
+    assert title == "Save before running?"
+    assert "Enter a project name" in copy
+    assert save_label == "Save and run"
+    assert disabled is True
+    assert unsaved_label == "Run without saving"
+    assert cancel_label == "Cancel"
+    assert named[0]["display"] == "flex"
+    assert named[4] is False
+    assert "Guárdala como 'Demo'" in named[2]
+
+
+def test_apply_button_auto_saves_bound_project_after_rebuild(monkeypatch) -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = save_project(state, project_name="Demo", language="en")
+    payload = _session_payload(state, lang="en")
+    calls: list[str] = []
+
+    monkeypatch.setattr(workbench_page, "ctx", SimpleNamespace(triggered_id="apply-edits-btn"))
+    monkeypatch.setattr(workbench_page, "apply_workbench_editor_state", lambda *args, **kwargs: calls.append("apply") or state.get_scenario().config_bundle)
+    monkeypatch.setattr(workbench_page, "save_project", lambda current_state, project_name, language: calls.append(f"save:{project_name}") or current_state)
+
+    _, status, dialog = workbench_page.mutate_session_state(
+        upload_contents=None,
+        _example_clicks=0,
+        _new_scenario_clicks=0,
+        _duplicate_clicks=0,
+        _rename_clicks=0,
+        _delete_clicks=0,
+        _apply_clicks=1,
+        _run_clicks=0,
+        _set_active_clicks=0,
+        _save_project_clicks=0,
+        _save_project_as_clicks=0,
+        _open_project_clicks=0,
+        upload_filename=None,
+        rename_value=None,
+        scenario_dropdown_value=state.active_scenario_id,
+        project_name_value="Demo",
+        project_dropdown_value=None,
+        session_payload=payload,
+        assumption_input_ids=[],
+        assumption_values=[],
+        inverter_rows=[],
+        battery_rows=[],
+        month_profile_rows=[],
+        sun_profile_rows=[],
+        price_kwp_rows=[],
+        price_kwp_others_rows=[],
+        demand_profile_rows=[],
+        demand_profile_general_rows=[],
+        demand_profile_weights_rows=[],
+        language_value="en",
+    )
+
+    assert calls == ["apply", "save:Demo"]
+    assert "Current edits applied." in status
+    assert "Project saved." in status
+    assert "Deterministic results marked dirty until rerun." in status
+    assert dialog == {"open": False}
+
+
+def test_run_scan_applies_then_prompts_when_project_is_unbound(monkeypatch) -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = _session_payload(state, lang="en")
+    calls: list[str] = []
+
+    monkeypatch.setattr(workbench_page, "ctx", SimpleNamespace(triggered_id="run-active-scan-btn"))
+    monkeypatch.setattr(workbench_page, "apply_workbench_editor_state", lambda *args, **kwargs: calls.append("apply") or state.get_scenario().config_bundle)
+    monkeypatch.setattr(workbench_page, "run_scenario_scan", lambda *args, **kwargs: calls.append("run") or state)
+
+    _, status, dialog = workbench_page.mutate_session_state(
+        upload_contents=None,
+        _example_clicks=0,
+        _new_scenario_clicks=0,
+        _duplicate_clicks=0,
+        _rename_clicks=0,
+        _delete_clicks=0,
+        _apply_clicks=0,
+        _run_clicks=1,
+        _set_active_clicks=0,
+        _save_project_clicks=0,
+        _save_project_as_clicks=0,
+        _open_project_clicks=0,
+        upload_filename=None,
+        rename_value=None,
+        scenario_dropdown_value=state.active_scenario_id,
+        project_name_value="",
+        project_dropdown_value=None,
+        session_payload=payload,
+        assumption_input_ids=[],
+        assumption_values=[],
+        inverter_rows=[],
+        battery_rows=[],
+        month_profile_rows=[],
+        sun_profile_rows=[],
+        price_kwp_rows=[],
+        price_kwp_others_rows=[],
+        demand_profile_rows=[],
+        demand_profile_general_rows=[],
+        demand_profile_weights_rows=[],
+        language_value="en",
+    )
+
+    assert calls == ["apply"]
+    assert "Current edits applied." in status
+    assert "Choose whether to save before running." in status
+    assert dialog == {"open": True}
+
+
+def test_run_scan_applies_saves_and_runs_for_bound_project(monkeypatch) -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = save_project(state, project_name="Demo", language="en")
+    payload = _session_payload(state, lang="en")
+    calls: list[str] = []
+
+    monkeypatch.setattr(workbench_page, "ctx", SimpleNamespace(triggered_id="run-active-scan-btn"))
+    monkeypatch.setattr(workbench_page, "apply_workbench_editor_state", lambda *args, **kwargs: calls.append("apply") or state.get_scenario().config_bundle)
+    monkeypatch.setattr(workbench_page, "save_project", lambda current_state, project_name, language: calls.append(f"save:{project_name}") or current_state)
+    monkeypatch.setattr(workbench_page, "run_scenario_scan", lambda current_state, scenario_id: calls.append(f"run:{scenario_id}") or current_state)
+
+    _, status, dialog = workbench_page.mutate_session_state(
+        upload_contents=None,
+        _example_clicks=0,
+        _new_scenario_clicks=0,
+        _duplicate_clicks=0,
+        _rename_clicks=0,
+        _delete_clicks=0,
+        _apply_clicks=0,
+        _run_clicks=1,
+        _set_active_clicks=0,
+        _save_project_clicks=0,
+        _save_project_as_clicks=0,
+        _open_project_clicks=0,
+        upload_filename=None,
+        rename_value=None,
+        scenario_dropdown_value=state.active_scenario_id,
+        project_name_value="Demo",
+        project_dropdown_value=None,
+        session_payload=payload,
+        assumption_input_ids=[],
+        assumption_values=[],
+        inverter_rows=[],
+        battery_rows=[],
+        month_profile_rows=[],
+        sun_profile_rows=[],
+        price_kwp_rows=[],
+        price_kwp_others_rows=[],
+        demand_profile_rows=[],
+        demand_profile_general_rows=[],
+        demand_profile_weights_rows=[],
+        language_value="en",
+    )
+
+    assert calls == ["apply", "save:Demo", f"run:{state.active_scenario_id}"]
+    assert "Current edits applied." in status
+    assert "Project saved." in status
+    assert "Deterministic scan completed for 'Base'." in status
+    assert dialog == {"open": False}
+
+
+def test_cancel_run_scan_choice_closes_dialog_without_running() -> None:
+    status, dialog = workbench_page.cancel_run_scan_choice(1, {"open": True}, "en")
+
+    assert "Current edits applied." in status
+    assert "Run cancelled." in status
+    assert dialog == {"open": False}
 
 
 def test_price_table_normalizer_ignores_fully_blank_draft_rows_and_preserves_bundle_shape() -> None:

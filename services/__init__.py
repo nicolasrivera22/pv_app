@@ -152,6 +152,7 @@ from .validation import (
     validate_config,
 )
 from .workbench_ui import (
+    apply_workbench_editor_state,
     collect_config_updates,
     demand_profile_visibility,
     frame_from_rows,
@@ -188,6 +189,7 @@ __all__ = [
     "build_schematic_legend",
     "add_scenario",
     "append_design_selection",
+    "apply_workbench_editor_state",
     "assets_dir",
     "build_available_design_rows",
     "build_comparison_figures",

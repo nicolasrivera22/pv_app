@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
-from dash import ALL, Input, Output, State, callback, ctx, dcc, html, register_page
+from dash import ALL, Input, Output, State, callback, ctx, dcc, html, no_update, register_page
 from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
 
@@ -17,17 +17,18 @@ from components import (
     render_schematic_legend,
     selected_candidate_deep_dive_section,
     render_validation_panel,
+    run_scan_choice_dialog,
     scenario_sidebar,
 )
 from services import (
     add_scenario,
+    apply_workbench_editor_state,
     build_assumption_sections,
     build_display_columns,
     build_schematic_legend,
     build_table_display_columns,
     build_unifilar_model,
     commit_client_session,
-    collect_config_updates,
     create_scenario_record,
     default_schematic_inspector,
     internal_results_root,
@@ -38,20 +39,14 @@ from services import (
     export_deterministic_artifacts,
     export_scenario_workbook,
     format_metric,
-    frame_from_rows,
     load_config_from_excel,
     load_example_config,
     list_projects,
-    normalize_battery_catalog_rows,
-    normalize_inverter_catalog_rows,
-    normalize_price_table_rows,
     open_export_folder,
     open_project,
     publish_export_artifacts,
     project_exports_root,
     project_root,
-    rebuild_bundle_from_ui,
-    refresh_bundle_issues,
     rename_scenario,
     resolve_client_session,
     resolve_schematic_focus,
@@ -121,6 +116,26 @@ def _project_options():
     return [{"label": manifest.name, "value": manifest.slug} for manifest in list_projects()]
 
 
+def _resolved_project_name(project_name_value, state) -> str:
+    return (project_name_value or state.project_name or state.project_slug or "").strip()
+
+
+def _project_is_bound(state) -> bool:
+    return bool(str(state.project_slug or "").strip())
+
+
+def _bundle_has_errors(bundle) -> bool:
+    return any(issue.level == "error" for issue in bundle.issues)
+
+
+def _join_status_parts(*parts: str) -> str:
+    return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def _run_choice_state(*, open_dialog: bool = False) -> dict[str, bool]:
+    return {"open": open_dialog}
+
+
 def _blank_table_row(table_columns, table_rows=None) -> dict[str, str]:
     column_ids = [
         str(column.get("id", "")).strip()
@@ -187,11 +202,56 @@ def _selected_candidate_banner(detail: dict | None, *, lang: str = "es") -> list
     ]
 
 
+def _apply_current_workbench_edits(
+    state,
+    active,
+    *,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    price_kwp_rows,
+    price_kwp_others_rows,
+    demand_profile_rows,
+    demand_profile_general_rows,
+    demand_profile_weights_rows,
+):
+    bundle = apply_workbench_editor_state(
+        active.config_bundle,
+        assumption_input_ids=assumption_input_ids,
+        assumption_values=assumption_values,
+        inverter_rows=inverter_rows,
+        battery_rows=battery_rows,
+        month_profile_rows=month_profile_rows,
+        sun_profile_rows=sun_profile_rows,
+        price_kwp_rows=price_kwp_rows,
+        price_kwp_others_rows=price_kwp_others_rows,
+        demand_profile_rows=demand_profile_rows,
+        demand_profile_general_rows=demand_profile_general_rows,
+        demand_profile_weights_rows=demand_profile_weights_rows,
+    )
+    next_state = update_scenario_bundle(state, active.scenario_id, bundle)
+    updated = next_state.get_scenario(active.scenario_id)
+    if updated is None:
+        raise KeyError(f"No existe el escenario '{active.scenario_id}'.")
+    return next_state, updated
+
+
+def _autosave_bound_project(state, project_name_value, *, lang: str) -> tuple[object, bool]:
+    if not _project_is_bound(state):
+        return state, False
+    return save_project(state, project_name=_resolved_project_name(project_name_value, state), language=lang), True
+
+
 layout = html.Div(
     className="page",
     children=[
         dcc.Download(id="scenario-download"),
         dcc.Store(id="workbench-latest-export-folder", storage_type="memory", data=""),
+        dcc.Store(id="run-scan-choice-state", storage_type="memory", data=_run_choice_state()),
+        run_scan_choice_dialog(),
         html.Div(
             className="workbench-grid",
             children=[
@@ -373,6 +433,38 @@ def translate_workbench_page(language_value):
         tr("common.export_artifacts", lang),
         tr("common.open_exports_folder", lang),
         tr("workbench.export_artifacts_running", lang),
+    )
+
+
+@callback(
+    Output("run-scan-choice-dialog", "style"),
+    Output("run-scan-choice-title", "children"),
+    Output("run-scan-choice-copy", "children"),
+    Output("run-scan-save-and-run-btn", "children"),
+    Output("run-scan-save-and-run-btn", "disabled"),
+    Output("run-scan-run-unsaved-btn", "children"),
+    Output("run-scan-cancel-btn", "children"),
+    Input("run-scan-choice-state", "data"),
+    Input("project-name-input", "value"),
+    Input("language-selector", "value"),
+)
+def sync_run_scan_choice_dialog(dialog_state, project_name_value, language_value):
+    lang = _lang(language_value)
+    project_name = str(project_name_value or "").strip()
+    copy = (
+        tr("workbench.run_dialog.body_named", lang, name=project_name)
+        if project_name
+        else tr("workbench.run_dialog.body_unnamed", lang)
+    )
+    style = {"display": "flex"} if (dialog_state or {}).get("open") else {"display": "none"}
+    return (
+        style,
+        tr("workbench.run_dialog.title", lang),
+        copy,
+        tr("workbench.run_dialog.save_and_run", lang),
+        not bool(project_name),
+        tr("workbench.run_dialog.run_without_saving", lang),
+        tr("workbench.run_dialog.cancel", lang),
     )
 
 
@@ -699,6 +791,7 @@ def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
 @callback(
     Output("scenario-session-store", "data"),
     Output("workbench-status", "children"),
+    Output("run-scan-choice-state", "data"),
     Input("scenario-upload", "contents"),
     Input("load-example-btn", "n_clicks"),
     Input("new-scenario-btn", "n_clicks"),
@@ -770,6 +863,7 @@ def mutate_session_state(
     lang = _lang(language_value)
     trigger = ctx.triggered_id
     client_state, state = _session(session_payload, lang)
+    closed_dialog = _run_choice_state()
 
     try:
         if trigger == "scenario-upload":
@@ -781,7 +875,7 @@ def mutate_session_state(
             record = create_scenario_record(scenario_name, bundle, source_name=upload_filename or bundle.source_name)
             state = add_scenario(state, record, make_active=True)
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.loaded_workbook", lang, name=record.name)
+            return client_state.to_payload(), tr("workbench.loaded_workbook", lang, name=record.name), closed_dialog
 
         if trigger == "load-example-btn":
             bundle = load_example_config()
@@ -789,7 +883,7 @@ def mutate_session_state(
             record = create_scenario_record(name, bundle, source_name=bundle.source_name)
             state = add_scenario(state, record, make_active=True)
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.loaded_example", lang, name=record.name)
+            return client_state.to_payload(), tr("workbench.loaded_example", lang, name=record.name), closed_dialog
 
         if trigger == "new-scenario-btn":
             bundle = load_example_config()
@@ -797,14 +891,18 @@ def mutate_session_state(
             record = create_scenario_record(name, bundle, source_name="default")
             state = add_scenario(state, record, make_active=True)
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.new_scenario_created", lang, name=record.name)
+            return client_state.to_payload(), tr("workbench.new_scenario_created", lang, name=record.name), closed_dialog
 
         if trigger == "open-project-btn":
             if not project_dropdown_value:
                 raise ValueError(tr("workbench.project.select_required", lang))
             state = open_project(project_dropdown_value)
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.project.opened", lang, name=state.project_name, path=str(project_root(state.project_slug)))
+            return (
+                client_state.to_payload(),
+                tr("workbench.project.opened", lang, name=state.project_name, path=str(project_root(state.project_slug))),
+                closed_dialog,
+            )
 
         if trigger in {"save-project-btn", "save-project-as-btn"}:
             resolved_name = (project_name_value or state.project_name or "").strip()
@@ -815,7 +913,11 @@ def mutate_session_state(
             else:
                 state = save_project_as(state, project_name=resolved_name, language=lang)
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.project.saved", lang, name=state.project_name, path=str(project_root(state.project_slug)))
+            return (
+                client_state.to_payload(),
+                tr("workbench.project.saved", lang, name=state.project_name, path=str(project_root(state.project_slug))),
+                closed_dialog,
+            )
 
         active = state.get_scenario()
         if active is None:
@@ -824,17 +926,17 @@ def mutate_session_state(
         if trigger == "duplicate-scenario-btn":
             state = duplicate_scenario(state, active.scenario_id)
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.duplicated", lang)
+            return client_state.to_payload(), tr("workbench.duplicated", lang), closed_dialog
 
         if trigger == "rename-scenario-btn":
             state = rename_scenario(state, active.scenario_id, rename_value or active.name)
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.renamed", lang)
+            return client_state.to_payload(), tr("workbench.renamed", lang), closed_dialog
 
         if trigger == "delete-scenario-btn":
             state = delete_scenario(state, active.scenario_id)
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.deleted", lang)
+            return client_state.to_payload(), tr("workbench.deleted", lang), closed_dialog
 
         if trigger == "set-active-scenario-btn":
             if scenario_dropdown_value == state.active_scenario_id:
@@ -842,55 +944,196 @@ def mutate_session_state(
             state = set_active_scenario(state, scenario_dropdown_value)
             selected = state.get_scenario()
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.set_active_status", lang, name=selected.name) if selected else tr("workbench.no_active_scenario", lang)
+            return (
+                client_state.to_payload(),
+                tr("workbench.set_active_status", lang, name=selected.name) if selected else tr("workbench.no_active_scenario", lang),
+                closed_dialog,
+            )
 
         if trigger == "apply-edits-btn":
-            config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
-            inverter_catalog, inverter_issues = normalize_inverter_catalog_rows(inverter_rows)
-            battery_catalog, battery_issues = normalize_battery_catalog_rows(battery_rows)
-            price_kwp_table, price_kwp_issues = normalize_price_table_rows(price_kwp_rows, "Precios_kWp_relativos")
-            price_kwp_table_others, price_kwp_others_issues = normalize_price_table_rows(
-                price_kwp_others_rows,
-                "Precios_kWp_relativos_Otros",
+            state, _ = _apply_current_workbench_edits(
+                state,
+                active,
+                assumption_input_ids=assumption_input_ids,
+                assumption_values=assumption_values,
+                inverter_rows=inverter_rows,
+                battery_rows=battery_rows,
+                month_profile_rows=month_profile_rows,
+                sun_profile_rows=sun_profile_rows,
+                price_kwp_rows=price_kwp_rows,
+                price_kwp_others_rows=price_kwp_others_rows,
+                demand_profile_rows=demand_profile_rows,
+                demand_profile_general_rows=demand_profile_general_rows,
+                demand_profile_weights_rows=demand_profile_weights_rows,
             )
-
-            bundle = rebuild_bundle_from_ui(
-                active.config_bundle,
-                config_updates=config,
-                inverter_catalog=inverter_catalog,
-                battery_catalog=battery_catalog,
-                demand_profile=frame_from_rows(demand_profile_rows, list(active.config_bundle.demand_profile_table.columns)),
-                demand_profile_weights=frame_from_rows(demand_profile_weights_rows, list(active.config_bundle.demand_profile_weights_table.columns)),
-                demand_profile_general=frame_from_rows(demand_profile_general_rows, list(active.config_bundle.demand_profile_general_table.columns)),
-                month_profile=frame_from_rows(month_profile_rows, list(active.config_bundle.month_profile_table.columns)),
-                sun_profile=frame_from_rows(sun_profile_rows, list(active.config_bundle.sun_profile_table.columns)),
-                cop_kwp_table=frame_from_rows(price_kwp_table.to_dict("records"), list(active.config_bundle.cop_kwp_table.columns)),
-                cop_kwp_table_others=frame_from_rows(
-                    price_kwp_table_others.to_dict("records"),
-                    list(active.config_bundle.cop_kwp_table_others.columns),
-                ),
-            )
-            bundle = refresh_bundle_issues(
-                bundle,
-                extra_issues=[*inverter_issues, *battery_issues, *price_kwp_issues, *price_kwp_others_issues],
-            )
-            state = update_scenario_bundle(state, active.scenario_id, bundle)
+            state, saved = _autosave_bound_project(state, project_name_value, lang=lang)
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.applied_edits", lang)
+            status = _join_status_parts(
+                tr("workbench.run_flow.applied", lang),
+                tr("workbench.run_flow.saved", lang) if saved else "",
+                tr("workbench.run_flow.needs_rerun", lang),
+            )
+            return client_state.to_payload(), status, closed_dialog
 
         if trigger == "run-active-scan-btn":
-            state = run_scenario_scan(state, active.scenario_id)
-            updated = state.get_scenario(active.scenario_id)
+            state, updated_active = _apply_current_workbench_edits(
+                state,
+                active,
+                assumption_input_ids=assumption_input_ids,
+                assumption_values=assumption_values,
+                inverter_rows=inverter_rows,
+                battery_rows=battery_rows,
+                month_profile_rows=month_profile_rows,
+                sun_profile_rows=sun_profile_rows,
+                price_kwp_rows=price_kwp_rows,
+                price_kwp_others_rows=price_kwp_others_rows,
+                demand_profile_rows=demand_profile_rows,
+                demand_profile_general_rows=demand_profile_general_rows,
+                demand_profile_weights_rows=demand_profile_weights_rows,
+            )
+
+            if _project_is_bound(state):
+                state, saved = _autosave_bound_project(state, project_name_value, lang=lang)
+                updated_active = state.get_scenario(updated_active.scenario_id) or updated_active
+                if _bundle_has_errors(updated_active.config_bundle):
+                    client_state = commit_client_session(client_state, state)
+                    status = _join_status_parts(
+                        tr("workbench.run_flow.applied", lang),
+                        tr("workbench.run_flow.saved", lang) if saved else "",
+                        tr("workbench.run_flow.validation_blocked", lang),
+                    )
+                    return client_state.to_payload(), status, closed_dialog
+                state = run_scenario_scan(state, updated_active.scenario_id)
+                updated = state.get_scenario(updated_active.scenario_id) or updated_active
+                client_state = commit_client_session(client_state, state)
+                status = _join_status_parts(
+                    tr("workbench.run_flow.applied", lang),
+                    tr("workbench.run_flow.saved", lang) if saved else "",
+                    tr("workbench.run_flow.ran", lang, name=updated.name),
+                )
+                return client_state.to_payload(), status, closed_dialog
+
+            if _bundle_has_errors(updated_active.config_bundle):
+                client_state = commit_client_session(client_state, state)
+                status = _join_status_parts(
+                    tr("workbench.run_flow.applied", lang),
+                    tr("workbench.run_flow.validation_blocked", lang),
+                )
+                return client_state.to_payload(), status, closed_dialog
+
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.scan_completed", lang, name=updated.name)
+            status = _join_status_parts(
+                tr("workbench.run_flow.applied", lang),
+                tr("workbench.run_flow.choose_save", lang),
+            )
+            return client_state.to_payload(), status, _run_choice_state(open_dialog=True)
 
     except PreventUpdate:
         raise
     except Exception as exc:
         client_state = commit_client_session(client_state, state, bump_revision=False)
-        return client_state.to_payload(), tr("common.action_failed", lang, error=exc)
+        return client_state.to_payload(), tr("common.action_failed", lang, error=exc), closed_dialog
 
     raise PreventUpdate
+
+
+@callback(
+    Output("scenario-session-store", "data", allow_duplicate=True),
+    Output("workbench-status", "children", allow_duplicate=True),
+    Output("run-scan-choice-state", "data", allow_duplicate=True),
+    Input("run-scan-save-and-run-btn", "n_clicks"),
+    Input("run-scan-run-unsaved-btn", "n_clicks"),
+    State("scenario-session-store", "data"),
+    State("project-name-input", "value"),
+    State("run-scan-choice-state", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+    running=[
+        (Output("run-active-scan-btn", "disabled"), True, False),
+        (Output("active-run-progress", "style"), {"display": "block"}, {"display": "none"}),
+    ],
+)
+def resolve_run_scan_choice(
+    _save_and_run_clicks,
+    _run_without_saving_clicks,
+    session_payload,
+    project_name_value,
+    dialog_state,
+    language_value,
+):
+    lang = _lang(language_value)
+    trigger = ctx.triggered_id
+    client_state, state = _session(session_payload, lang)
+    closed_dialog = _run_choice_state()
+
+    if not (dialog_state or {}).get("open"):
+        raise PreventUpdate
+
+    try:
+        active = state.get_scenario()
+        if active is None:
+            raise PreventUpdate
+
+        if _bundle_has_errors(active.config_bundle):
+            client_state = commit_client_session(client_state, state)
+            status = _join_status_parts(
+                tr("workbench.run_flow.applied", lang),
+                tr("workbench.run_flow.validation_blocked", lang),
+            )
+            return client_state.to_payload(), status, closed_dialog
+
+        if trigger == "run-scan-save-and-run-btn":
+            resolved_name = _resolved_project_name(project_name_value, state)
+            if not resolved_name:
+                return no_update, tr("workbench.run_dialog.name_required", lang), dialog_state
+            state = save_project(state, project_name=resolved_name, language=lang)
+            active = state.get_scenario(active.scenario_id) or active
+            state = run_scenario_scan(state, active.scenario_id)
+            updated = state.get_scenario(active.scenario_id) or active
+            client_state = commit_client_session(client_state, state)
+            status = _join_status_parts(
+                tr("workbench.run_flow.applied", lang),
+                tr("workbench.run_flow.saved", lang),
+                tr("workbench.run_flow.ran", lang, name=updated.name),
+            )
+            return client_state.to_payload(), status, closed_dialog
+
+        if trigger == "run-scan-run-unsaved-btn":
+            state = run_scenario_scan(state, active.scenario_id)
+            updated = state.get_scenario(active.scenario_id) or active
+            client_state = commit_client_session(client_state, state)
+            status = _join_status_parts(
+                tr("workbench.run_flow.applied", lang),
+                tr("workbench.run_flow.ran_without_saving", lang, name=updated.name),
+            )
+            return client_state.to_payload(), status, closed_dialog
+
+    except PreventUpdate:
+        raise
+    except Exception as exc:
+        client_state = commit_client_session(client_state, state, bump_revision=False)
+        return client_state.to_payload(), tr("common.action_failed", lang, error=exc), closed_dialog
+
+    raise PreventUpdate
+
+
+@callback(
+    Output("workbench-status", "children", allow_duplicate=True),
+    Output("run-scan-choice-state", "data", allow_duplicate=True),
+    Input("run-scan-cancel-btn", "n_clicks"),
+    State("run-scan-choice-state", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def cancel_run_scan_choice(_cancel_clicks, dialog_state, language_value):
+    if not (dialog_state or {}).get("open"):
+        raise PreventUpdate
+    lang = _lang(language_value)
+    status = _join_status_parts(
+        tr("workbench.run_flow.applied", lang),
+        tr("workbench.run_flow.cancelled", lang),
+    )
+    return status, _run_choice_state()
 
 
 @callback(

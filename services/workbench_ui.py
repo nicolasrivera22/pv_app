@@ -9,6 +9,12 @@ from .i18n import tr
 from .io_excel import rebuild_config_bundle
 from .types import LoadedConfigBundle
 from .ui_schema import coerce_config_value, parse_assumption_input_value
+from .validation import (
+    normalize_battery_catalog_rows,
+    normalize_inverter_catalog_rows,
+    normalize_price_table_rows,
+    refresh_bundle_issues,
+)
 
 
 def frame_from_rows(rows: list[dict] | None, columns: list[str]) -> pd.DataFrame:
@@ -79,6 +85,52 @@ def rebuild_bundle_from_ui(
         sun_profile=sun_profile,
         cop_kwp_table=cop_kwp_table,
         cop_kwp_table_others=cop_kwp_table_others,
+    )
+
+
+def apply_workbench_editor_state(
+    base_bundle: LoadedConfigBundle,
+    *,
+    assumption_input_ids: list[dict] | None,
+    assumption_values: list[Any] | None,
+    inverter_rows: list[dict] | None,
+    battery_rows: list[dict] | None,
+    month_profile_rows: list[dict] | None,
+    sun_profile_rows: list[dict] | None,
+    price_kwp_rows: list[dict] | None,
+    price_kwp_others_rows: list[dict] | None,
+    demand_profile_rows: list[dict] | None,
+    demand_profile_general_rows: list[dict] | None,
+    demand_profile_weights_rows: list[dict] | None,
+) -> LoadedConfigBundle:
+    config = collect_config_updates(assumption_input_ids, assumption_values, base_bundle.config)
+    inverter_catalog, inverter_issues = normalize_inverter_catalog_rows(inverter_rows)
+    battery_catalog, battery_issues = normalize_battery_catalog_rows(battery_rows)
+    price_kwp_table, price_kwp_issues = normalize_price_table_rows(price_kwp_rows, "Precios_kWp_relativos")
+    price_kwp_table_others, price_kwp_others_issues = normalize_price_table_rows(
+        price_kwp_others_rows,
+        "Precios_kWp_relativos_Otros",
+    )
+
+    bundle = rebuild_bundle_from_ui(
+        base_bundle,
+        config_updates=config,
+        inverter_catalog=inverter_catalog,
+        battery_catalog=battery_catalog,
+        demand_profile=frame_from_rows(demand_profile_rows, list(base_bundle.demand_profile_table.columns)),
+        demand_profile_weights=frame_from_rows(demand_profile_weights_rows, list(base_bundle.demand_profile_weights_table.columns)),
+        demand_profile_general=frame_from_rows(demand_profile_general_rows, list(base_bundle.demand_profile_general_table.columns)),
+        month_profile=frame_from_rows(month_profile_rows, list(base_bundle.month_profile_table.columns)),
+        sun_profile=frame_from_rows(sun_profile_rows, list(base_bundle.sun_profile_table.columns)),
+        cop_kwp_table=frame_from_rows(price_kwp_table.to_dict("records"), list(base_bundle.cop_kwp_table.columns)),
+        cop_kwp_table_others=frame_from_rows(
+            price_kwp_table_others.to_dict("records"),
+            list(base_bundle.cop_kwp_table_others.columns),
+        ),
+    )
+    return refresh_bundle_issues(
+        bundle,
+        extra_issues=[*inverter_issues, *battery_issues, *price_kwp_issues, *price_kwp_others_issues],
     )
 
 

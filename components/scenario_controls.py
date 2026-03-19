@@ -5,6 +5,46 @@ from dash import dcc, html
 from services.i18n import tr
 
 
+def run_scan_choice_dialog() -> html.Div:
+    return html.Div(
+        id="run-scan-choice-dialog",
+        className="dialog-backdrop",
+        style={"display": "none"},
+        children=[
+            html.Div(
+                className="panel dialog-card",
+                children=[
+                    html.H3(tr("workbench.run_dialog.title", "es"), id="run-scan-choice-title"),
+                    html.P(tr("workbench.run_dialog.body_unnamed", "es"), id="run-scan-choice-copy", className="section-copy"),
+                    html.Div(
+                        className="controls",
+                        children=[
+                            html.Button(
+                                tr("workbench.run_dialog.save_and_run", "es"),
+                                id="run-scan-save-and-run-btn",
+                                n_clicks=0,
+                                className="action-btn",
+                            ),
+                            html.Button(
+                                tr("workbench.run_dialog.run_without_saving", "es"),
+                                id="run-scan-run-unsaved-btn",
+                                n_clicks=0,
+                                className="action-btn secondary",
+                            ),
+                            html.Button(
+                                tr("workbench.run_dialog.cancel", "es"),
+                                id="run-scan-cancel-btn",
+                                n_clicks=0,
+                                className="action-btn tertiary",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
 def scenario_sidebar() -> html.Div:
     return html.Div(
         className="panel sidebar-panel",
