@@ -43,6 +43,7 @@ from services import (
     export_deterministic_artifacts,
     export_scenario_workbook,
     format_metric,
+    frame_from_rows,
     load_config_from_excel,
     load_example_config,
     list_projects,
