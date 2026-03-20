@@ -2,12 +2,16 @@
   "format_version": 1,
   "name": "Demo 1",
   "slug": "demo_1",
-  "active_scenario_id": "scenario-3cf3eee7",
+  "active_scenario_id": "scenario-9f9d2e1d",
   "comparison_scenario_ids": [],
   "design_comparison_candidate_keys": {
     "scenario-9f9d2e1d": [
       "42.000::BAT-32",
       "42.000::None"
+    ],
+    "scenario-3cf3eee7": [
+      "30.000::None",
+      "12.000::None"
     ]
   },
   "scenarios": [
@@ -15,19 +19,19 @@
       "scenario_id": "scenario-9f9d2e1d",
       "name": "Escenario 1",
       "source_name": "PV_inputs.xlsx",
-      "selected_candidate_key": "42.600::BAT-29",
-      "dirty": false,
-      "last_run_at": "2026-03-15T22:20:57",
-      "scan_fingerprint": "554d20a72e6917c1863c1f41248adac177b98c9ce917cff3f7c96303a9d5abeb"
+      "selected_candidate_key": null,
+      "dirty": true,
+      "last_run_at": null,
+      "scan_fingerprint": null
     },
     {
       "scenario_id": "scenario-3cf3eee7",
       "name": "Escenario 2",
       "source_name": "PV_inputs.xlsx",
-      "selected_candidate_key": null,
-      "dirty": true,
-      "last_run_at": null,
-      "scan_fingerprint": null
+      "selected_candidate_key": "27.000::None",
+      "dirty": false,
+      "last_run_at": "2026-03-20T10:18:35",
+      "scan_fingerprint": "258a7c4b831c2f2ac93b71af1d233f8aa5c6ed661a2dfda954f2be454ac85983"
     }
   ],
   "ui_prefs": {

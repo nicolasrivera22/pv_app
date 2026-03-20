@@ -447,7 +447,7 @@ def build_npv_figure(
     figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
     discarded = [dict(point) for point in (discarded_points or [])]
     if not discarded:
-        figure = go.Figure()
+        figure = make_subplots(specs=[[{"secondary_y": True}]])
         if curve.empty:
             figure.add_annotation(
                 text=tr("workbench.scan_discard.no_viable_detail", lang),
@@ -459,8 +459,23 @@ def build_npv_figure(
             )
         else:
             _add_viable_npv_traces(figure, curve, lang=lang, figure_title=figure_title, selected_key=selected_key)
+            figure.add_trace(
+                go.Scatter(
+                    x=curve["kWp"],
+                    y=curve["payback_years"],
+                    mode="lines+markers",
+                    name=metric_label("payback_years", lang),
+                    line={"color": "#0f766e", "width": 2, "dash": "dash"},
+                    marker={"size": 6, "color": "#0f766e"},
+                    hovertemplate=(
+                        f"kWp: %{{x:.3f}}<br>{metric_label('payback_years', lang)}: %{{y:.2f}}<extra></extra>"
+                    ),
+                ),
+                secondary_y=True,
+            )
         figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified", margin={"t": 88})
-        figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f")
+        figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", secondary_y=False)
+        figure.update_yaxes(title=metric_label("payback_years", lang), secondary_y=True)
         figure.update_xaxes(title=tr("common.chart.installed_kwp", lang))
         _apply_panel_count_axis(figure, curve, module_power_w, lang=lang, axis_name="xaxis2", overlay_axis="x")
         return figure
@@ -471,6 +486,7 @@ def build_npv_figure(
         shared_xaxes=True,
         row_heights=[0.82, 0.18],
         vertical_spacing=0.05,
+        specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
     )
     if curve.empty:
         figure.add_annotation(
@@ -483,6 +499,22 @@ def build_npv_figure(
         )
     else:
         _add_viable_npv_traces(figure, curve, lang=lang, figure_title=figure_title, selected_key=selected_key, row=1)
+        figure.add_trace(
+            go.Scatter(
+                x=curve["kWp"],
+                y=curve["payback_years"],
+                mode="lines+markers",
+                name=metric_label("payback_years", lang),
+                line={"color": "#0f766e", "width": 2, "dash": "dash"},
+                marker={"size": 6, "color": "#0f766e"},
+                hovertemplate=(
+                    f"kWp: %{{x:.3f}}<br>{metric_label('payback_years', lang)}: %{{y:.2f}}<extra></extra>"
+                ),
+            ),
+            row=1,
+            col=1,
+            secondary_y=True,
+        )
 
     discard_frame = pd.DataFrame(discarded).sort_values(["scan_order", "kWp"], kind="mergesort").reset_index(drop=True)
     for reason, color in (("peak_ratio", "#d97706"), ("inverter_string", "#64748b")):
@@ -504,7 +536,8 @@ def build_npv_figure(
         )
 
     figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified", margin={"t": 88})
-    figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", row=1, col=1)
+    figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", row=1, col=1, secondary_y=False)
+    figure.update_yaxes(title=metric_label("payback_years", lang), row=1, col=1, secondary_y=True)
     figure.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, range=[0, 1], row=2, col=1)
     figure.update_xaxes(title=tr("common.chart.installed_kwp", lang), row=2, col=1)
     _apply_panel_count_axis(figure, curve, module_power_w, lang=lang, axis_name="xaxis3", overlay_axis="x")
