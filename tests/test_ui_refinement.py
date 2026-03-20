@@ -432,6 +432,8 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
 def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
     section = candidate_explorer_section()
     assert section.id == "candidate-selection-section"
+    assert _find_component(section, "scan-summary-strip") is not None
+    assert _find_component(section, "scan-discard-explainer") is not None
     assert _find_component(section, "active-kpi-cards") is not None
     assert _find_component(section, "active-npv-graph") is not None
     assert _find_component(section, "candidate-selection-helper") is not None
@@ -1420,6 +1422,90 @@ def test_npv_chart_omits_top_axis_without_valid_module_power() -> None:
     figure = build_npv_figure(table, lang="es", module_power_w=0.0)
 
     assert "xaxis2" not in figure.layout
+
+
+def test_npv_chart_renders_discard_strip_without_fabricating_npv() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery": "None",
+                "NPV_COP": 10_000_000,
+                "payback_years": 5.5,
+                "self_consumption_ratio": 0.45,
+                "peak_ratio": 1.1,
+                "scan_order": 0,
+            },
+            {
+                "candidate_key": "18.000::BAT-10",
+                "kWp": 18.0,
+                "battery": "BAT-10",
+                "NPV_COP": 16_000_000,
+                "payback_years": 6.2,
+                "self_consumption_ratio": 0.52,
+                "peak_ratio": 1.25,
+                "scan_order": 1,
+            },
+        ]
+    )
+
+    figure = build_npv_figure(
+        table,
+        selected_key="18.000::BAT-10",
+        lang="es",
+        module_power_w=600.0,
+        discarded_points=(
+            {"scan_order": 2, "kWp": 24.0, "reason": "peak_ratio", "peak_ratio": 1.8, "limit_peak_ratio": 1.5},
+            {"scan_order": 3, "kWp": 30.0, "reason": "inverter_string"},
+        ),
+    )
+
+    assert figure.layout.xaxis3.title.text == "Número de paneles"
+    assert figure.layout.yaxis2.showticklabels is False
+    assert any(trace.name == "Diseño seleccionado" for trace in figure.data)
+    discard_traces = [trace for trace in figure.data if trace.name in {"excede el límite de peak ratio", "no se encontró una combinación válida de inversor/string"}]
+    assert len(discard_traces) == 2
+    assert all(all(value == 0.5 for value in trace.y) for trace in discard_traces)
+    assert any("Descartado" in trace.hovertemplate[0] for trace in discard_traces if isinstance(trace.hovertemplate, (list, tuple)))
+
+
+def test_workbench_results_explain_all_discarded_scan() -> None:
+    bundle = replace(
+        _fast_bundle(),
+        config={**_fast_bundle().config, "limit_peak_ratio_enable": True, "limit_peak_ratio": 0.01},
+    )
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", bundle))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    payload = _session_payload(state)
+
+    (
+        summary_strip,
+        explainer,
+        explainer_style,
+        kpis,
+        npv_figure,
+        _banner,
+        monthly_figure,
+        _cash_flow,
+        _annual,
+        _battery,
+        _typical_day,
+        table_rows,
+        _columns,
+        selected_rows,
+        _styles,
+        _tooltips,
+    ) = workbench_page.populate_results(payload, "es")
+
+    assert len(summary_strip) == 4
+    assert "restricción dominante actual" in explainer
+    assert explainer_style["display"] == "block"
+    assert kpis == []
+    assert table_rows == []
+    assert selected_rows == []
+    assert monthly_figure.layout.annotations[0].text == tr("workbench.scan_discard.no_viable_detail", "es")
+    assert npv_figure.data
 
 
 def test_deep_dive_figure_builders_return_non_empty_plotly_figures() -> None:

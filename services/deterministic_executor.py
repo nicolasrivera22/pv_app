@@ -41,7 +41,9 @@ class DeterministicScanTask:
 @dataclass(frozen=True)
 class DeterministicScanTaskResult:
     task_index: int
+    k_wp: float
     detail_rows: tuple[dict[str, Any], ...]
+    discarded_point: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -185,6 +187,16 @@ def _build_tasks(config_bundle: LoadedConfigBundle) -> tuple[float, tuple[Determ
     return float(seed), tasks
 
 
+def _discard_point(task: DeterministicScanTask, reason: str, **context: Any) -> dict[str, Any]:
+    point = {
+        "scan_order": int(task.task_index),
+        "kWp": float(task.k_wp),
+        "reason": str(reason),
+    }
+    point.update({key: value for key, value in context.items() if value is not None})
+    return point
+
+
 def evaluate_deterministic_scan_task(task: DeterministicScanTask) -> DeterministicScanTaskResult:
     cfg = task.cfg
     simulator = Simulator(
@@ -210,7 +222,12 @@ def evaluate_deterministic_scan_task(task: DeterministicScanTask) -> Determinist
         ILR_target=(cfg["ILR_min"], cfg["ILR_max"]),
     )
     if inv_sel is None:
-        return DeterministicScanTaskResult(task_index=task.task_index, detail_rows=())
+        return DeterministicScanTaskResult(
+            task_index=task.task_index,
+            k_wp=k_wp,
+            detail_rows=(),
+            discarded_point=_discard_point(task, "inverter_string"),
+        )
 
     ok_peak, ratio = peak_ratio_ok(
         cfg,
@@ -223,7 +240,17 @@ def evaluate_deterministic_scan_task(task: DeterministicScanTask) -> Determinist
         day_w=task.day_weights,
     )
     if not ok_peak:
-        return DeterministicScanTaskResult(task_index=task.task_index, detail_rows=())
+        return DeterministicScanTaskResult(
+            task_index=task.task_index,
+            k_wp=k_wp,
+            detail_rows=(),
+            discarded_point=_discard_point(
+                task,
+                "peak_ratio",
+                peak_ratio=float(ratio),
+                limit_peak_ratio=float(cfg.get("limit_peak_ratio", 0.0) or 0.0),
+            ),
+        )
 
     price_per_kwp_cop = _lookup_price_per_kwp(task.cop_kwp_table, k_wp, "Precios_kWp_relativos")
     if cfg["include_var_others"]:
@@ -276,21 +303,97 @@ def evaluate_deterministic_scan_task(task: DeterministicScanTask) -> Determinist
                 "best_battery": False,
             }
         )
-    return DeterministicScanTaskResult(task_index=task.task_index, detail_rows=tuple(detail_rows))
+    return DeterministicScanTaskResult(task_index=task.task_index, k_wp=k_wp, detail_rows=tuple(detail_rows))
 
 
-def _run_tasks_serial(tasks: tuple[DeterministicScanTask, ...]) -> tuple[dict[str, Any], ...]:
+def _run_task_results_serial(tasks: tuple[DeterministicScanTask, ...]) -> tuple[DeterministicScanTaskResult, ...]:
     results = [evaluate_deterministic_scan_task(task) for task in tasks]
-    ordered = sorted(results, key=lambda item: item.task_index)
-    return tuple(detail for result in ordered for detail in result.detail_rows)
+    return tuple(sorted(results, key=lambda item: item.task_index))
 
 
-def _run_tasks_parallel(tasks: tuple[DeterministicScanTask, ...], max_workers: int) -> tuple[dict[str, Any], ...]:
+def _run_task_results_parallel(tasks: tuple[DeterministicScanTask, ...], max_workers: int) -> tuple[DeterministicScanTaskResult, ...]:
     mp_context = get_context("spawn")
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=mp_context) as executor:
         results = list(executor.map(evaluate_deterministic_scan_task, tasks))
-    ordered = sorted(results, key=lambda item: item.task_index)
-    return tuple(detail for result in ordered for detail in result.detail_rows)
+    return tuple(sorted(results, key=lambda item: item.task_index))
+
+
+def _flatten_task_results(task_results: tuple[DeterministicScanTaskResult, ...]) -> tuple[dict[str, Any], ...]:
+    return tuple(detail for result in task_results for detail in result.detail_rows)
+
+
+def _run_tasks_serial(tasks: tuple[DeterministicScanTask, ...]) -> tuple[dict[str, Any], ...]:
+    return _flatten_task_results(_run_task_results_serial(tasks))
+
+
+def _run_tasks_parallel(tasks: tuple[DeterministicScanTask, ...], max_workers: int) -> tuple[dict[str, Any], ...]:
+    return _flatten_task_results(_run_task_results_parallel(tasks, max_workers=max_workers))
+
+
+def run_deterministic_scan_task_results(
+    config_bundle: LoadedConfigBundle,
+    *,
+    allow_parallel: bool = True,
+    max_workers: int | None = None,
+) -> tuple[float, tuple[DeterministicScanTaskResult, ...]]:
+    started_at = time.perf_counter()
+    tasks: tuple[Any, ...] = ()
+    decision: WorkerDecision | None = None
+    fallback_to_serial = False
+    fallback_reason: str | None = None
+    execution_mode = "serial"
+    effective_workers = 1
+
+    seed_kwp, tasks = _build_tasks(config_bundle)
+    decision = _resolve_worker_decision(
+        allow_parallel=allow_parallel,
+        task_count=len(tasks),
+        max_workers=max_workers,
+    )
+    execution_mode = decision.execution_mode
+    effective_workers = decision.effective_workers
+    try:
+        if decision.execution_mode == "serial":
+            task_results = _run_task_results_serial(tasks)
+        else:
+            try:
+                task_results = _run_task_results_parallel(tasks, max_workers=decision.effective_workers)
+            except Exception as exc:
+                fallback_to_serial = True
+                fallback_reason = "parallel_exception"
+                execution_mode = "serial"
+                effective_workers = 1
+                logger.exception(
+                    _structured_log_message(
+                        event="deterministic_scan_parallel_fallback",
+                        candidate_tasks=len(tasks),
+                        requested_workers=decision.requested_workers,
+                        effective_workers=effective_workers,
+                        worker_source=decision.worker_source,
+                        fallback_reason=fallback_reason,
+                        exc_class=type(exc).__name__,
+                        exc_message=str(exc),
+                    )
+                )
+                task_results = _run_task_results_serial(tasks)
+        return seed_kwp, task_results
+    finally:
+        if decision is not None:
+            total_ms = (time.perf_counter() - started_at) * 1000.0
+            logger.info(
+                _structured_log_message(
+                    event="deterministic_scan",
+                    total_ms=f"{total_ms:.1f}",
+                    candidate_tasks=len(tasks),
+                    execution_mode=execution_mode,
+                    requested_workers=decision.requested_workers,
+                    effective_workers=effective_workers,
+                    worker_source=decision.worker_source,
+                    serial_reason=fallback_reason or decision.serial_reason,
+                    fallback_to_serial=fallback_to_serial,
+                    fallback_reason=fallback_reason,
+                )
+            )
 
 
 def run_deterministic_scan_tasks(

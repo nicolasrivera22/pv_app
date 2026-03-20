@@ -267,9 +267,29 @@ def test_scan_payload_round_trip_preserves_detail_fields() -> None:
     restored = type(scan).from_payload(scan.to_payload())
 
     assert restored.best_candidate_key == scan.best_candidate_key
+    assert restored.evaluated_kwp_count == scan.evaluated_kwp_count
+    assert restored.viable_kwp_count == scan.viable_kwp_count
+    assert restored.discard_counts == scan.discard_counts
+    assert restored.discarded_points == scan.discarded_points
     detail = restored.candidate_details[restored.best_candidate_key]
     assert "self_consumption_ratio" in detail
     assert "scan_order" in detail
+
+
+def test_scan_payload_backfills_discard_telemetry_for_legacy_payload() -> None:
+    scan = run_scan(_fast_bundle())
+    payload = scan.to_payload()
+    payload.pop("evaluated_kwp_count")
+    payload.pop("viable_kwp_count")
+    payload.pop("discard_counts")
+    payload.pop("discarded_points")
+
+    restored = type(scan).from_payload(payload)
+
+    assert restored.viable_kwp_count == int(scan.candidates["kWp"].nunique())
+    assert restored.evaluated_kwp_count == restored.viable_kwp_count
+    assert restored.discard_counts == {}
+    assert restored.discarded_points == ()
 
 
 def test_candidate_table_has_single_best_battery_per_kwp_and_detail_alignment() -> None:
@@ -503,6 +523,37 @@ def test_peak_ratio_behavior_is_kept_for_legacy_compatibility() -> None:
 
     assert ok_a == ok_b or isinstance(ok_a, bool)
     assert ratio_b != ratio_a
+
+
+def test_all_discarded_peak_ratio_scan_returns_completed_result() -> None:
+    bundle = _fast_bundle()
+    discarded_bundle = replace(
+        bundle,
+        config={**bundle.config, "limit_peak_ratio_enable": True, "limit_peak_ratio": 0.01},
+    )
+
+    scan = run_scan(discarded_bundle)
+
+    assert scan.best_candidate_key is None
+    assert scan.candidates.empty
+    assert scan.viable_kwp_count == 0
+    assert scan.evaluated_kwp_count > 0
+    assert scan.discard_counts["peak_ratio"] == scan.evaluated_kwp_count
+    assert scan.discard_counts["inverter_string"] == 0
+    assert scan.discarded_points
+    assert all(point["reason"] == "peak_ratio" for point in scan.discarded_points)
+
+
+def test_selected_candidate_helper_ignores_discard_marker_clicks() -> None:
+    scan = run_scan(_fast_bundle())
+
+    selected_key = resolve_selected_candidate_key_for_scenario(
+        scan,
+        scan.best_candidate_key,
+        click_data={"points": [{"x": 18.0, "y": 0.5}]},
+    )
+
+    assert selected_key == scan.best_candidate_key
 
 
 def test_regression_against_preserved_legacy_artifacts() -> None:

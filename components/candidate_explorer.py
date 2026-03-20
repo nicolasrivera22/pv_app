@@ -36,9 +36,11 @@ def candidate_explorer_section() -> html.Div:
             html.Div("", id="scenario-artifacts-progress", className="status-line", style={"display": "none"}),
             html.P(tr("workbench.export.note", "es"), id="candidate-export-note", className="section-copy section-copy-wide"),
             html.P(tr("workbench.candidate_explorer.intro", "es"), id="candidate-explorer-intro", className="section-copy section-copy-wide"),
+            html.Div(id="scan-summary-strip", className="scan-summary-strip"),
             html.Div(tr("workbench.selected_design.summary", "es"), id="selected-candidate-kpi-title", className="selected-candidate-kpi-title"),
             html.Div(id="active-kpi-cards", className="kpi-grid"),
             dcc.Graph(id="active-npv-graph"),
+            html.P("", id="scan-discard-explainer", className="section-copy scan-discard-explainer", style={"display": "none"}),
             html.P(
                 tr("workbench.candidate_selection.helper", "es"),
                 id="candidate-selection-helper",

@@ -19,6 +19,20 @@ def _array_to_list(value: np.ndarray) -> list[Any]:
     return value.tolist()
 
 
+def _distinct_viable_kwp_count(
+    candidates: pd.DataFrame,
+    candidate_details: dict[str, dict[str, Any]],
+) -> int:
+    if not candidates.empty and "kWp" in candidates.columns:
+        return int(candidates["kWp"].nunique())
+    viable_kwp = {
+        round(float(detail.get("kWp", 0.0) or 0.0), 6)
+        for detail in candidate_details.values()
+        if detail.get("kWp") not in (None, "")
+    }
+    return len(viable_kwp)
+
+
 @dataclass(frozen=True)
 class ValidationIssue:
     level: str
@@ -103,10 +117,14 @@ class LoadedConfigBundle:
 @dataclass(frozen=True)
 class ScanRunResult:
     candidates: pd.DataFrame
-    best_candidate_key: str
+    best_candidate_key: str | None
     candidate_details: dict[str, dict[str, Any]]
     seed_kwp: float
     issues: tuple[ValidationIssue, ...] = ()
+    evaluated_kwp_count: int = 0
+    viable_kwp_count: int = 0
+    discard_counts: dict[str, int] = field(default_factory=dict)
+    discarded_points: tuple[dict[str, Any], ...] = ()
 
     def to_payload(self) -> dict[str, Any]:
         details_payload: dict[str, dict[str, Any]] = {}
@@ -132,6 +150,10 @@ class ScanRunResult:
             "candidate_details": details_payload,
             "seed_kwp": self.seed_kwp,
             "issues": [issue.to_payload() for issue in self.issues],
+            "evaluated_kwp_count": int(self.evaluated_kwp_count),
+            "viable_kwp_count": int(self.viable_kwp_count),
+            "discard_counts": {str(key): int(value) for key, value in self.discard_counts.items()},
+            "discarded_points": [dict(point) for point in self.discarded_points],
         }
 
     @classmethod
@@ -153,12 +175,24 @@ class ScanRunResult:
                 "self_sufficiency_ratio": detail.get("self_sufficiency_ratio", 0.0),
                 "monthly": _frame_from_payload(detail["monthly"]),
             }
+        candidates = _frame_from_payload(payload["candidates"])
+        viable_kwp_count = int(payload.get("viable_kwp_count", _distinct_viable_kwp_count(candidates, details)))
+        evaluated_kwp_count = int(payload.get("evaluated_kwp_count", viable_kwp_count))
+        discard_counts = {
+            str(key): int(value)
+            for key, value in dict(payload.get("discard_counts") or {}).items()
+        }
+        discarded_points = tuple(dict(point) for point in (payload.get("discarded_points") or []))
         return cls(
-            candidates=_frame_from_payload(payload["candidates"]),
-            best_candidate_key=payload["best_candidate_key"],
+            candidates=candidates,
+            best_candidate_key=payload.get("best_candidate_key"),
             candidate_details=details,
             seed_kwp=float(payload["seed_kwp"]),
             issues=tuple(ValidationIssue.from_payload(issue) for issue in payload.get("issues", [])),
+            evaluated_kwp_count=evaluated_kwp_count,
+            viable_kwp_count=viable_kwp_count,
+            discard_counts=discard_counts,
+            discarded_points=discarded_points,
         )
 
 

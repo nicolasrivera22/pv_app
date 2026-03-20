@@ -97,6 +97,21 @@ def test_ready_scenarios_filter_and_validation_are_explicit() -> None:
     assert any("Seed" in issue for issue in issues)
 
 
+def test_ready_risk_scenarios_excludes_completed_scans_without_viable_designs() -> None:
+    bundle = replace(
+        _fast_bundle(),
+        config={**_fast_bundle().config, "limit_peak_ratio_enable": True, "limit_peak_ratio": 0.01},
+    )
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("No viable", bundle))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+
+    assert scenario is not None and scenario.scan_result is not None
+    assert scenario.scan_result.best_candidate_key is None
+    assert ready_risk_scenarios(state) == []
+    assert resolve_default_risk_candidate(scenario) is None
+
+
 def test_validation_rejects_non_positive_manual_risk_kwp_when_enabled() -> None:
     state = _run_ready_scenario()
     scenario = state.get_scenario()

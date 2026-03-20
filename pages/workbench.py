@@ -192,24 +192,32 @@ def _blank_table_row(table_columns, table_rows=None) -> dict[str, str]:
 
 
 def _candidate_table_styles(selected_key: str, best_key: str) -> list[dict]:
-    return [
-        {
-            "if": {"filter_query": f'{{candidate_key}} = "{best_key}"'},
-            "backgroundColor": "#dcfce7",
-            "fontWeight": "bold",
-        },
+    styles = [
         {
             "if": {"filter_query": "{best_battery_for_kwp} = true"},
             "backgroundColor": "#eff6ff",
-        },
-        {
-            "if": {"filter_query": f'{{candidate_key}} = "{selected_key}"'},
-            "backgroundColor": "#fee2e2",
-            "borderTop": "2px solid #b91c1c",
-            "borderBottom": "2px solid #b91c1c",
-            "fontWeight": "bold",
-        },
+        }
     ]
+    if best_key:
+        styles.insert(
+            0,
+            {
+                "if": {"filter_query": f'{{candidate_key}} = "{best_key}"'},
+                "backgroundColor": "#dcfce7",
+                "fontWeight": "bold",
+            },
+        )
+    if selected_key:
+        styles.append(
+            {
+                "if": {"filter_query": f'{{candidate_key}} = "{selected_key}"'},
+                "backgroundColor": "#fee2e2",
+                "borderTop": "2px solid #b91c1c",
+                "borderBottom": "2px solid #b91c1c",
+                "fontWeight": "bold",
+            }
+        )
+    return styles
 
 
 def _selected_candidate_banner(detail: dict | None, *, lang: str = "es") -> list[html.Div]:
@@ -244,6 +252,81 @@ def _selected_candidate_banner(detail: dict | None, *, lang: str = "es") -> list
         )
         for label, value in banner_values
     ]
+
+
+def _has_viable_scan_result(scan_result) -> bool:
+    return scan_result is not None and not scan_result.candidates.empty and bool(scan_result.candidate_details)
+
+
+def _scan_max_evaluated_kwp(scan_result) -> float | None:
+    values: list[float] = []
+    if scan_result is None:
+        return None
+    if not scan_result.candidates.empty and "kWp" in scan_result.candidates.columns:
+        values.extend(float(value) for value in scan_result.candidates["kWp"].dropna().tolist())
+    values.extend(
+        float(point["kWp"])
+        for point in scan_result.discarded_points
+        if point.get("kWp") not in (None, "")
+    )
+    return max(values) if values else None
+
+
+def _dominant_discard_reasons(scan_result) -> list[str]:
+    counts = dict(scan_result.discard_counts or {})
+    ordered = ["peak_ratio", "inverter_string"]
+    highest = max((int(counts.get(reason, 0)) for reason in ordered), default=0)
+    if highest <= 0:
+        return []
+    return [reason for reason in ordered if int(counts.get(reason, 0)) == highest]
+
+
+def _join_reason_labels(reason_labels: list[str], lang: str) -> str:
+    if not reason_labels:
+        return ""
+    if len(reason_labels) == 1:
+        return reason_labels[0]
+    conjunction = " y " if lang == "es" else " and "
+    if len(reason_labels) == 2:
+        return conjunction.join(reason_labels)
+    return ", ".join(reason_labels[:-1]) + f"{conjunction}{reason_labels[-1]}"
+
+
+def _scan_summary_strip(scan_result, *, lang: str = "es") -> list[html.Div]:
+    if scan_result is None:
+        return []
+    counters = [
+        ("workbench.scan_summary.evaluated", int(scan_result.evaluated_kwp_count)),
+        ("workbench.scan_summary.viable", int(scan_result.viable_kwp_count)),
+        ("workbench.scan_summary.discard_peak_ratio", int((scan_result.discard_counts or {}).get("peak_ratio", 0))),
+        ("workbench.scan_summary.discard_inverter_string", int((scan_result.discard_counts or {}).get("inverter_string", 0))),
+    ]
+    return [
+        html.Div(
+            className="scan-summary-card",
+            children=[
+                html.Span(tr(label_key, lang), className="scan-summary-label"),
+                html.Span(f"{value:,}", className="scan-summary-value"),
+            ],
+        )
+        for label_key, value in counters
+    ]
+
+
+def _scan_discard_explainer(scan_result, *, lang: str = "es") -> tuple[str, dict[str, str]]:
+    if scan_result is None:
+        return "", {"display": "none"}
+    discard_total = sum(int(value) for value in (scan_result.discard_counts or {}).values())
+    if discard_total <= 0:
+        return "", {"display": "none"}
+    max_kwp = _scan_max_evaluated_kwp(scan_result) or 0.0
+    reasons = _dominant_discard_reasons(scan_result)
+    dominant = _join_reason_labels([tr(f"workbench.scan_discard.reason.{reason}", lang) for reason in reasons], lang)
+    if int(scan_result.viable_kwp_count) <= 0:
+        key = "workbench.scan_discard.explainer.all"
+    else:
+        key = "workbench.scan_discard.explainer.partial"
+    return tr(key, lang, max_kwp=max_kwp, reason=dominant), {"display": "block"}
 
 
 def _apply_current_workbench_edits(
@@ -779,7 +862,7 @@ def populate_scenario_shell(session_payload, language_value):
         run_status = tr("workbench.run_not_executed", lang)
     validation_children = render_validation_panel(active.config_bundle.issues, lang=lang)
     has_errors = any(issue.level == "error" for issue in active.config_bundle.issues)
-    export_disabled = active.dirty
+    export_disabled = active.dirty or not _has_viable_scan_result(active.scan_result)
     return (
         project_options,
         state.project_slug,
@@ -1752,6 +1835,9 @@ def persist_selected_candidate(selected_rows, click_data, table_rows, session_pa
 
 
 @callback(
+    Output("scan-summary-strip", "children"),
+    Output("scan-discard-explainer", "children"),
+    Output("scan-discard-explainer", "style"),
     Output("active-kpi-cards", "children"),
     Output("active-npv-graph", "figure"),
     Output("selected-candidate-banner", "children"),
@@ -1773,14 +1859,12 @@ def populate_results(session_payload, language_value):
     _, state, active = _session_with_scan(session_payload, lang)
     empty = _empty_figure(tr("common.results", lang), tr("workbench.results.empty", lang))
     if active is None or active.scan_result is None:
-        return [], empty, [], empty, empty, empty, empty, empty, [], [], [], [], {}
+        return [], "", {"display": "none"}, [], empty, [], empty, empty, empty, empty, empty, [], [], [], [], {}
 
     scan = active.scan_result
+    summary_strip = _scan_summary_strip(scan, lang=lang)
+    discard_explainer, discard_explainer_style = _scan_discard_explainer(scan, lang=lang)
     selected_key = resolve_selected_candidate_key_for_scenario(scan, active.selected_candidate_key)
-    detail = scan.candidate_details[selected_key]
-    kpis = build_kpis(detail)
-    monthly_balance = build_monthly_balance(detail["monthly"], lang=lang)
-    cash_flow = build_cash_flow(detail["monthly"])
     table = scan.candidates.copy()
     table["battery"] = table["battery"].replace({"None": tr("common.no_battery", lang)})
     visible_columns = [
@@ -1803,18 +1887,48 @@ def populate_results(session_payload, language_value):
             {"name": "best_battery_for_kwp", "id": "best_battery_for_kwp"},
         ]
     )
-    selected_index = table.index[table["candidate_key"] == selected_key].tolist()
+    selected_index = table.index[table["candidate_key"] == selected_key].tolist() if selected_key else []
     best_key = scan.best_candidate_key
     styles = _candidate_table_styles(selected_key, best_key)
     module_power_w = float(active.config_bundle.config.get("P_mod_W", 0.0) or 0.0)
+    npv_figure = build_npv_figure(
+        table,
+        selected_key=selected_key,
+        lang=lang,
+        module_power_w=module_power_w,
+        discarded_points=scan.discarded_points,
+    )
+    if not _has_viable_scan_result(scan) or not selected_key:
+        detail_empty = _empty_figure(tr("common.results", lang), tr("workbench.scan_discard.no_viable_detail", lang))
+        return (
+            summary_strip,
+            discard_explainer,
+            discard_explainer_style,
+            [],
+            npv_figure,
+            _selected_candidate_banner(None, lang=lang),
+            detail_empty,
+            detail_empty,
+            detail_empty,
+            detail_empty,
+            detail_empty,
+            table.to_dict("records"),
+            columns,
+            [],
+            styles,
+            tooltip_header,
+        )
+
+    detail = scan.candidate_details[selected_key]
+    kpis = build_kpis(detail)
+    monthly_balance = build_monthly_balance(detail["monthly"], lang=lang)
+    cash_flow = build_cash_flow(detail["monthly"])
     return (
+        summary_strip,
+        discard_explainer,
+        discard_explainer_style,
         render_kpi_cards(kpis, lang),
-        build_npv_figure(
-            table,
-            selected_key=selected_key,
-            lang=lang,
-            module_power_w=module_power_w,
-        ),
+        npv_figure,
         _selected_candidate_banner(detail, lang=lang),
         build_monthly_balance_figure(monthly_balance, lang=lang),
         build_cash_flow_figure(cash_flow, lang=lang, k_wp=float(detail["kWp"]), module_power_w=module_power_w),
@@ -1868,6 +1982,20 @@ def populate_unifilar_diagram(session_payload, language_value):
         )
 
     selected_key = resolve_selected_candidate_key_for_scenario(active.scan_result, active.selected_candidate_key)
+    if not selected_key:
+        return (
+            title,
+            "",
+            tr("workbench.schematic.no_viable", lang),
+            {"display": "block"},
+            "",
+            {"display": "none"},
+            [],
+            {"width": "100%", "height": "420px"},
+            legend_title,
+            legend_children,
+            inspector_title,
+        )
     model = build_unifilar_model(active, selected_key, lang=lang)
     return (
         title,
@@ -1914,6 +2042,13 @@ def populate_unifilar_inspector(inspector_lock, session_payload, language_value)
         )
 
     selected_key = resolve_selected_candidate_key_for_scenario(active.scan_result, active.selected_candidate_key)
+    if not selected_key:
+        return render_schematic_inspector(
+            default_schematic_inspector(
+                model=None,
+                lang=lang,
+            )
+        )
     model = build_unifilar_model(active, selected_key, lang=lang)
     locked_node_id = str((inspector_lock or {}).get("node_id") or "") or None
     node_data, is_locked = resolve_schematic_focus(locked_node_id=locked_node_id, hover_node_data=None)
@@ -1931,7 +2066,7 @@ def export_active_scenario(n_clicks, session_payload):
     if not n_clicks:
         raise PreventUpdate
     _, state, active = _session_with_scan(session_payload, None)
-    if active is None or active.scan_result is None or active.dirty:
+    if active is None or active.scan_result is None or active.dirty or not _has_viable_scan_result(active.scan_result):
         raise PreventUpdate
     content = export_scenario_workbook(active)
     filename = f"{active.name.replace(' ', '_')}_deterministic.xlsx"
@@ -1955,7 +2090,7 @@ def export_active_artifacts(n_clicks, session_payload, language_value):
         raise PreventUpdate
     lang = _lang(language_value)
     _, state, active = _session_with_scan(session_payload, lang)
-    if active is None or active.scan_result is None or active.dirty:
+    if active is None or active.scan_result is None or active.dirty or not _has_viable_scan_result(active.scan_result):
         raise PreventUpdate
     output_root = project_exports_root(state.project_slug) if state.project_slug else internal_results_root()
     paths = export_deterministic_artifacts(active, output_root=output_root)

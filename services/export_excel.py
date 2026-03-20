@@ -17,6 +17,8 @@ def _summary_frame(scenario: ScenarioRecord) -> pd.DataFrame:
     if scenario.scan_result is None:
         raise ValueError(f"El escenario '{scenario.name}' no tiene resultados para exportar.")
     candidate_key = scenario.selected_candidate_key or scenario.scan_result.best_candidate_key
+    if not candidate_key:
+        raise ValueError(f"El escenario '{scenario.name}' no tiene diseños viables para exportar.")
     detail = scenario.scan_result.candidate_details[candidate_key]
     kpis = build_kpis(detail)
     return pd.DataFrame(
@@ -45,6 +47,8 @@ def export_scenario_workbook(scenario_record: ScenarioRecord) -> bytes:
     if scenario_record.scan_result is None:
         raise ValueError(f"El escenario '{scenario_record.name}' no tiene resultados para exportar.")
     candidate_key = scenario_record.selected_candidate_key or scenario_record.scan_result.best_candidate_key
+    if not candidate_key:
+        raise ValueError(f"El escenario '{scenario_record.name}' no tiene diseños viables para exportar.")
     detail = scenario_record.scan_result.candidate_details[candidate_key]
 
     output = BytesIO()
@@ -59,7 +63,11 @@ def export_scenario_workbook(scenario_record: ScenarioRecord) -> bytes:
 
 
 def export_comparison_workbook(session_state: ScenarioSessionState, scenario_records: list[ScenarioRecord]) -> bytes:
-    clean_records = [scenario for scenario in scenario_records if scenario.scan_result is not None and not scenario.dirty]
+    clean_records = [
+        scenario
+        for scenario in scenario_records
+        if scenario.scan_result is not None and not scenario.dirty and scenario.scan_result.best_candidate_key
+    ]
     if not clean_records:
         raise ValueError("No hay escenarios ejecutados para exportar la comparación.")
 

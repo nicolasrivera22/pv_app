@@ -64,6 +64,8 @@ def test_help_page_contains_real_bilingual_product_help() -> None:
     assert "Exporting and saving" in text_en
     assert "Glossary / key terms" in text_en
     assert "Risk > Monte Carlo settings" in text_en
+    assert "chart and candidate table show only viable designs" in text_en
+    assert "discard counters and discard markers" in text_en
     assert "quick-start guide" not in text_en.lower()
 
     assert title_es == tr("help.title", "es")
@@ -77,6 +79,8 @@ def test_help_page_contains_real_bilingual_product_help() -> None:
     assert "Exportar y guardar" in text_es
     assert "Glosario / términos clave" in text_es
     assert "Riesgo > Parámetros de Monte Carlo" in text_es
+    assert "solo diseños viables" in text_es
+    assert "contadores y marcadores de descarte" in text_es
 
 
 def test_validation_panel_uses_friendly_names_and_sections() -> None:
