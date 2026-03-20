@@ -70,7 +70,7 @@ def _section_label(field: str, *, lang: str = "es") -> str:
         "assumptions_demand": {"es": "Supuestos > Demanda y perfil", "en": "Assumptions > Demand and profile"},
         "assumptions_solar": {"es": "Supuestos > Sol y módulos", "en": "Assumptions > Solar and modules"},
         "assumptions_pricing": {"es": "Supuestos > Economía y precios", "en": "Assumptions > Economics and pricing"},
-        "assumptions_monte_carlo": {"es": "Supuestos > Monte Carlo", "en": "Assumptions > Monte Carlo"},
+        "assumptions_monte_carlo": {"es": "Riesgo > Monte Carlo", "en": "Risk > Monte Carlo"},
         "assumptions_peak_ratio": {"es": "Supuestos > Límite de pico FV", "en": "Assumptions > PV peak cap"},
         "assumptions_scan": {"es": "Supuestos > Barrido de diseños", "en": "Assumptions > Design scan"},
         "assumptions_battery": {"es": "Supuestos > Batería y exportación", "en": "Assumptions > Battery and export"},

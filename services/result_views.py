@@ -26,6 +26,23 @@ MONTH_ABBREVIATIONS = {
     "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
 }
 
+CANDIDATE_TABLE_COLUMNS = [
+    "scan_order",
+    "candidate_key",
+    "kWp",
+    "battery",
+    "NPV_COP",
+    "payback_years",
+    "capex_client",
+    "self_consumption_ratio",
+    "self_sufficiency_ratio",
+    "annual_import_kwh",
+    "annual_export_kwh",
+    "peak_ratio",
+    "best_battery_for_kwp",
+]
+NPV_CURVE_COLUMNS = ["kWp", "NPV_COP", "battery", "candidate_key", "payback_years", "self_consumption_ratio", "peak_ratio"]
+
 
 def candidate_key_for(k_wp: float, battery_name: str) -> str:
     return f"{k_wp:.3f}::{battery_name}"
@@ -87,7 +104,7 @@ def build_candidate_table(detail_map: dict[str, dict]) -> pd.DataFrame:
         )
     frame = pd.DataFrame(rows)
     if frame.empty:
-        return frame
+        return pd.DataFrame(columns=CANDIDATE_TABLE_COLUMNS)
     frame = frame.sort_values(
         by=["kWp", "NPV_COP", "scan_order"],
         ascending=[True, False, True],
@@ -268,10 +285,12 @@ def build_cash_flow(monthly: pd.DataFrame, *, base_year: int | None = None) -> p
 
 
 def build_npv_curve(candidate_table: pd.DataFrame) -> pd.DataFrame:
+    if candidate_table.empty:
+        return pd.DataFrame(columns=NPV_CURVE_COLUMNS)
     grouped = (
         candidate_table.sort_values(["kWp", "NPV_COP", "scan_order"], ascending=[True, False, True], kind="mergesort")
         .groupby("kWp", as_index=False, sort=True)
-        .first()[["kWp", "NPV_COP", "battery", "candidate_key", "payback_years", "self_consumption_ratio", "peak_ratio"]]
+        .first()[NPV_CURVE_COLUMNS]
     )
     return grouped.sort_values("kWp").reset_index(drop=True)
 
@@ -303,25 +322,40 @@ def _build_panel_count_axis(curve: pd.DataFrame, module_power_w: float | None, *
     return tickvals, ticktext
 
 
-def build_npv_figure(
-    candidate_table: pd.DataFrame,
-    selected_key: str | None = None,
+def _discard_reason_label(reason: str, lang: str) -> str:
+    return tr(f"workbench.scan_discard.reason.{reason}", lang)
+
+
+def _discard_hover_text(point: dict[str, Any], lang: str) -> str:
+    reason = str(point.get("reason", "")).strip()
+    base = (
+        f"{tr('workbench.scan_discard.discarded_prefix', lang)}: {_discard_reason_label(reason, lang)}"
+        f"<br>kWp: {float(point.get('kWp', 0.0)):.3f}"
+    )
+    if reason != "peak_ratio":
+        return f"{base}<extra></extra>"
+    details = []
+    peak_ratio = point.get("peak_ratio")
+    limit = point.get("limit_peak_ratio")
+    if peak_ratio not in (None, ""):
+        details.append(f"{metric_label('peak_ratio', lang)}: {float(peak_ratio):.1%}")
+    if limit not in (None, ""):
+        details.append(f"{tr('workbench.scan_discard.limit_label', lang)}: {float(limit):.1f}")
+    suffix = f"<br>{'<br>'.join(details)}" if details else ""
+    return f"{base}{suffix}<extra></extra>"
+
+
+def _add_viable_npv_traces(
+    figure: go.Figure,
+    curve: pd.DataFrame,
     *,
-    lang: str = "es",
-    title: str | None = None,
-    module_power_w: float | None = None,
-) -> go.Figure:
-    curve = build_npv_curve(candidate_table)
-    curve = curve.copy()
-    curve["battery_display"] = curve["battery"].map(lambda value: format_metric("selected_battery", value, lang))
-    if module_power_w and float(module_power_w) > 0:
-        curve["panel_count"] = curve["kWp"].map(lambda value: int(round(float(value) / (float(module_power_w) / 1000.0))))
-    else:
-        curve["panel_count"] = None
-    figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
-    figure = go.Figure()
+    lang: str,
+    figure_title: str,
+    selected_key: str | None,
+    row: int | None = None,
+) -> None:
     hover_template = (
-        f"{'kWp' if lang == 'es' else 'kWp'}: %{{x:.3f}}<br>"
+        f"kWp: %{{x:.3f}}<br>"
         f"{tr('common.chart.panels', lang)}: %{{customdata[1]}}<br>"
         f"{'Batería' if lang == 'es' else 'Battery'}: %{{customdata[2]}}<br>"
         f"{metric_label('NPV_COP', lang)}: %{{y:,.0f}}<br>"
@@ -329,6 +363,7 @@ def build_npv_figure(
         f"{metric_label('self_consumption_ratio', lang)}: %{{customdata[4]:.1%}}<br>"
         f"{metric_label('peak_ratio', lang)}: %{{customdata[5]:.1%}}<extra></extra>"
     )
+    add_trace_kwargs = {"row": row, "col": 1} if row is not None else {}
     figure.add_trace(
         go.Scatter(
             x=curve["kWp"],
@@ -339,41 +374,173 @@ def build_npv_figure(
             marker={"size": 9, "color": "#2563eb"},
             customdata=curve[["candidate_key", "panel_count", "battery_display", "payback_years", "self_consumption_ratio", "peak_ratio"]],
             hovertemplate=hover_template,
-        )
+        ),
+        **add_trace_kwargs,
     )
-    if selected_key:
-        selected_row = curve[curve["candidate_key"] == selected_key]
-        if not selected_row.empty:
-            figure.add_scatter(
-                x=selected_row["kWp"],
-                y=selected_row["NPV_COP"],
-                mode="markers",
-                marker={"size": 14, "color": "#b91c1c"},
-                name=tr("common.chart.selected_design", lang),
-                customdata=selected_row[["candidate_key", "panel_count"]],
-                hovertemplate=(
-                    tr("common.chart.selected_design", lang)
-                    + "<br>"
-                    + tr("common.chart.panels", lang)
-                    + ": %{customdata[1]}<extra></extra>"
-                ),
-            )
-    figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified", margin={"t": 88})
-    figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f")
-    figure.update_xaxes(title=tr("common.chart.installed_kwp", lang))
+    if not selected_key:
+        return
+    selected_row = curve[curve["candidate_key"] == selected_key]
+    if selected_row.empty:
+        return
+    figure.add_trace(
+        go.Scatter(
+            x=selected_row["kWp"],
+            y=selected_row["NPV_COP"],
+            mode="markers",
+            marker={"size": 14, "color": "#b91c1c"},
+            name=tr("common.chart.selected_design", lang),
+            customdata=selected_row[["candidate_key", "panel_count"]],
+            hovertemplate=(
+                tr("common.chart.selected_design", lang)
+                + "<br>"
+                + tr("common.chart.panels", lang)
+                + ": %{customdata[1]}<extra></extra>"
+            ),
+        ),
+        **add_trace_kwargs,
+    )
+
+
+def _apply_panel_count_axis(
+    figure: go.Figure,
+    curve: pd.DataFrame,
+    module_power_w: float | None,
+    *,
+    lang: str,
+    axis_name: str,
+    overlay_axis: str,
+) -> None:
     panel_axis = _build_panel_count_axis(curve, module_power_w)
-    if panel_axis is not None:
-        tickvals, ticktext = panel_axis
-        figure.update_layout(
-            xaxis2={
-                "overlaying": "x",
+    if panel_axis is None:
+        return
+    tickvals, ticktext = panel_axis
+    figure.update_layout(
+        {
+            axis_name: {
+                "overlaying": overlay_axis,
                 "side": "top",
                 "title": {"text": tr("common.chart.panel_count", lang), "standoff": 8},
                 "tickvals": tickvals,
                 "ticktext": ticktext,
                 "showgrid": False,
             }
+        }
+    )
+
+
+def build_npv_figure(
+    candidate_table: pd.DataFrame,
+    selected_key: str | None = None,
+    *,
+    lang: str = "es",
+    title: str | None = None,
+    module_power_w: float | None = None,
+    discarded_points: tuple[dict[str, Any], ...] | list[dict[str, Any]] | None = None,
+) -> go.Figure:
+    curve = build_npv_curve(candidate_table)
+    curve = curve.copy()
+    curve["battery_display"] = curve["battery"].map(lambda value: format_metric("selected_battery", value, lang))
+    if module_power_w and float(module_power_w) > 0:
+        curve["panel_count"] = curve["kWp"].map(lambda value: int(round(float(value) / (float(module_power_w) / 1000.0))))
+    else:
+        curve["panel_count"] = None
+    figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
+    discarded = [dict(point) for point in (discarded_points or [])]
+    if not discarded:
+        figure = make_subplots(specs=[[{"secondary_y": True}]])
+        if curve.empty:
+            figure.add_annotation(
+                text=tr("workbench.scan_discard.no_viable_detail", lang),
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+            )
+        else:
+            _add_viable_npv_traces(figure, curve, lang=lang, figure_title=figure_title, selected_key=selected_key)
+            figure.add_trace(
+                go.Scatter(
+                    x=curve["kWp"],
+                    y=curve["payback_years"],
+                    mode="lines+markers",
+                    name=metric_label("payback_years", lang),
+                    line={"color": "#0f766e", "width": 2, "dash": "dash"},
+                    marker={"size": 6, "color": "#0f766e"},
+                    hovertemplate=(
+                        f"kWp: %{{x:.3f}}<br>{metric_label('payback_years', lang)}: %{{y:.2f}}<extra></extra>"
+                    ),
+                ),
+                secondary_y=True,
+            )
+        figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified", margin={"t": 88})
+        figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", secondary_y=False)
+        figure.update_yaxes(title=metric_label("payback_years", lang), secondary_y=True)
+        figure.update_xaxes(title=tr("common.chart.installed_kwp", lang))
+        _apply_panel_count_axis(figure, curve, module_power_w, lang=lang, axis_name="xaxis2", overlay_axis="x")
+        return figure
+
+    figure = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.82, 0.18],
+        vertical_spacing=0.05,
+        specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
+    )
+    if curve.empty:
+        figure.add_annotation(
+            text=tr("workbench.scan_discard.all_discarded_chart", lang),
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.88,
+            showarrow=False,
         )
+    else:
+        _add_viable_npv_traces(figure, curve, lang=lang, figure_title=figure_title, selected_key=selected_key, row=1)
+        figure.add_trace(
+            go.Scatter(
+                x=curve["kWp"],
+                y=curve["payback_years"],
+                mode="lines+markers",
+                name=metric_label("payback_years", lang),
+                line={"color": "#0f766e", "width": 2, "dash": "dash"},
+                marker={"size": 6, "color": "#0f766e"},
+                hovertemplate=(
+                    f"kWp: %{{x:.3f}}<br>{metric_label('payback_years', lang)}: %{{y:.2f}}<extra></extra>"
+                ),
+            ),
+            row=1,
+            col=1,
+            secondary_y=True,
+        )
+
+    discard_frame = pd.DataFrame(discarded).sort_values(["scan_order", "kWp"], kind="mergesort").reset_index(drop=True)
+    for reason, color in (("peak_ratio", "#d97706"), ("inverter_string", "#64748b")):
+        subset = discard_frame[discard_frame["reason"] == reason]
+        if subset.empty:
+            continue
+        figure.add_trace(
+            go.Scatter(
+                x=subset["kWp"],
+                y=[0.5] * len(subset),
+                mode="markers",
+                name=_discard_reason_label(reason, lang),
+                marker={"size": 11, "symbol": "x", "color": color, "line": {"width": 2, "color": color}},
+                hovertemplate=[_discard_hover_text(point, lang) for point in subset.to_dict("records")],
+                showlegend=False,
+            ),
+            row=2,
+            col=1,
+        )
+
+    figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified", margin={"t": 88})
+    figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", row=1, col=1, secondary_y=False)
+    figure.update_yaxes(title=metric_label("payback_years", lang), row=1, col=1, secondary_y=True)
+    figure.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, range=[0, 1], row=2, col=1)
+    figure.update_xaxes(title=tr("common.chart.installed_kwp", lang), row=2, col=1)
+    _apply_panel_count_axis(figure, curve, module_power_w, lang=lang, axis_name="xaxis3", overlay_axis="x")
     return figure
 
 
@@ -717,7 +884,7 @@ def build_cash_flow_figure(
     return figure
 
 
-def resolve_selected_candidate_key(scan_result, selected_rows=None, table_rows=None) -> str:
+def resolve_selected_candidate_key(scan_result, selected_rows=None, table_rows=None) -> str | None:
     selected_key = scan_result.best_candidate_key
     if selected_rows and table_rows:
         selected_index = selected_rows[0]
@@ -734,7 +901,7 @@ def resolve_selected_candidate_key_for_scenario(
     table_rows: list[dict] | None = None,
     selected_rows: list[int] | None = None,
     click_data: dict | None = None,
-) -> str:
+) -> str | None:
     if click_data and click_data.get("points"):
         point = click_data["points"][0]
         customdata = point.get("customdata")
@@ -755,6 +922,8 @@ def build_scenario_summary_row(scenario: ScenarioRecord) -> dict[str, Any]:
     if scenario.scan_result is None:
         raise ValueError(f"El escenario '{scenario.name}' no tiene un escaneo determinístico.")
     candidate_key = scenario.selected_candidate_key or scenario.scan_result.best_candidate_key
+    if not candidate_key:
+        raise ValueError(f"El escenario '{scenario.name}' no tiene diseños viables en el escaneo determinístico.")
     detail = scenario.scan_result.candidate_details[candidate_key]
     kpis = build_kpis(detail)
     return {
@@ -773,7 +942,11 @@ def build_scenario_summary_row(scenario: ScenarioRecord) -> dict[str, Any]:
 
 
 def build_comparison_table(scenarios: list[ScenarioRecord]) -> pd.DataFrame:
-    rows = [build_scenario_summary_row(scenario) for scenario in scenarios if scenario.scan_result is not None and not scenario.dirty]
+    rows = [
+        build_scenario_summary_row(scenario)
+        for scenario in scenarios
+        if scenario.scan_result is not None and not scenario.dirty and scenario.scan_result.best_candidate_key
+    ]
     if not rows:
         return pd.DataFrame(
             columns=[
@@ -794,7 +967,11 @@ def build_comparison_table(scenarios: list[ScenarioRecord]) -> pd.DataFrame:
 
 
 def build_comparison_figures(scenarios: list[ScenarioRecord], lang: str = "es") -> dict[str, go.Figure]:
-    clean_scenarios = [scenario for scenario in scenarios if scenario.scan_result is not None and not scenario.dirty]
+    clean_scenarios = [
+        scenario
+        for scenario in scenarios
+        if scenario.scan_result is not None and not scenario.dirty and scenario.scan_result.best_candidate_key
+    ]
     summary = build_comparison_table(clean_scenarios)
 
     if summary.empty:

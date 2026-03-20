@@ -21,6 +21,7 @@ from components.candidate_explorer import candidate_explorer_section
 from components.selected_candidate_deep_dive import selected_candidate_deep_dive_section
 from components.profile_editor import profile_editor_section
 from components.catalog_editor import catalog_editor_section
+from pages import risk as risk_page
 from pages import workbench as workbench_page
 help_page = importlib.import_module("pages.help")
 from services import (
@@ -407,6 +408,10 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     assert _find_component(section, "demand-profile-weights-editor").page_size == 12
     assert _find_component(section, "price-kwp-editor").page_size == 8
     assert _find_component(section, "price-kwp-others-editor").page_size == 8
+    assert _find_component(section, "price-kwp-editor").row_deletable is True
+    assert _find_component(section, "price-kwp-others-editor").row_deletable is True
+    assert _find_component(section, "month-profile-editor").row_deletable is False
+    assert _find_component(section, "demand-profile-editor").row_deletable is False
     assert _find_component(section, "month-profile-tooltip").children == tr("workbench.profiles.tooltip.month", "es")
     assert _find_component(section, "sun-profile-tooltip").children == tr("workbench.profiles.tooltip.sun", "es")
     assert _find_component(section, "price-kwp-tooltip").children == tr("workbench.profiles.tooltip.price", "es")
@@ -416,6 +421,8 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     assert _find_component(section, "demand-profile-weights-tooltip").children == tr("workbench.profiles.tooltip.demand_weights", "es")
     assert _find_component(section, "add-price-kwp-row-btn").children == tr("workbench.profiles.add_row", "es")
     assert _find_component(section, "add-price-kwp-others-row-btn").children == tr("workbench.profiles.add_row", "es")
+    assert "profile-secondary-pricing-panel" in str(_find_component(section, "price-kwp-panel").className)
+    assert "profile-secondary-pricing-panel" in str(_find_component(section, "price-kwp-others-panel").className)
     assert _find_component(workbench_page.layout, "run-scan-choice-dialog") is not None
     assert _find_component(workbench_page.layout, "run-scan-save-and-run-btn") is not None
     assert _find_component(workbench_page.layout, "run-scan-run-unsaved-btn") is not None
@@ -425,6 +432,8 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
 def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
     section = candidate_explorer_section()
     assert section.id == "candidate-selection-section"
+    assert _find_component(section, "scan-summary-strip") is not None
+    assert _find_component(section, "scan-discard-explainer") is not None
     assert _find_component(section, "active-kpi-cards") is not None
     assert _find_component(section, "active-npv-graph") is not None
     assert _find_component(section, "candidate-selection-helper") is not None
@@ -704,13 +713,48 @@ def test_workbench_assumption_context_callback_highlights_fixed_battery_selectio
     assert note_styles == [{"display": "block"}]
 
 
-def test_populate_assumptions_keeps_monte_carlo_group_visible_in_workbench() -> None:
+def test_populate_assumptions_hides_monte_carlo_group_in_workbench() -> None:
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     payload = _session_payload(state, lang="es")
 
     rendered = workbench_page.populate_assumptions(payload, [], "es")
 
-    assert any("Monte Carlo" in str(section.to_plotly_json()) for section in rendered)
+    assert not any("Monte Carlo" in str(section.to_plotly_json()) for section in rendered)
+
+
+def test_risk_monte_carlo_context_callback_enables_manual_kwp_only_when_requested() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None
+
+    payload = _session_payload(state, lang="en")
+    field_values = {
+        "mc_PR_std": 5.0,
+        "mc_buy_std": 4.0,
+        "mc_sell_std": 3.0,
+        "mc_demand_std": 2.0,
+        "mc_use_manual_kWp": True,
+        "mc_manual_kWp": 16.5,
+        "mc_battery_name": "BAT-10",
+    }
+    input_ids = [{"type": "risk-mc-input", "field": field} for field in field_values]
+    card_ids = [{"type": "risk-mc-field-card", "field": field} for field in field_values]
+
+    disabled_values, card_classes = risk_page.sync_risk_monte_carlo_context(
+        payload,
+        scenario.scenario_id,
+        input_ids,
+        list(field_values.values()),
+        "en",
+        card_ids,
+    )
+
+    disabled_by_field = dict(zip(field_values.keys(), disabled_values))
+    class_by_field = dict(zip(field_values.keys(), card_classes))
+
+    assert disabled_by_field["mc_manual_kWp"] is False
+    assert "field-card-disabled" not in class_by_field["mc_manual_kWp"]
 
 
 def test_active_summary_uses_copy_and_meta_classes_for_hierarchy() -> None:
@@ -811,6 +855,9 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert asset_css.exists()
     assert "app.index_string" not in app_source
     assert ".assumption-input-shell" in css_source
+    assert ".assumption-editor-panel" in css_source
+    assert "--assumption-control-height" in css_source
+    assert ".assumption-editor-panel .Select-control" in css_source
     assert ".candidate-selection-helper" in css_source
     assert "body {" in css_source
     assert ".active-summary-copy" in css_source
@@ -820,6 +867,8 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".profile-main-grid" in css_source
     assert "minmax(0, 1.35fr)" in css_source
     assert ".profile-secondary-grid" in css_source
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css_source
+    assert ".profile-secondary-pricing-panel" in css_source
     assert ".profile-inline-btn" in css_source
     assert ".profile-table-activator" in css_source
     assert ".profile-chart-panel" in css_source
@@ -1338,9 +1387,12 @@ def test_npv_chart_adds_top_axis_for_panel_count() -> None:
 
     assert figure.layout.xaxis.title.text == "kWp instalado"
     assert figure.layout.xaxis2.title.text == "Número de paneles"
+    assert figure.layout.yaxis.title.text == "VPN [COP]"
+    assert figure.layout.yaxis2.title.text == "Payback [años]"
     assert list(figure.layout.xaxis2.ticktext) == ["20", "30"]
     assert list(figure.layout.xaxis2.tickvals) == pytest.approx([12.0, 18.0])
     assert list(figure.data[0].customdata[0][:2]) == ["12.000::None", 20]
+    assert any(trace.name == "Payback [años]" for trace in figure.data)
     assert any(trace.name == "Diseño seleccionado" for trace in figure.data)
 
 
@@ -1373,6 +1425,93 @@ def test_npv_chart_omits_top_axis_without_valid_module_power() -> None:
     figure = build_npv_figure(table, lang="es", module_power_w=0.0)
 
     assert "xaxis2" not in figure.layout
+
+
+def test_npv_chart_renders_discard_strip_without_fabricating_npv() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery": "None",
+                "NPV_COP": 10_000_000,
+                "payback_years": 5.5,
+                "self_consumption_ratio": 0.45,
+                "peak_ratio": 1.1,
+                "scan_order": 0,
+            },
+            {
+                "candidate_key": "18.000::BAT-10",
+                "kWp": 18.0,
+                "battery": "BAT-10",
+                "NPV_COP": 16_000_000,
+                "payback_years": 6.2,
+                "self_consumption_ratio": 0.52,
+                "peak_ratio": 1.25,
+                "scan_order": 1,
+            },
+        ]
+    )
+
+    figure = build_npv_figure(
+        table,
+        selected_key="18.000::BAT-10",
+        lang="es",
+        module_power_w=600.0,
+        discarded_points=(
+            {"scan_order": 2, "kWp": 24.0, "reason": "peak_ratio", "peak_ratio": 1.8, "limit_peak_ratio": 1.5},
+            {"scan_order": 3, "kWp": 30.0, "reason": "inverter_string"},
+        ),
+    )
+
+    assert figure.layout.xaxis3.title.text == "Número de paneles"
+    assert figure.layout.yaxis.title.text == "VPN [COP]"
+    assert figure.layout.yaxis2.title.text == "Payback [años]"
+    assert figure.layout.yaxis3.showticklabels is False
+    assert any(trace.name == "Diseño seleccionado" for trace in figure.data)
+    assert any(trace.name == "Payback [años]" for trace in figure.data)
+    discard_traces = [trace for trace in figure.data if trace.name in {"excede el límite de peak ratio", "no se encontró una combinación válida de inversor/string"}]
+    assert len(discard_traces) == 2
+    assert all(all(value == 0.5 for value in trace.y) for trace in discard_traces)
+    assert any("Descartado" in trace.hovertemplate[0] for trace in discard_traces if isinstance(trace.hovertemplate, (list, tuple)))
+
+
+def test_workbench_results_explain_all_discarded_scan() -> None:
+    bundle = replace(
+        _fast_bundle(),
+        config={**_fast_bundle().config, "limit_peak_ratio_enable": True, "limit_peak_ratio": 0.01},
+    )
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", bundle))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    payload = _session_payload(state)
+
+    (
+        summary_strip,
+        explainer,
+        explainer_style,
+        kpis,
+        npv_figure,
+        _banner,
+        monthly_figure,
+        _cash_flow,
+        _annual,
+        _battery,
+        _typical_day,
+        table_rows,
+        _columns,
+        selected_rows,
+        _styles,
+        _tooltips,
+    ) = workbench_page.populate_results(payload, "es")
+
+    assert len(summary_strip) == 4
+    assert "restricción dominante actual" in explainer
+    assert explainer_style["display"] == "block"
+    assert kpis == []
+    assert table_rows == []
+    assert selected_rows == []
+    assert monthly_figure.layout.annotations[0].text == tr("workbench.scan_discard.no_viable_detail", "es")
+    assert npv_figure.data
 
 
 def test_deep_dive_figure_builders_return_non_empty_plotly_figures() -> None:

@@ -16,6 +16,7 @@ def _risk_mc_input(field: dict):
             value=field["value"],
             clearable=False,
             className="text-input",
+            disabled=field.get("disabled", False),
         )
     if kind == "number":
         input_control = dcc.Input(
@@ -26,6 +27,7 @@ def _risk_mc_input(field: dict):
             min=field.get("min"),
             max=field.get("max"),
             className="text-input text-input-affixed" if field.get("suffix") else "text-input",
+            disabled=field.get("disabled", False),
         )
         if field.get("suffix"):
             return html.Div(
@@ -36,7 +38,22 @@ def _risk_mc_input(field: dict):
                 ],
             )
         return input_control
-    return dcc.Input(id=component_id, type="text", value=field["value"], className="text-input")
+    return dcc.Input(
+        id=component_id,
+        type="text",
+        value=field["value"],
+        className="text-input",
+        disabled=field.get("disabled", False),
+    )
+
+
+def _risk_field_card_class(field: dict) -> str:
+    classes = ["field-card"]
+    if field.get("disabled"):
+        classes.append("field-card-disabled")
+    if field.get("emphasize") and not field.get("disabled"):
+        classes.append("field-card-highlight")
+    return " ".join(dict.fromkeys(classes))
 
 
 def _risk_mc_field_card(field: dict) -> html.Div:
@@ -48,7 +65,8 @@ def _risk_mc_field_card(field: dict) -> html.Div:
         ],
     )
     return html.Div(
-        className="field-card",
+        id={"type": "risk-mc-field-card", "field": field["field"]},
+        className=_risk_field_card_class(field),
         children=[
             html.Label([field["label"], help_icon], className="input-label"),
             _risk_mc_input(field),

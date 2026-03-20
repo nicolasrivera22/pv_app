@@ -11,6 +11,11 @@ from .ui_schema import FIELD_SCHEMAS, format_metric, metric_label
 RATIO_METRICS = {"self_consumption_ratio", "self_sufficiency_ratio"}
 
 
+def _scenario_has_viable_scan(scenario: ScenarioRecord) -> bool:
+    scan = scenario.scan_result
+    return scan is not None and not scenario.dirty and not scan.candidates.empty and bool(scan.candidate_details)
+
+
 def _field_display_label(field_key: str, lang: str) -> str:
     schema = FIELD_SCHEMAS.get(field_key)
     if schema is None:
@@ -21,7 +26,7 @@ def _field_display_label(field_key: str, lang: str) -> str:
 
 
 def ready_risk_scenarios(state: ScenarioSessionState) -> list[ScenarioRecord]:
-    return [scenario for scenario in state.scenarios if not scenario.dirty]
+    return [scenario for scenario in state.scenarios if _scenario_has_viable_scan(scenario)]
 
 
 def resolve_default_risk_scenario(state: ScenarioSessionState, preferred_id: str | None = None) -> str | None:
@@ -36,7 +41,7 @@ def resolve_default_risk_scenario(state: ScenarioSessionState, preferred_id: str
 
 def resolve_default_risk_candidate(scenario_record: ScenarioRecord) -> str | None:
     scan = scenario_record.scan_result
-    if scan is None or scenario_record.dirty:
+    if scan is None or scenario_record.dirty or scan.candidates.empty or not scan.candidate_details:
         return None
     if scenario_record.selected_candidate_key in scan.candidate_details:
         return str(scenario_record.selected_candidate_key)
@@ -47,7 +52,7 @@ def resolve_default_risk_candidate(scenario_record: ScenarioRecord) -> str | Non
 
 def build_risk_candidate_options(scenario_record: ScenarioRecord, lang: str = "en") -> list[dict[str, str]]:
     scan = scenario_record.scan_result
-    if scan is None or scenario_record.dirty:
+    if scan is None or scenario_record.dirty or scan.candidates.empty or not scan.candidate_details:
         return []
 
     table = scan.candidates.sort_values(["kWp", "NPV_COP", "scan_order"], ascending=[True, False, True], kind="mergesort")
@@ -90,6 +95,7 @@ def validate_risk_run_inputs(
     n_simulations: Any,
     seed: Any,
     *,
+    mc_settings: dict[str, Any] | None = None,
     lang: str = "en",
 ) -> list[str]:
     issues: list[str] = []
@@ -107,6 +113,14 @@ def validate_risk_run_inputs(
         issues.append(tr("risk.error.invalid_n_simulations", lang))
     if _coerce_non_negative_int(seed) is None:
         issues.append(tr("risk.error.invalid_seed", lang))
+    effective_config = dict((scenario_record.config_bundle.config if scenario_record is not None else {}) or {})
+    effective_config.update(dict(mc_settings or {}))
+    try:
+        manual_k_wp = float(effective_config.get("mc_manual_kWp", 0) or 0)
+    except (TypeError, ValueError):
+        manual_k_wp = 0.0
+    if bool(effective_config.get("mc_use_manual_kWp")) and manual_k_wp <= 0:
+        issues.append(tr("risk.error.invalid_manual_kWp", lang))
     return issues
 
 

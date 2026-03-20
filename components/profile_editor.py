@@ -5,11 +5,16 @@ from dash import dcc, dash_table, html
 from services.i18n import tr
 
 
-def _profile_table(table_id: str, *, page_size: int = 8) -> dash_table.DataTable:
+def _profile_table(
+    table_id: str,
+    *,
+    page_size: int = 8,
+    row_deletable: bool = False,
+) -> dash_table.DataTable:
     return dash_table.DataTable(
         id=table_id,
         editable=True,
-        row_deletable=False,
+        row_deletable=row_deletable,
         sort_action="native",
         page_size=page_size,
         style_table={"overflowX": "auto"},
@@ -80,6 +85,7 @@ def _profile_panel(
     page_size: int = 8,
     add_row_button_id: str | None = None,
     placeholder_id: str | None = None,
+    row_deletable: bool = False,
 ) -> html.Div:
     activator = html.Button(
         tr("workbench.profiles.preview_chart", "es"),
@@ -111,7 +117,7 @@ def _profile_panel(
             className="section-head profile-table-head",
             children=head_children,
         ),
-        _profile_table(table_id, page_size=page_size),
+        _profile_table(table_id, page_size=page_size, row_deletable=row_deletable),
     ]
     if placeholder_id is not None:
         panel_children.append(
@@ -193,8 +199,10 @@ def profile_editor_section() -> html.Div:
                         "price-kwp-tooltip",
                         "price-kwp-editor",
                         panel_id="price-kwp-panel",
+                        panel_class_name="profile-secondary-pricing-panel",
                         add_row_button_id="add-price-kwp-row-btn",
                         placeholder_id="price-kwp-placeholder",
+                        row_deletable=True,
                     ),
                     _profile_panel(
                         "price-kwp-others-card",
@@ -204,8 +212,10 @@ def profile_editor_section() -> html.Div:
                         "price-kwp-others-tooltip",
                         "price-kwp-others-editor",
                         panel_id="price-kwp-others-panel",
+                        panel_class_name="profile-secondary-pricing-panel",
                         add_row_button_id="add-price-kwp-others-row-btn",
                         placeholder_id="price-kwp-others-placeholder",
+                        row_deletable=True,
                     ),
                     _profile_panel(
                         "demand-profile-card",

@@ -342,6 +342,37 @@ body {
     margin: 0.75rem 0 1rem;
 }
 
+.scan-summary-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.75rem;
+    margin: 0.4rem 0 0.75rem;
+}
+
+.scan-summary-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.8rem 0.9rem;
+    border-radius: 14px;
+    background: #f8fafc;
+    border: 1px solid #dbeafe;
+}
+
+.scan-summary-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    font-weight: 700;
+}
+
+.scan-summary-value {
+    color: #0f172a;
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
 .kpi-card {
     background: white;
     border-radius: 18px;
@@ -378,6 +409,16 @@ body {
     background: #eff6ff;
     color: #1d4ed8;
     border: 1px solid #bfdbfe;
+}
+
+.scan-discard-explainer {
+    margin-top: 0.2rem;
+    margin-bottom: 0.35rem;
+    padding: 0.85rem 0.95rem;
+    border-radius: 14px;
+    background: #fff7ed;
+    color: #9a3412;
+    border: 1px solid #fed7aa;
 }
 
 .selected-candidate-banner {
@@ -430,6 +471,34 @@ body {
     border-radius: 12px;
     padding: 0.7rem 0.8rem;
     background: white;
+}
+
+.assumption-editor-panel {
+    --assumption-control-height: 42px;
+}
+
+.assumption-editor-panel .text-input {
+    min-height: var(--assumption-control-height);
+}
+
+.assumption-editor-panel .assumption-input-shell {
+    min-height: var(--assumption-control-height);
+}
+
+.assumption-editor-panel .assumption-input-shell .text-input-affixed {
+    min-height: calc(var(--assumption-control-height) - 2px);
+}
+
+.assumption-editor-panel .Select-control {
+    min-height: var(--assumption-control-height);
+    height: var(--assumption-control-height);
+}
+
+.assumption-editor-panel .Select-placeholder,
+.assumption-editor-panel .Select--single > .Select-control .Select-value,
+.assumption-editor-panel .Select-input {
+    height: var(--assumption-control-height);
+    line-height: var(--assumption-control-height);
 }
 
 .assumption-input-shell {
@@ -628,12 +697,16 @@ body {
 }
 
 .profile-secondary-grid {
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .profile-main-grid .subpanel,
 .profile-secondary-grid .subpanel {
     min-width: 0;
+}
+
+.profile-secondary-pricing-panel {
+    width: 100%;
 }
 
 .profile-table-card-shell {

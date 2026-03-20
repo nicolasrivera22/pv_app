@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from .cache import fingerprint_deterministic_input, get_deterministic_cache
-from .deterministic_executor import run_deterministic_scan_tasks
+from .deterministic_executor import run_deterministic_scan_task_results
 from .result_views import (
     battery_name_from_candidate,
     build_candidate_table,
@@ -62,7 +62,8 @@ def _build_scan_result(config_bundle: LoadedConfigBundle, *, allow_parallel: boo
         source_name=config_bundle.source_name,
         issues=config_bundle.issues,
     )
-    seed_kwp, detail_rows = run_deterministic_scan_tasks(effective_bundle, allow_parallel=allow_parallel)
+    seed_kwp, task_results = run_deterministic_scan_task_results(effective_bundle, allow_parallel=allow_parallel)
+    detail_rows = tuple(detail for task_result in task_results for detail in task_result.detail_rows)
     detail_map: dict[str, dict] = {}
     for scan_order, detail in enumerate(detail_rows):
         battery_name = battery_name_from_candidate(detail["battery"])
@@ -85,24 +86,44 @@ def _build_scan_result(config_bundle: LoadedConfigBundle, *, allow_parallel: boo
         }
 
     candidate_table = build_candidate_table(detail_map)
-    if candidate_table.empty:
-        raise ValueError("No se encontraron candidatos viables para el escenario determinístico.")
-
     best_for_kwp = set(candidate_table.loc[candidate_table["best_battery_for_kwp"], "candidate_key"])
     for candidate_key, detail in detail_map.items():
         detail["best_battery"] = candidate_key in best_for_kwp
 
-    best_candidate_key = candidate_table.sort_values(
-        by=["NPV_COP", "scan_order"],
-        ascending=[False, True],
-        kind="mergesort",
-    ).iloc[0]["candidate_key"]
+    best_candidate_key = None
+    if not candidate_table.empty:
+        best_candidate_key = candidate_table.sort_values(
+            by=["NPV_COP", "scan_order"],
+            ascending=[False, True],
+            kind="mergesort",
+        ).iloc[0]["candidate_key"]
+
+    discard_counts = {"peak_ratio": 0, "inverter_string": 0}
+    discarded_points = []
+    for task_result in task_results:
+        point = task_result.discarded_point
+        if not point:
+            continue
+        reason = str(point.get("reason", "")).strip()
+        if reason:
+            discard_counts[reason] = int(discard_counts.get(reason, 0)) + 1
+        discarded_points.append(dict(point))
+
+    viable_kwp = {
+        round(float(task_result.k_wp), 6)
+        for task_result in task_results
+        if task_result.detail_rows
+    }
     return ScanRunResult(
         candidates=candidate_table,
         best_candidate_key=best_candidate_key,
         candidate_details=detail_map,
         seed_kwp=seed_kwp,
         issues=issues,
+        evaluated_kwp_count=len(task_results),
+        viable_kwp_count=len(viable_kwp),
+        discard_counts=discard_counts,
+        discarded_points=tuple(discarded_points),
     )
 
 
@@ -124,6 +145,8 @@ def run_scan(config_bundle: LoadedConfigBundle) -> ScanRunResult:
 def run_scenario(config_bundle: LoadedConfigBundle, candidate_key: str | None = None) -> ScenarioRunResult:
     scan_result = run_scan(config_bundle)
     selected_key = candidate_key or scan_result.best_candidate_key
+    if not selected_key:
+        raise ValueError("El escaneo determinístico no produjo diseños viables para el escenario.")
     if selected_key not in scan_result.candidate_details:
         raise KeyError(f"No existe el candidato '{selected_key}' en el escaneo.")
 

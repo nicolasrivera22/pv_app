@@ -20,6 +20,12 @@ ANNUAL_COVERAGE_METRICS = ("PV_a_Carga_kWh", "Bateria_a_Carga_kWh", "Importacion
 MONTHLY_DESTINATION_METRICS = ("PV_a_Carga_kWh", "PV_a_Bateria_kWh", "Exportacion_kWh", "Curtailment_kWh")
 
 
+def _scenario_has_viable_scan(scenario_record: ScenarioRecord | None) -> bool:
+    if scenario_record is None or scenario_record.scan_result is None or scenario_record.dirty:
+        return False
+    return not scenario_record.scan_result.candidates.empty and bool(scenario_record.scan_result.candidate_details)
+
+
 @dataclass(frozen=True)
 class DesignComparePageState:
     code: str
@@ -168,7 +174,7 @@ def derive_panel_count(detail: dict[str, Any], scenario_record: ScenarioRecord) 
 
 
 def _default_design_selection(scenario_record: ScenarioRecord) -> tuple[str, ...]:
-    if scenario_record.scan_result is None or scenario_record.dirty:
+    if not _scenario_has_viable_scan(scenario_record):
         return ()
     if scenario_record.selected_candidate_key in scenario_record.scan_result.candidate_details:
         return (str(scenario_record.selected_candidate_key),)
@@ -185,7 +191,7 @@ def sanitize_design_selection(
     *,
     max_designs: int = MAX_COMPARE_DESIGNS,
 ) -> tuple[str, ...]:
-    if scenario_record is None or scenario_record.scan_result is None or scenario_record.dirty:
+    if not _scenario_has_viable_scan(scenario_record):
         return ()
     valid_keys = set(scenario_record.scan_result.candidate_details)
     cleaned: list[str] = []
@@ -206,7 +212,7 @@ def resolve_design_selection(
     *,
     max_designs: int = MAX_COMPARE_DESIGNS,
 ) -> tuple[str, ...]:
-    if scenario_record is None or scenario_record.scan_result is None or scenario_record.dirty:
+    if not _scenario_has_viable_scan(scenario_record):
         return ()
     if scenario_record.scenario_id in state.design_comparison_candidate_keys:
         return sanitize_design_selection(
@@ -255,6 +261,9 @@ def build_design_compare_state(
     if scenario_record.scan_result is None:
         message = tr("compare.state.no_scan", lang)
         return DesignComparePageState("no_scan", message, message, "", False, False)
+    if not _scenario_has_viable_scan(scenario_record):
+        message = tr("compare.state.no_viable", lang)
+        return DesignComparePageState("no_viable", message, message, "", False, False)
     if selected_count == 0:
         message = tr("compare.state.no_selection", lang)
         return DesignComparePageState("no_selection", message, message, tr("compare.export.requires_two", lang), True, False)
@@ -299,7 +308,7 @@ def _base_candidate_frame(scenario_record: ScenarioRecord, *, lang: str = "es") 
 
 
 def build_available_design_rows(scenario_record: ScenarioRecord, *, lang: str = "es") -> pd.DataFrame:
-    if scenario_record.scan_result is None or scenario_record.dirty:
+    if not _scenario_has_viable_scan(scenario_record):
         return pd.DataFrame(
             columns=[
                 "candidate_key",

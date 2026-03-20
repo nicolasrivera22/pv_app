@@ -75,6 +75,8 @@ def _selected_detail(scenario: ScenarioRecord) -> tuple[str, dict]:
     if scenario.scan_result is None:
         raise ValueError(f"El escenario '{scenario.name}' no tiene resultados para exportar.")
     candidate_key = scenario.selected_candidate_key or scenario.scan_result.best_candidate_key
+    if not candidate_key:
+        raise ValueError(f"El escenario '{scenario.name}' no tiene diseños viables para exportar.")
     return candidate_key, scenario.scan_result.candidate_details[candidate_key]
 
 
