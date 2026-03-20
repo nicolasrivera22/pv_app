@@ -408,6 +408,10 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     assert _find_component(section, "demand-profile-weights-editor").page_size == 12
     assert _find_component(section, "price-kwp-editor").page_size == 8
     assert _find_component(section, "price-kwp-others-editor").page_size == 8
+    assert _find_component(section, "price-kwp-editor").row_deletable is True
+    assert _find_component(section, "price-kwp-others-editor").row_deletable is True
+    assert _find_component(section, "month-profile-editor").row_deletable is False
+    assert _find_component(section, "demand-profile-editor").row_deletable is False
     assert _find_component(section, "month-profile-tooltip").children == tr("workbench.profiles.tooltip.month", "es")
     assert _find_component(section, "sun-profile-tooltip").children == tr("workbench.profiles.tooltip.sun", "es")
     assert _find_component(section, "price-kwp-tooltip").children == tr("workbench.profiles.tooltip.price", "es")
@@ -417,6 +421,8 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     assert _find_component(section, "demand-profile-weights-tooltip").children == tr("workbench.profiles.tooltip.demand_weights", "es")
     assert _find_component(section, "add-price-kwp-row-btn").children == tr("workbench.profiles.add_row", "es")
     assert _find_component(section, "add-price-kwp-others-row-btn").children == tr("workbench.profiles.add_row", "es")
+    assert "profile-secondary-pricing-panel" in str(_find_component(section, "price-kwp-panel").className)
+    assert "profile-secondary-pricing-panel" in str(_find_component(section, "price-kwp-others-panel").className)
     assert _find_component(workbench_page.layout, "run-scan-choice-dialog") is not None
     assert _find_component(workbench_page.layout, "run-scan-save-and-run-btn") is not None
     assert _find_component(workbench_page.layout, "run-scan-run-unsaved-btn") is not None
@@ -859,6 +865,8 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".profile-main-grid" in css_source
     assert "minmax(0, 1.35fr)" in css_source
     assert ".profile-secondary-grid" in css_source
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css_source
+    assert ".profile-secondary-pricing-panel" in css_source
     assert ".profile-inline-btn" in css_source
     assert ".profile-table-activator" in css_source
     assert ".profile-chart-panel" in css_source

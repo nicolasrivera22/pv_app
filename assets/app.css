@@ -656,12 +656,16 @@ body {
 }
 
 .profile-secondary-grid {
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .profile-main-grid .subpanel,
 .profile-secondary-grid .subpanel {
     min-width: 0;
+}
+
+.profile-secondary-pricing-panel {
+    width: 100%;
 }
 
 .profile-table-card-shell {
