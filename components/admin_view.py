@@ -2,11 +2,73 @@ from __future__ import annotations
 
 from dash import dcc, html
 
-from services.admin_access import ADMIN_PIN_SETUP_COMMAND
 from services.i18n import tr
 
 from .catalog_editor import catalog_editor_section
 from .profile_editor import profile_editor_section
+
+
+def _admin_navigation_controls(*, lang: str) -> html.Div:
+    return html.Div(
+        className="controls",
+        children=[
+            dcc.Link(tr("nav.results", lang), href="/", className="action-btn tertiary workspace-admin-nav-link"),
+            dcc.Link(tr("nav.assumptions", lang), href="/assumptions", className="action-btn tertiary workspace-admin-nav-link"),
+        ],
+    )
+
+
+def admin_setup_card(
+    *,
+    lang: str = "es",
+    status_key: str | None = None,
+    tone: str = "neutral",
+) -> html.Div:
+    if status_key:
+        message = tr(status_key, lang)
+    else:
+        message = tr("workspace.admin.setup.ready", lang)
+        tone = "info"
+
+    return html.Div(
+        id="admin-setup-shell",
+        className="panel admin-lock-card",
+        children=[
+            html.H3(tr("workspace.admin.setup.title", lang), id="admin-setup-title"),
+            html.P(tr("workspace.admin.setup.copy", lang), id="admin-setup-copy", className="section-copy"),
+            html.Div(message, id="admin-setup-status", className=f"admin-lock-status admin-lock-status-{tone}"),
+            html.Label(tr("workspace.admin.setup.pin_label", lang), htmlFor="admin-setup-pin-input", className="input-label"),
+            dcc.Input(
+                id="admin-setup-pin-input",
+                type="password",
+                placeholder=tr("workspace.admin.setup.pin_placeholder", lang),
+                className="text-input",
+            ),
+            html.Label(
+                tr("workspace.admin.setup.confirm_label", lang),
+                htmlFor="admin-setup-confirm-input",
+                className="input-label",
+            ),
+            dcc.Input(
+                id="admin-setup-confirm-input",
+                type="password",
+                placeholder=tr("workspace.admin.setup.confirm_placeholder", lang),
+                className="text-input",
+            ),
+            html.Div(
+                className="controls",
+                children=[
+                    html.Button(
+                        tr("workspace.admin.setup.submit", lang),
+                        id="admin-setup-btn",
+                        n_clicks=0,
+                        className="action-btn",
+                    ),
+                ],
+            ),
+            _admin_navigation_controls(lang=lang),
+        ],
+    )
 
 
 def admin_secure_content(*, lang: str = "es") -> html.Div:
@@ -40,20 +102,15 @@ def admin_secure_content(*, lang: str = "es") -> html.Div:
 def admin_locked_card(
     *,
     lang: str = "es",
-    configured: bool,
     status_key: str | None = None,
     tone: str = "neutral",
 ) -> html.Div:
-    if not configured:
-        message = tr("workspace.admin.locked.setup_missing", lang, command=ADMIN_PIN_SETUP_COMMAND)
-        tone = "warning"
-    elif status_key:
+    if status_key:
         message = tr(status_key, lang)
     else:
         message = tr("workspace.admin.locked.ready", lang)
         tone = "info"
 
-    disabled = not configured
     return html.Div(
         id="admin-locked-shell",
         className="panel admin-lock-card",
@@ -67,7 +124,6 @@ def admin_locked_card(
                 type="password",
                 placeholder=tr("workspace.admin.locked.pin_placeholder", lang),
                 className="text-input",
-                disabled=disabled,
             ),
             html.Div(
                 className="controls",
@@ -77,11 +133,24 @@ def admin_locked_card(
                         id="admin-unlock-btn",
                         n_clicks=0,
                         className="action-btn",
-                        disabled=disabled,
                     ),
-                    dcc.Link(tr("nav.results", lang), href="/", className="action-btn tertiary workspace-admin-nav-link"),
-                    dcc.Link(tr("nav.assumptions", lang), href="/assumptions", className="action-btn tertiary workspace-admin-nav-link"),
                 ],
             ),
+            _admin_navigation_controls(lang=lang),
         ],
     )
+
+
+def build_admin_access_shell(
+    *,
+    lang: str = "es",
+    configured: bool,
+    unlocked: bool,
+    status_key: str | None = None,
+    tone: str = "neutral",
+):
+    if not configured:
+        return admin_setup_card(lang=lang, status_key=status_key, tone=tone)
+    if unlocked:
+        return admin_secure_content(lang=lang)
+    return admin_locked_card(lang=lang, status_key=status_key, tone=tone)

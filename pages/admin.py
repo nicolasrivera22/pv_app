@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dash import dcc, html, register_page
 
-from components.admin_view import admin_locked_card
+from components.admin_view import build_admin_access_shell
 from services.admin_access import admin_pin_configured
 from components.workspace_frame import workspace_frame
 import services.workspace_admin_callbacks as _workspace_admin_callbacks  # noqa: F401
@@ -33,12 +33,11 @@ def layout():
             ),
             html.Div(
                 id="admin-access-shell",
-                children=[
-                    admin_locked_card(
-                        lang="es",
-                        configured=admin_pin_configured(),
-                    )
-                ],
+                children=build_admin_access_shell(
+                    lang="es",
+                    configured=admin_pin_configured(),
+                    unlocked=False,
+                ),
             ),
         ],
     )

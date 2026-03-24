@@ -140,7 +140,8 @@ def test_results_status_digest_covers_empty_scan_stale_and_validation_states() -
     assert validation_blocked is not None and validation_blocked.state == "validation_blocked"
 
 
-def test_page_wrappers_render_split_sections() -> None:
+def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
     results_layout = results_page.layout() if callable(results_page.layout) else results_page.layout
     assumptions_layout = assumptions_page.layout() if callable(assumptions_page.layout) else assumptions_page.layout
     admin_layout = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
@@ -159,8 +160,10 @@ def test_page_wrappers_render_split_sections() -> None:
 
     assert _find_component(admin_layout, "admin-access-shell") is not None
     assert _find_component(admin_layout, "admin-gating-note") is not None
-    assert _find_component(admin_layout, "admin-pin-input") is not None
-    assert _find_component(admin_layout, "admin-unlock-btn") is not None
+    assert _find_component(admin_layout, "admin-setup-pin-input") is not None
+    assert _find_component(admin_layout, "admin-setup-confirm-input") is not None
+    assert _find_component(admin_layout, "admin-setup-btn") is not None
+    assert _find_component(admin_layout, "admin-pin-input") is None
     assert _find_component(admin_layout, "profile-editor-title") is None
     assert _find_component(admin_layout, "inverter-table-editor") is None
     assert _find_component(admin_layout, "apply-admin-btn") is None
@@ -176,11 +179,12 @@ def test_top_nav_exposes_results_and_assumptions_but_not_admin() -> None:
     assert _find_component(layout, "workspace-admin-link") is None
 
 
-def test_admin_page_gracefully_handles_direct_access_without_active_scenario() -> None:
+def test_admin_page_gracefully_handles_direct_access_without_active_scenario(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
     payload = commit_client_session(bootstrap_client_session("es"), ScenarioSessionState.empty()).to_payload()
 
     rendered = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
 
     assert _find_component(rendered, "admin-gating-note") is not None
-    assert _find_component(rendered, "admin-pin-input") is not None
+    assert _find_component(rendered, "admin-setup-pin-input") is not None
     assert payload["active_scenario_id"] is None

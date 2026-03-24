@@ -6,11 +6,13 @@ from dash import ALL, Input, Output, State, callback, ctx
 from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
 
-from components import admin_locked_card, admin_secure_content, render_assumption_sections
+from components.admin_view import build_admin_access_shell
+from components.assumption_editor import render_assumption_sections
 from .admin_access import (
     admin_pin_configured,
     grant_admin_session_access,
     is_admin_session_unlocked,
+    set_admin_pin,
     verify_admin_pin,
 )
 from .i18n import tr
@@ -49,6 +51,20 @@ def _admin_locked_meta(message_key: str | None = None, *, tone: str = "neutral")
         "message_key": message_key,
         "tone": tone,
     }
+
+
+def _validate_admin_setup_pin(pin_value, confirm_value) -> str:
+    pin = str(pin_value or "").strip()
+    confirm = str(confirm_value or "").strip()
+    if not pin:
+        raise ValueError("workspace.admin.setup.empty")
+    if not pin.isdigit():
+        raise ValueError("workspace.admin.setup.digits_only")
+    if len(pin) < 4:
+        raise ValueError("workspace.admin.setup.too_short")
+    if pin != confirm:
+        raise ValueError("workspace.admin.setup.mismatch")
+    return pin
 
 
 PROFILE_MAIN_TABLE_IDS = (
@@ -166,7 +182,28 @@ def _blank_table_row(table_columns, table_rows=None) -> dict[str, str]:
 
 
 @callback(
-    Output("admin-access-meta", "data"),
+    Output("admin-access-meta", "data", allow_duplicate=True),
+    Input("admin-setup-btn", "n_clicks"),
+    State("scenario-session-store", "data"),
+    State("admin-setup-pin-input", "value"),
+    State("admin-setup-confirm-input", "value"),
+    prevent_initial_call=True,
+)
+def setup_admin_session(_setup_clicks, session_payload, pin_value, confirm_value):
+    client_state, _state, _unlocked = _admin_session(session_payload, None)
+    if admin_pin_configured():
+        return _admin_locked_meta("workspace.admin.setup.already_configured", tone="info")
+    try:
+        pin = _validate_admin_setup_pin(pin_value, confirm_value)
+    except ValueError as exc:
+        return _admin_locked_meta(str(exc), tone="error")
+    set_admin_pin(pin)
+    grant_admin_session_access(client_state.session_id)
+    return _admin_locked_meta("workspace.admin.setup.success", tone="success")
+
+
+@callback(
+    Output("admin-access-meta", "data", allow_duplicate=True),
     Input("admin-unlock-btn", "n_clicks"),
     State("scenario-session-store", "data"),
     State("admin-pin-input", "value"),
@@ -175,7 +212,7 @@ def _blank_table_row(table_columns, table_rows=None) -> dict[str, str]:
 def unlock_admin_session(_unlock_clicks, session_payload, pin_value):
     client_state, _state, _unlocked = _admin_session(session_payload, None)
     if not admin_pin_configured():
-        return _admin_locked_meta("workspace.admin.locked.setup_missing", tone="warning")
+        return _admin_locked_meta("workspace.admin.setup.ready", tone="info")
     if not verify_admin_pin(pin_value):
         return _admin_locked_meta("workspace.admin.locked.invalid", tone="error")
     grant_admin_session_access(client_state.session_id)
@@ -190,18 +227,16 @@ def unlock_admin_session(_unlock_clicks, session_payload, pin_value):
 )
 def render_admin_access_shell(session_payload, language_value, access_meta):
     lang = _lang(language_value)
-    client_state, _state, unlocked = _admin_session(session_payload, lang)
-    if unlocked:
-        return [admin_secure_content(lang=lang)]
+    _client_state, _state, unlocked = _admin_session(session_payload, lang)
+    configured = admin_pin_configured()
     meta = access_meta or {}
-    return [
-        admin_locked_card(
-            lang=lang,
-            configured=admin_pin_configured(),
-            status_key=meta.get("message_key"),
-            tone=str(meta.get("tone") or "neutral"),
-        )
-    ]
+    return build_admin_access_shell(
+        lang=lang,
+        configured=configured,
+        unlocked=unlocked,
+        status_key=meta.get("message_key"),
+        tone=str(meta.get("tone") or "neutral"),
+    )
 
 
 @callback(
