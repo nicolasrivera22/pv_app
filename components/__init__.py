@@ -16,6 +16,7 @@ from .risk_tables import render_message_list, render_metadata_table, risk_tables
 from .scenario_controls import run_scan_choice_dialog, scenario_sidebar
 from .unifilar_diagram import render_schematic_inspector, render_schematic_legend, unifilar_diagram_section
 from .validation_panel import render_validation_panel
+from .workspace_frame import workspace_frame
 
 __all__ = [
     "assumption_editor_section",
@@ -41,4 +42,5 @@ __all__ = [
     "scenario_sidebar",
     "selected_candidate_deep_dive_section",
     "unifilar_diagram_section",
+    "workspace_frame",
 ]

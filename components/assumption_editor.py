@@ -18,8 +18,8 @@ def _format_thousands(value) -> str:
         return str(value)
 
 
-def _assumption_input(field: dict):
-    component_id = {"type": "assumption-input", "field": field["field"]}
+def _assumption_input(field: dict, *, input_id_type: str):
+    component_id = {"type": input_id_type, "field": field["field"]}
     kind = field["kind"]
     if kind == "dropdown":
         return dcc.Dropdown(
@@ -78,7 +78,7 @@ def _assumption_input(field: dict):
     )
 
 
-def _field_card(field: dict, *, extra_class: str = "") -> html.Div:
+def _field_card(field: dict, *, field_card_type: str, input_id_type: str, extra_class: str = "") -> html.Div:
     help_icon = html.Span(
         className="field-help",
         children=[
@@ -88,7 +88,7 @@ def _field_card(field: dict, *, extra_class: str = "") -> html.Div:
     )
     children = [
         html.Label([field["label"], help_icon], className="input-label"),
-        _assumption_input(field),
+        _assumption_input(field, input_id_type=input_id_type),
     ]
     unit = html.Div(field["unit"], className="scenario-meta") if field.get("kind") != "number" and field.get("unit") else None
     if unit is not None:
@@ -101,14 +101,22 @@ def _field_card(field: dict, *, extra_class: str = "") -> html.Div:
     if field.get("emphasize") and not field.get("disabled"):
         classes.append("field-card-highlight")
     css = " ".join(dict.fromkeys(classes))
-    return html.Div(id={"type": "assumption-field-card", "field": field["field"]}, className=css, children=children)
+    return html.Div(id={"type": field_card_type, "field": field["field"]}, className=css, children=children)
 
 
 _PRECIOS_ROW1_FIELDS = ["pricing_mode", "include_hw_in_price", "include_var_others"]
 _PRECIOS_ROW2_FIELDS = ["price_total_COP", "price_others_total"]
 
 
-def _render_precios_section(section: dict, *, show_all: bool, advanced_label: str) -> html.Div:
+def _render_precios_section(
+    section: dict,
+    *,
+    show_all: bool,
+    advanced_label: str,
+    input_id_type: str,
+    field_card_type: str,
+    context_note_type: str,
+) -> html.Div:
     """Render the Precios section with a custom two-row layout."""
     all_fields = section.get("basic", []) + section.get("advanced", [])
     row1_fields = []
@@ -132,24 +140,39 @@ def _render_precios_section(section: dict, *, show_all: bool, advanced_label: st
     if section.get("context_note_id"):
         note_group = section.get("group_key", section.get("group", ""))
         blocks.append(
-            html.Div(
-                section.get("context_note", ""),
-                id={"type": "assumption-context-note", "group": note_group},
-                className="assumption-context-note",
-                style={"display": "block"} if section.get("context_note") else {"display": "none"},
-            )
-        )
+                    html.Div(
+                        section.get("context_note", ""),
+                        id={"type": context_note_type, "group": note_group},
+                        className="assumption-context-note",
+                        style={"display": "block"} if section.get("context_note") else {"display": "none"},
+                    )
+                )
     if row1_fields:
         blocks.append(
             html.Div(
                 className="precios-row precios-row-1",
-                children=[_field_card(f, extra_class="precios-card") for f in row1_fields],
+                children=[
+                    _field_card(
+                        f,
+                        field_card_type=field_card_type,
+                        input_id_type=input_id_type,
+                        extra_class="precios-card",
+                    )
+                    for f in row1_fields
+                ],
             )
         )
     if row2_fields:
         row2_cards = []
         for f in row2_fields:
-            row2_cards.append(_field_card(f, extra_class="precios-card"))
+            row2_cards.append(
+                _field_card(
+                    f,
+                    field_card_type=field_card_type,
+                    input_id_type=input_id_type,
+                    extra_class="precios-card",
+                )
+            )
         blocks.append(
             html.Div(
                 className="precios-row precios-row-2",
@@ -160,7 +183,14 @@ def _render_precios_section(section: dict, *, show_all: bool, advanced_label: st
         blocks.append(
             html.Div(
                 className="assumption-grid",
-                children=[_field_card(f) for f in other_fields],
+                children=[
+                    _field_card(
+                        f,
+                        field_card_type=field_card_type,
+                        input_id_type=input_id_type,
+                    )
+                    for f in other_fields
+                ],
             )
         )
     return html.Div(className="subpanel", children=blocks)
@@ -172,6 +202,9 @@ def render_assumption_sections(
     show_all: bool = False,
     empty_message: str,
     advanced_label: str,
+    input_id_type: str = "assumption-input",
+    field_card_type: str = "assumption-field-card",
+    context_note_type: str = "assumption-context-note",
 ) -> list[html.Div]:
     if not sections:
         return [html.Div(className="validation-empty", children=empty_message)]
@@ -179,7 +212,16 @@ def render_assumption_sections(
     children: list[html.Div] = []
     for section in sections:
         if section.get("group_key") == "Precios":
-            children.append(_render_precios_section(section, show_all=show_all, advanced_label=advanced_label))
+            children.append(
+                _render_precios_section(
+                    section,
+                    show_all=show_all,
+                    advanced_label=advanced_label,
+                    input_id_type=input_id_type,
+                    field_card_type=field_card_type,
+                    context_note_type=context_note_type,
+                )
+            )
             continue
 
         basic_fields = section.get("basic", [])
@@ -190,24 +232,38 @@ def render_assumption_sections(
         if section.get("context_note_id"):
             note_group = section.get("group_key", section.get("group", ""))
             blocks.append(
-                html.Div(
-                    section.get("context_note", ""),
-                    id={"type": "assumption-context-note", "group": note_group},
-                    className="assumption-context-note",
-                    style={"display": "block"} if section.get("context_note") else {"display": "none"},
+                    html.Div(
+                        section.get("context_note", ""),
+                        id={"type": context_note_type, "group": note_group},
+                        className="assumption-context-note",
+                        style={"display": "block"} if section.get("context_note") else {"display": "none"},
+                    )
                 )
-            )
         if basic_fields:
             blocks.append(
                 html.Div(
                     className="assumption-grid",
-                    children=[_field_card(field) for field in basic_fields],
+                    children=[
+                        _field_card(
+                            field,
+                            field_card_type=field_card_type,
+                            input_id_type=input_id_type,
+                        )
+                        for field in basic_fields
+                    ],
                 )
             )
         if advanced_fields:
             advanced_grid = html.Div(
                 className="assumption-grid",
-                children=[_field_card(field) for field in advanced_fields],
+                children=[
+                    _field_card(
+                        field,
+                        field_card_type=field_card_type,
+                        input_id_type=input_id_type,
+                    )
+                    for field in advanced_fields
+                ],
             )
             if show_all:
                 blocks.append(advanced_grid)

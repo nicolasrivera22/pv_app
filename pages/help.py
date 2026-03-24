@@ -41,13 +41,13 @@ HELP_CONTENT: dict[str, tuple[dict[str, object], ...]] = {
             ),
         },
         {
-            "title": "Workbench workflow",
+            "title": "Results and setup workflow",
             "paragraphs": (
-                "Workbench is where you build and rerun a scenario. It is the main page for editing assumptions and reviewing deterministic results.",
+                "Results is now the customer-facing landing page for deterministic outputs. Use Assumptions for client-safe setup and Admin for internal catalogs and pricing data.",
             ),
             "bullets": (
-                "Assumptions change demand, sizing constraints, economics, battery behavior, and the scan range used to evaluate candidate kWp sizes.",
-                "Profile tables and hardware catalogs let you edit the workbook-backed data in place.",
+                "Assumptions changes demand, sizing constraints, and other client-safe setup inputs.",
+                "Admin holds pricing-sensitive assumptions, profile tables, and hardware catalogs.",
                 "The deterministic scan evaluates sizes inside the configured min/max range, but the chart and candidate table show only viable designs that survive the technical constraints.",
                 "If some evaluated sizes are filtered out, Workbench shows discard counters and discard markers so you can see that the scan continued beyond the last viable point.",
                 "Selecting a row or a point on the viable NPV curve makes that design the active deep dive.",
@@ -150,11 +150,11 @@ HELP_CONTENT: dict[str, tuple[dict[str, object], ...]] = {
         {
             "title": "Flujo de trabajo en Escenarios",
             "paragraphs": (
-                "Escenarios es la página principal para construir y volver a correr un escenario. Ahí editas los supuestos y revisas los resultados determinísticos.",
+                "Resultados es ahora la página principal de cara al cliente para revisar salidas determinísticas. Usa Supuestos para la configuración apta para cliente y Admin para catálogos y precios internos.",
             ),
             "bullets": (
-                "Supuestos cambia demanda, restricciones de tamaño, economía, comportamiento de batería y el rango min/max que usa el escaneo para evaluar tamaños kWp candidatos.",
-                "Las tablas de perfiles y los catálogos de hardware te permiten editar los datos del libro directamente en la app.",
+                "Supuestos cambia demanda, restricciones de tamaño y otras entradas seguras para conversar con cliente.",
+                "Admin concentra los supuestos sensibles en precio, las tablas de perfiles y los catálogos de hardware.",
                 "El escaneo determinístico evalúa tamaños dentro del rango configurado, pero la gráfica y la tabla de candidatos muestran solo diseños viables que superan las restricciones técnicas.",
                 "Si algunos tamaños evaluados se filtran, Escenarios muestra contadores y marcadores de descarte para que veas que el escaneo continuó más allá del último punto viable.",
                 "Al seleccionar una fila o un punto de la curva viable de VPN, ese diseño pasa a ser el análisis detallado activo.",
