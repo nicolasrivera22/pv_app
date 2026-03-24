@@ -147,6 +147,7 @@ def test_page_wrappers_render_split_sections() -> None:
 
     assert _find_component(results_layout, "deterministic-results-area") is not None
     assert _find_component(results_layout, "results-status-digest") is not None
+    assert _find_component(results_layout, "workspace-admin-entry") is not None
     assert _find_component(results_layout, "assumptions-sections") is None
     assert _find_component(results_layout, "inverter-table-editor") is None
 
@@ -156,11 +157,13 @@ def test_page_wrappers_render_split_sections() -> None:
     assert _find_component(assumptions_layout, "run-assumptions-scan-btn") is not None
     assert _find_component(assumptions_layout, "inverter-table-editor") is None
 
-    assert _find_component(admin_layout, "admin-assumption-sections") is not None
+    assert _find_component(admin_layout, "admin-access-shell") is not None
     assert _find_component(admin_layout, "admin-gating-note") is not None
-    assert _find_component(admin_layout, "profile-editor-title") is not None
-    assert _find_component(admin_layout, "inverter-table-editor") is not None
-    assert _find_component(admin_layout, "apply-admin-btn") is not None
+    assert _find_component(admin_layout, "admin-pin-input") is not None
+    assert _find_component(admin_layout, "admin-unlock-btn") is not None
+    assert _find_component(admin_layout, "profile-editor-title") is None
+    assert _find_component(admin_layout, "inverter-table-editor") is None
+    assert _find_component(admin_layout, "apply-admin-btn") is None
     assert _find_component(admin_layout, "run-assumptions-scan-btn") is None
 
 
@@ -179,5 +182,5 @@ def test_admin_page_gracefully_handles_direct_access_without_active_scenario() -
     rendered = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
 
     assert _find_component(rendered, "admin-gating-note") is not None
-    assert _find_component(rendered, "admin-assumption-sections") is not None
+    assert _find_component(rendered, "admin-pin-input") is not None
     assert payload["active_scenario_id"] is None

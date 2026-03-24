@@ -1,3 +1,4 @@
+from .admin_view import admin_locked_card, admin_secure_content
 from .assumption_editor import assumption_editor_section, render_assumption_sections
 from .candidate_explorer import candidate_explorer_section
 from .catalog_editor import catalog_editor_section
@@ -20,6 +21,8 @@ from .workspace_frame import workspace_frame
 
 __all__ = [
     "assumption_editor_section",
+    "admin_locked_card",
+    "admin_secure_content",
     "build_ecdf_figure",
     "build_histogram_figure",
     "candidate_explorer_section",

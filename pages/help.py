@@ -43,11 +43,11 @@ HELP_CONTENT: dict[str, tuple[dict[str, object], ...]] = {
         {
             "title": "Results and setup workflow",
             "paragraphs": (
-                "Results is now the customer-facing landing page for deterministic outputs. Use Assumptions for client-safe setup and Admin for internal catalogs and pricing data.",
+                "Results is now the customer-facing landing page for deterministic outputs. Use Assumptions for client-safe setup and Admin for internal catalogs and pricing data behind the local PIN gate.",
             ),
             "bullets": (
                 "Assumptions changes demand, sizing constraints, and other client-safe setup inputs.",
-                "Admin holds pricing-sensitive assumptions, profile tables, and hardware catalogs.",
+                "Admin holds pricing-sensitive assumptions, profile tables, and hardware catalogs behind the local PIN gate.",
                 "The deterministic scan evaluates sizes inside the configured min/max range, but the chart and candidate table show only viable designs that survive the technical constraints.",
                 "If some evaluated sizes are filtered out, Workbench shows discard counters and discard markers so you can see that the scan continued beyond the last viable point.",
                 "Selecting a row or a point on the viable NPV curve makes that design the active deep dive.",
@@ -150,11 +150,11 @@ HELP_CONTENT: dict[str, tuple[dict[str, object], ...]] = {
         {
             "title": "Flujo de trabajo en Escenarios",
             "paragraphs": (
-                "Resultados es ahora la página principal de cara al cliente para revisar salidas determinísticas. Usa Supuestos para la configuración apta para cliente y Admin para catálogos y precios internos.",
+                "Resultados es ahora la página principal de cara al cliente para revisar salidas determinísticas. Usa Supuestos para la configuración apta para cliente y Admin para catálogos y precios internos detrás del PIN local.",
             ),
             "bullets": (
                 "Supuestos cambia demanda, restricciones de tamaño y otras entradas seguras para conversar con cliente.",
-                "Admin concentra los supuestos sensibles en precio, las tablas de perfiles y los catálogos de hardware.",
+                "Admin concentra los supuestos sensibles en precio, las tablas de perfiles y los catálogos de hardware detrás del PIN local.",
                 "El escaneo determinístico evalúa tamaños dentro del rango configurado, pero la gráfica y la tabla de candidatos muestran solo diseños viables que superan las restricciones técnicas.",
                 "Si algunos tamaños evaluados se filtran, Escenarios muestra contadores y marcadores de descarte para que veas que el escaneo continuó más allá del último punto viable.",
                 "Al seleccionar una fila o un punto de la curva viable de VPN, ese diseño pasa a ser el análisis detallado activo.",

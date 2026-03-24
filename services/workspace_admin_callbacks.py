@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import time
+
 from dash import ALL, Input, Output, State, callback, ctx
 from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
 
-from components import render_assumption_sections
+from components import admin_locked_card, admin_secure_content, render_assumption_sections
+from .admin_access import (
+    admin_pin_configured,
+    grant_admin_session_access,
+    is_admin_session_unlocked,
+    verify_admin_pin,
+)
 from .i18n import tr
 from .profile_charts import build_profile_chart
 from .project_io import save_project
@@ -28,6 +36,19 @@ def _lang(value: str | None) -> str:
 
 def _session(payload, language_value: str | None):
     return resolve_client_session(payload, language=_lang(language_value))
+
+
+def _admin_session(payload, language_value: str | None):
+    client_state, state = _session(payload, language_value)
+    return client_state, state, is_admin_session_unlocked(client_state.session_id)
+
+
+def _admin_locked_meta(message_key: str | None = None, *, tone: str = "neutral") -> dict[str, object]:
+    return {
+        "revision": time.time(),
+        "message_key": message_key,
+        "tone": tone,
+    }
 
 
 PROFILE_MAIN_TABLE_IDS = (
@@ -145,11 +166,62 @@ def _blank_table_row(table_columns, table_rows=None) -> dict[str, str]:
 
 
 @callback(
+    Output("admin-access-meta", "data"),
+    Input("admin-unlock-btn", "n_clicks"),
+    State("scenario-session-store", "data"),
+    State("admin-pin-input", "value"),
+    prevent_initial_call=True,
+)
+def unlock_admin_session(_unlock_clicks, session_payload, pin_value):
+    client_state, _state, _unlocked = _admin_session(session_payload, None)
+    if not admin_pin_configured():
+        return _admin_locked_meta("workspace.admin.locked.setup_missing", tone="warning")
+    if not verify_admin_pin(pin_value):
+        return _admin_locked_meta("workspace.admin.locked.invalid", tone="error")
+    grant_admin_session_access(client_state.session_id)
+    return _admin_locked_meta("workspace.admin.locked.unlocked", tone="success")
+
+
+@callback(
+    Output("admin-access-shell", "children"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+    Input("admin-access-meta", "data"),
+)
+def render_admin_access_shell(session_payload, language_value, access_meta):
+    lang = _lang(language_value)
+    client_state, _state, unlocked = _admin_session(session_payload, lang)
+    if unlocked:
+        return [admin_secure_content(lang=lang)]
+    meta = access_meta or {}
+    return [
+        admin_locked_card(
+            lang=lang,
+            configured=admin_pin_configured(),
+            status_key=meta.get("message_key"),
+            tone=str(meta.get("tone") or "neutral"),
+        )
+    ]
+
+
+@callback(
     Output("admin-page-title", "children"),
     Output("admin-page-copy", "children"),
+    Output("admin-gating-note", "children"),
+    Input("language-selector", "value"),
+)
+def translate_admin_page_header(language_value):
+    lang = _lang(language_value)
+    return (
+        tr("workspace.admin.title", lang),
+        tr("workspace.admin.copy", lang),
+        tr("workspace.admin.note", lang),
+    )
+
+
+@callback(
     Output("admin-show-all", "options"),
     Output("apply-admin-btn", "children"),
-    Output("admin-gating-note", "children"),
     Output("profile-editor-title", "children"),
     Output("profile-editor-note", "children"),
     Output("month-profile-title", "children"),
@@ -175,14 +247,11 @@ def _blank_table_row(table_columns, table_rows=None) -> dict[str, str]:
     Output("add-battery-row-btn", "children"),
     Input("language-selector", "value"),
 )
-def translate_admin_page(language_value):
+def translate_admin_secure_content(language_value):
     lang = _lang(language_value)
     return (
-        tr("workspace.admin.title", lang),
-        tr("workspace.admin.copy", lang),
         [{"label": tr("workbench.assumptions.show_all", lang), "value": "all"}],
         tr("workbench.assumptions.apply", lang),
-        tr("workspace.admin.note", lang),
         tr("workbench.profiles", lang),
         tr("workbench.profiles.note", lang),
         tr("workbench.profiles.month", lang),
@@ -257,7 +326,34 @@ def translate_profile_table_activators(language_value):
 )
 def populate_admin_page(session_payload, show_all_values, language_value):
     lang = _lang(language_value)
-    client_state, state = _session(session_payload, lang)
+    client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        empty = ([], [], {})
+        hidden = {"display": "none"}
+        return (
+            render_assumption_sections(
+                [],
+                show_all=False,
+                empty_message=tr("workbench.assumptions.none", lang),
+                advanced_label=tr("workbench.assumptions.advanced", lang),
+                input_id_type="admin-assumption-input",
+                field_card_type="admin-assumption-field-card",
+                context_note_type="admin-assumption-context-note",
+            ),
+            True,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            hidden,
+            hidden,
+            hidden,
+        )
     active = state.get_scenario()
     if active is None:
         empty = ([], [], {})
@@ -369,7 +465,9 @@ def sync_admin_assumption_context_ui(
     note_ids,
 ):
     lang = _lang(language_value)
-    _, state = _session(session_payload, lang)
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        raise PreventUpdate
     active = state.get_scenario()
     if active is None:
         return [], [], [], []
@@ -414,7 +512,11 @@ def sync_admin_assumption_context_ui(
 )
 def toggle_pricing_table_visibility(session_payload, assumption_input_ids, assumption_values, language_value):
     lang = _lang(language_value)
-    client_state, state = _session(session_payload, lang)
+    client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        hidden = {"display": "none"}
+        placeholder_hidden = {"display": "none"}
+        return hidden, hidden, "", placeholder_hidden, "", placeholder_hidden
     active = state.get_scenario()
     if active is None:
         hidden = {"display": "none"}
@@ -480,7 +582,9 @@ def sync_admin_draft(
     demand_profile_general_rows,
     demand_profile_weights_rows,
 ):
-    client_state, state = _session(session_payload, None)
+    client_state, state, unlocked = _admin_session(session_payload, None)
+    if not unlocked:
+        raise PreventUpdate
     active = state.get_scenario()
     if active is None:
         raise PreventUpdate
@@ -833,7 +937,9 @@ def apply_admin_edits(
     language_value,
 ):
     lang = _lang(language_value)
-    client_state, state = _session(session_payload, lang)
+    client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        raise PreventUpdate
     try:
         active = state.get_scenario()
         if active is None:

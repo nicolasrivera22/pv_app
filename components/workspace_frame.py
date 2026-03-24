@@ -19,19 +19,6 @@ def workspace_frame(*, children: list, stores: list | None = None) -> html.Div:
                         className="workspace-sidebar-stack",
                         children=[
                             scenario_sidebar(),
-                            html.Div(
-                                className="panel secondary-panel workspace-internal-panel",
-                                children=[
-                                    html.H3(tr("workspace.internal.title", "es"), id="workspace-internal-title"),
-                                    html.P(tr("workspace.internal.copy", "es"), id="workspace-internal-copy", className="section-copy"),
-                                    dcc.Link(
-                                        tr("workspace.internal.link", "es"),
-                                        id="workspace-admin-link",
-                                        href="/admin",
-                                        className="link workspace-admin-link",
-                                    ),
-                                ],
-                            ),
                         ],
                     ),
                     html.Div(
@@ -60,6 +47,25 @@ def workspace_frame(*, children: list, stores: list | None = None) -> html.Div:
                                                             )
                                                         ],
                                                     ),
+                                                ],
+                                            ),
+                                            html.Div(
+                                                className="active-summary-actions workspace-shell-actions",
+                                                children=[
+                                                    html.Div(
+                                                        id="workspace-admin-entry",
+                                                        className="workspace-admin-entry",
+                                                        children=[
+                                                            html.Div(tr("workspace.internal.title", "es"), id="workspace-internal-title", className="workspace-admin-entry-title"),
+                                                            html.Div(tr("workspace.internal.copy", "es"), id="workspace-internal-copy", className="workspace-admin-entry-copy"),
+                                                            dcc.Link(
+                                                                tr("workspace.internal.link", "es"),
+                                                                id="workspace-admin-link",
+                                                                href="/admin",
+                                                                className="action-btn tertiary workspace-admin-link",
+                                                            ),
+                                                        ],
+                                                    )
                                                 ],
                                             ),
                                         ],
