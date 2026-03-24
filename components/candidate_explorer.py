@@ -39,7 +39,47 @@ def candidate_explorer_section() -> html.Div:
             html.Div(id="scan-summary-strip", className="scan-summary-strip"),
             html.Div(tr("workbench.selected_design.summary", "es"), id="selected-candidate-kpi-title", className="selected-candidate-kpi-title"),
             html.Div(id="active-kpi-cards", className="kpi-grid"),
-            dcc.Graph(id="active-npv-graph"),
+            html.Div(
+                id="candidate-horizon-shell",
+                className="candidate-horizon-shell",
+                children=[
+                    html.Div(
+                        id="candidate-horizon-toolbar",
+                        className="candidate-horizon-toolbar",
+                        style={"display": "none"},
+                        children=[
+                            html.Div(
+                                className="candidate-horizon-head",
+                                children=[
+                                    html.Label(
+                                        tr("workbench.horizon.label", "es"),
+                                        id="candidate-horizon-label",
+                                        className="candidate-horizon-label",
+                                        htmlFor="candidate-horizon-slider",
+                                    ),
+                                    html.Span("", id="candidate-horizon-value", className="candidate-horizon-value"),
+                                ],
+                            ),
+                            dcc.Slider(
+                                id="candidate-horizon-slider",
+                                min=1,
+                                max=1,
+                                step=1,
+                                value=1,
+                                marks={1: "1"},
+                                disabled=True,
+                                updatemode="drag",
+                            ),
+                            html.P(
+                                tr("workbench.horizon.helper", "es"),
+                                id="candidate-horizon-helper",
+                                className="candidate-horizon-helper",
+                            ),
+                        ],
+                    ),
+                    dcc.Graph(id="active-npv-graph"),
+                ],
+            ),
             html.P("", id="scan-discard-explainer", className="section-copy scan-discard-explainer", style={"display": "none"}),
             html.P(
                 tr("workbench.candidate_selection.helper", "es"),

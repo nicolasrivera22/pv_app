@@ -25,6 +25,7 @@ MONTH_ABBREVIATIONS = {
     "es": ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"],
     "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
 }
+MONTHS_PER_YEAR = 12
 
 CANDIDATE_TABLE_COLUMNS = [
     "scan_order",
@@ -55,21 +56,21 @@ def battery_name_from_candidate(battery: dict | None) -> str:
 
 
 def calculate_self_consumption_ratio(monthly: pd.DataFrame) -> float:
-    first_year = monthly.iloc[:12]
+    first_year = monthly.iloc[:MONTHS_PER_YEAR]
     consumed = first_year.get("PV_a_Carga_kWh", 0).sum() + first_year.get("Bateria_a_Carga_kWh", 0).sum()
     demand = first_year.get("Demanda_kWh", 0).sum()
     return float(consumed / demand) if demand else 0.0
 
 
 def calculate_self_sufficiency_ratio(monthly: pd.DataFrame) -> float:
-    first_year = monthly.iloc[:12]
+    first_year = monthly.iloc[:MONTHS_PER_YEAR]
     demand = first_year.get("Demanda_kWh", 0).sum()
     imports = first_year.get("Importacion_Red_kWh", 0).sum()
     return float(1.0 - (imports / demand)) if demand else 0.0
 
 
 def summarize_energy_metrics(monthly: pd.DataFrame) -> dict[str, float]:
-    first_year = monthly.iloc[:12]
+    first_year = monthly.iloc[:MONTHS_PER_YEAR]
     demand = float(first_year.get("Demanda_kWh", 0).sum())
     imports = float(first_year.get("Importacion_Red_kWh", 0).sum())
     exports = float(first_year.get("Exportacion_kWh", 0).sum())
@@ -82,27 +83,160 @@ def summarize_energy_metrics(monthly: pd.DataFrame) -> dict[str, float]:
     }
 
 
-def build_candidate_table(detail_map: dict[str, dict]) -> pd.DataFrame:
-    rows = []
-    for detail in detail_map.values():
-        energy = summarize_energy_metrics(detail["monthly"])
-        rows.append(
-            {
-                "scan_order": int(detail["scan_order"]),
-                "candidate_key": detail["candidate_key"],
-                "kWp": round(float(detail["kWp"]), 3),
-                "battery": detail["battery_name"],
-                "NPV_COP": float(detail["summary"]["cum_disc_final"]),
-                "payback_years": detail["summary"]["payback_years"],
-                "capex_client": float(detail["summary"]["capex_client"]),
-                "self_consumption_ratio": energy["self_consumption_ratio"],
-                "self_sufficiency_ratio": energy["self_sufficiency_ratio"],
-                "annual_import_kwh": energy["annual_import_kwh"],
-                "annual_export_kwh": energy["annual_export_kwh"],
-                "peak_ratio": float(detail["peak_ratio"]),
-            }
-        )
-    frame = pd.DataFrame(rows)
+def _available_horizon_years(monthly: pd.DataFrame) -> int:
+    if not isinstance(monthly, pd.DataFrame) or monthly.empty:
+        return 1
+    return max(1, (len(monthly) + MONTHS_PER_YEAR - 1) // MONTHS_PER_YEAR)
+
+
+def _normalize_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized if pd.notna(normalized) else None
+
+
+def _normalize_optional_int(value: Any) -> int | None:
+    normalized = _normalize_optional_float(value)
+    if normalized is None:
+        return None
+    return int(normalized)
+
+
+def _normalize_payback_years(value: Any) -> float | None:
+    normalized = _normalize_optional_float(value)
+    if normalized is None or normalized < 0:
+        return None
+    return normalized
+
+
+def _normalize_payback_month(value: Any) -> int | None:
+    normalized = _normalize_optional_int(value)
+    if normalized is None or normalized <= 0:
+        return None
+    return normalized
+
+
+def build_candidate_project_summary(detail: dict[str, Any]) -> dict[str, Any]:
+    summary = dict(detail.get("summary") or {})
+    summary["cum_disc_final"] = _normalize_optional_float(summary.get("cum_disc_final"))
+    summary["payback_years"] = _normalize_payback_years(summary.get("payback_years"))
+    summary["payback_month"] = _normalize_payback_month(summary.get("payback_month"))
+    return summary
+
+
+def summarize_candidate_for_horizon(detail: dict[str, Any], horizon_years: int) -> dict[str, Any]:
+    monthly = detail.get("monthly")
+    project_summary = build_candidate_project_summary(detail)
+    if not isinstance(monthly, pd.DataFrame) or monthly.empty or "NPV_COP" not in monthly.columns:
+        return {
+            "horizon_years": max(1, int(horizon_years or 1)),
+            "horizon_months": 0,
+            "NPV_COP": project_summary.get("cum_disc_final"),
+        }
+
+    max_years = _available_horizon_years(monthly)
+    effective_years = max(1, min(int(horizon_years or max_years), max_years))
+    horizon_months = min(len(monthly), effective_years * MONTHS_PER_YEAR)
+    truncated = monthly.iloc[:horizon_months].reset_index(drop=True)
+    npv_series = pd.to_numeric(truncated["NPV_COP"], errors="coerce")
+    finite_npv = npv_series.dropna()
+    npv_value = float(finite_npv.iloc[-1]) if not finite_npv.empty else None
+
+    return {
+        "horizon_years": effective_years,
+        "horizon_months": horizon_months,
+        "NPV_COP": npv_value,
+    }
+
+
+def resolve_payback_display_state(
+    payback_years: Any,
+    visible_horizon_years: int | float | None,
+    *,
+    payback_month: Any = None,
+) -> dict[str, Any]:
+    try:
+        resolved_visible_horizon = max(1, int(float(visible_horizon_years or 1)))
+    except (TypeError, ValueError):
+        resolved_visible_horizon = 1
+    resolved_payback_years = _normalize_payback_years(payback_years)
+    resolved_payback_month = _normalize_payback_month(payback_month)
+    if resolved_payback_years is None:
+        return {
+            "visible_horizon_years": resolved_visible_horizon,
+            "project_payback_years": None,
+            "project_payback_month": resolved_payback_month,
+            "reaches_payback": False,
+            "within_visible_horizon": False,
+            "message_key": "workbench.payback.note.project_horizon",
+            "trace_payback_years": None,
+        }
+    if resolved_payback_month is not None:
+        within_visible_horizon = resolved_payback_month <= (resolved_visible_horizon * MONTHS_PER_YEAR)
+    else:
+        within_visible_horizon = resolved_payback_years <= float(resolved_visible_horizon)
+    return {
+        "visible_horizon_years": resolved_visible_horizon,
+        "project_payback_years": resolved_payback_years,
+        "project_payback_month": resolved_payback_month,
+        "reaches_payback": True,
+        "within_visible_horizon": within_visible_horizon,
+        "message_key": None if within_visible_horizon else "workbench.payback.note.visible_horizon",
+        "trace_payback_years": resolved_payback_years,
+    }
+
+
+def build_visible_horizon_candidate_summary(detail: dict[str, Any], horizon_years: int) -> dict[str, Any]:
+    project_summary = build_candidate_project_summary(detail)
+    visible_horizon_summary = summarize_candidate_for_horizon(detail, horizon_years)
+    payback_display_state = resolve_payback_display_state(
+        project_summary.get("payback_years"),
+        visible_horizon_summary["horizon_years"],
+        payback_month=project_summary.get("payback_month"),
+    )
+    return {
+        **detail,
+        "project_summary": project_summary,
+        "visible_horizon_summary": visible_horizon_summary,
+        "payback_display_state": payback_display_state,
+    }
+
+
+def _candidate_summary_row(
+    detail: dict[str, Any],
+    *,
+    npv_cop: float | None = None,
+    payback_years: float | None = None,
+) -> dict[str, Any]:
+    energy = summarize_energy_metrics(detail["monthly"])
+    project_summary = build_candidate_project_summary(detail)
+    resolved_npv = npv_cop if npv_cop is not None else project_summary.get("cum_disc_final")
+    return {
+        "scan_order": int(detail["scan_order"]),
+        "candidate_key": detail["candidate_key"],
+        "kWp": round(float(detail["kWp"]), 3),
+        "battery": detail["battery_name"],
+        "NPV_COP": float(resolved_npv) if resolved_npv is not None else None,
+        "payback_years": payback_years if payback_years is not None else project_summary.get("payback_years"),
+        "capex_client": float(project_summary["capex_client"]),
+        "self_consumption_ratio": energy["self_consumption_ratio"],
+        "self_sufficiency_ratio": energy["self_sufficiency_ratio"],
+        "annual_import_kwh": energy["annual_import_kwh"],
+        "annual_export_kwh": energy["annual_export_kwh"],
+        "peak_ratio": float(detail["peak_ratio"]),
+    }
+
+
+def _finalize_candidate_table(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame(columns=CANDIDATE_TABLE_COLUMNS)
     frame = frame.sort_values(
@@ -116,14 +250,41 @@ def build_candidate_table(detail_map: dict[str, dict]) -> pd.DataFrame:
     return frame
 
 
+def build_candidate_table(detail_map: dict[str, dict]) -> pd.DataFrame:
+    frame = pd.DataFrame([_candidate_summary_row(detail) for detail in detail_map.values()])
+    return _finalize_candidate_table(frame)
+
+
+def summarize_candidates_for_horizon(detail_map: dict[str, dict], horizon_years: int) -> pd.DataFrame:
+    rows = []
+    for detail in detail_map.values():
+        presentation = build_visible_horizon_candidate_summary(detail, horizon_years)
+        rows.append(
+            _candidate_summary_row(
+                detail,
+                npv_cop=presentation["visible_horizon_summary"]["NPV_COP"],
+                payback_years=presentation["payback_display_state"]["trace_payback_years"],
+            )
+        )
+    return _finalize_candidate_table(pd.DataFrame(rows))
+
+
 def build_kpis(detail: dict) -> dict[str, float | str | None]:
-    summary = detail["summary"]
+    project_summary = detail.get("project_summary") or build_candidate_project_summary(detail)
+    visible_horizon_summary = detail.get("visible_horizon_summary") or {}
+    payback_display_state = detail.get("payback_display_state") or {}
     metrics = summarize_energy_metrics(detail["monthly"])
+    npv_value = visible_horizon_summary.get("NPV_COP")
+    if npv_value is None:
+        npv_value = project_summary.get("cum_disc_final")
+    payback_value = payback_display_state.get("project_payback_years")
+    if payback_value is None:
+        payback_value = project_summary.get("payback_years")
     return {
         "best_kWp": round(float(detail["kWp"]), 3),
         "selected_battery": detail["battery_name"],
-        "NPV": float(summary["cum_disc_final"]),
-        "payback_years": summary["payback_years"],
+        "NPV": float(npv_value) if npv_value is not None else None,
+        "payback_years": payback_value,
         "self_consumption_ratio": float(detail.get("self_consumption_ratio", metrics["self_consumption_ratio"])),
         "self_sufficiency_ratio": float(detail.get("self_sufficiency_ratio", metrics["self_sufficiency_ratio"])),
         "annual_import_kwh": metrics["annual_import_kwh"],
@@ -132,7 +293,7 @@ def build_kpis(detail: dict) -> dict[str, float | str | None]:
 
 
 def build_monthly_balance(monthly: pd.DataFrame, lang: str = "en") -> pd.DataFrame:
-    first_year = monthly.iloc[:12].copy()
+    first_year = monthly.iloc[:MONTHS_PER_YEAR].copy()
     if lang == "es":
         columns = [
             ("PV_a_Carga_kWh", "FV a carga"),
@@ -345,24 +506,66 @@ def _discard_hover_text(point: dict[str, Any], lang: str) -> str:
     return f"{base}{suffix}<extra></extra>"
 
 
+def format_horizon_year_value(years: int, *, lang: str = "es") -> str:
+    resolved_years = max(1, int(years))
+    if lang == "es":
+        unit = "año" if resolved_years == 1 else "años"
+    else:
+        unit = "year" if resolved_years == 1 else "years"
+    return f"{resolved_years} {unit}"
+
+
+def _npv_figure_title(base_title: str, *, horizon_years: int | None, lang: str) -> str:
+    if horizon_years is None:
+        return base_title
+    return f"{base_title}<br><sup>{tr('workbench.horizon.label', lang)}: {format_horizon_year_value(horizon_years, lang=lang)}</sup>"
+
+
+def _format_payback_hover_value(value: Any, *, lang: str = "es") -> str:
+    normalized = _normalize_payback_years(value)
+    if normalized is None:
+        return "-"
+    return format_metric("payback_years", normalized, lang)
+
+
+def _curve_hover_lines(curve: pd.DataFrame, *, lang: str, payback_label: str) -> list[str]:
+    lines: list[str] = []
+    for row in curve.to_dict("records"):
+        panel_count = row.get("panel_count")
+        panel_value = str(int(panel_count)) if panel_count is not None and pd.notna(panel_count) else "-"
+        lines.append(
+            "<br>".join(
+                [
+                    f"kWp: {float(row['kWp']):.3f}",
+                    f"{tr('common.chart.panels', lang)}: {panel_value}",
+                    f"{'Batería' if lang == 'es' else 'Battery'}: {row['battery_display']}",
+                    f"{metric_label('NPV_COP', lang)}: {format_metric('NPV_COP', row['NPV_COP'], lang)}",
+                    f"{payback_label}: {_format_payback_hover_value(row.get('payback_years'), lang=lang)}",
+                    f"{metric_label('self_consumption_ratio', lang)}: {100 * float(row['self_consumption_ratio']):.1f}%",
+                    f"{metric_label('peak_ratio', lang)}: {100 * float(row['peak_ratio']):.1f}%",
+                ]
+            )
+        )
+    return lines
+
+
+def _payback_trace_hover_lines(curve: pd.DataFrame, *, label: str, lang: str) -> list[str]:
+    return [
+        f"kWp: {float(k_wp):.3f}<br>{label}: {_format_payback_hover_value(payback_years, lang=lang)}"
+        for k_wp, payback_years in zip(curve["kWp"], curve["payback_years"], strict=False)
+    ]
+
+
 def _add_viable_npv_traces(
     figure: go.Figure,
     curve: pd.DataFrame,
     *,
     lang: str,
     figure_title: str,
+    payback_label: str,
     selected_key: str | None,
     row: int | None = None,
 ) -> None:
-    hover_template = (
-        f"kWp: %{{x:.3f}}<br>"
-        f"{tr('common.chart.panels', lang)}: %{{customdata[1]}}<br>"
-        f"{'Batería' if lang == 'es' else 'Battery'}: %{{customdata[2]}}<br>"
-        f"{metric_label('NPV_COP', lang)}: %{{y:,.0f}}<br>"
-        f"{metric_label('payback_years', lang)}: %{{customdata[3]:.2f}}<br>"
-        f"{metric_label('self_consumption_ratio', lang)}: %{{customdata[4]:.1%}}<br>"
-        f"{metric_label('peak_ratio', lang)}: %{{customdata[5]:.1%}}<extra></extra>"
-    )
     add_trace_kwargs = {"row": row, "col": 1} if row is not None else {}
     figure.add_trace(
         go.Scatter(
@@ -372,8 +575,9 @@ def _add_viable_npv_traces(
             name=figure_title,
             line={"color": "#2563eb", "width": 3},
             marker={"size": 9, "color": "#2563eb"},
-            customdata=curve[["candidate_key", "panel_count", "battery_display", "payback_years", "self_consumption_ratio", "peak_ratio"]],
-            hovertemplate=hover_template,
+            customdata=curve[["candidate_key", "panel_count"]],
+            hovertext=_curve_hover_lines(curve, lang=lang, payback_label=payback_label),
+            hovertemplate="%{hovertext}<extra></extra>",
         ),
         **add_trace_kwargs,
     )
@@ -434,6 +638,8 @@ def build_npv_figure(
     *,
     lang: str = "es",
     title: str | None = None,
+    horizon_years: int | None = None,
+    payback_label: str | None = None,
     module_power_w: float | None = None,
     discarded_points: tuple[dict[str, Any], ...] | list[dict[str, Any]] | None = None,
 ) -> go.Figure:
@@ -445,6 +651,8 @@ def build_npv_figure(
     else:
         curve["panel_count"] = None
     figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
+    full_title = _npv_figure_title(figure_title, horizon_years=horizon_years, lang=lang)
+    resolved_payback_label = payback_label or metric_label("payback_years", lang)
     discarded = [dict(point) for point in (discarded_points or [])]
     if not discarded:
         figure = make_subplots(specs=[[{"secondary_y": True}]])
@@ -458,24 +666,35 @@ def build_npv_figure(
                 showarrow=False,
             )
         else:
-            _add_viable_npv_traces(figure, curve, lang=lang, figure_title=figure_title, selected_key=selected_key)
+            _add_viable_npv_traces(
+                figure,
+                curve,
+                lang=lang,
+                figure_title=figure_title,
+                payback_label=resolved_payback_label,
+                selected_key=selected_key,
+            )
             figure.add_trace(
                 go.Scatter(
                     x=curve["kWp"],
                     y=curve["payback_years"],
                     mode="lines+markers",
-                    name=metric_label("payback_years", lang),
+                    name=resolved_payback_label,
                     line={"color": "#0f766e", "width": 2, "dash": "dash"},
                     marker={"size": 6, "color": "#0f766e"},
-                    hovertemplate=(
-                        f"kWp: %{{x:.3f}}<br>{metric_label('payback_years', lang)}: %{{y:.2f}}<extra></extra>"
-                    ),
+                    hovertext=_payback_trace_hover_lines(curve, label=resolved_payback_label, lang=lang),
+                    hovertemplate="%{hovertext}<extra></extra>",
                 ),
                 secondary_y=True,
             )
-        figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified", margin={"t": 88})
+        figure.update_layout(
+            template="plotly_white",
+            title=full_title,
+            hovermode="x unified",
+            margin={"t": 108 if horizon_years is not None else 88},
+        )
         figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", secondary_y=False)
-        figure.update_yaxes(title=metric_label("payback_years", lang), secondary_y=True)
+        figure.update_yaxes(title=resolved_payback_label, secondary_y=True)
         figure.update_xaxes(title=tr("common.chart.installed_kwp", lang))
         _apply_panel_count_axis(figure, curve, module_power_w, lang=lang, axis_name="xaxis2", overlay_axis="x")
         return figure
@@ -498,18 +717,25 @@ def build_npv_figure(
             showarrow=False,
         )
     else:
-        _add_viable_npv_traces(figure, curve, lang=lang, figure_title=figure_title, selected_key=selected_key, row=1)
+        _add_viable_npv_traces(
+            figure,
+            curve,
+            lang=lang,
+            figure_title=figure_title,
+            payback_label=resolved_payback_label,
+            selected_key=selected_key,
+            row=1,
+        )
         figure.add_trace(
             go.Scatter(
                 x=curve["kWp"],
                 y=curve["payback_years"],
                 mode="lines+markers",
-                name=metric_label("payback_years", lang),
+                name=resolved_payback_label,
                 line={"color": "#0f766e", "width": 2, "dash": "dash"},
                 marker={"size": 6, "color": "#0f766e"},
-                hovertemplate=(
-                    f"kWp: %{{x:.3f}}<br>{metric_label('payback_years', lang)}: %{{y:.2f}}<extra></extra>"
-                ),
+                hovertext=_payback_trace_hover_lines(curve, label=resolved_payback_label, lang=lang),
+                hovertemplate="%{hovertext}<extra></extra>",
             ),
             row=1,
             col=1,
@@ -535,9 +761,14 @@ def build_npv_figure(
             col=1,
         )
 
-    figure.update_layout(template="plotly_white", title=figure_title, hovermode="x unified", margin={"t": 88})
+    figure.update_layout(
+        template="plotly_white",
+        title=full_title,
+        hovermode="x unified",
+        margin={"t": 108 if horizon_years is not None else 88},
+    )
     figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", row=1, col=1, secondary_y=False)
-    figure.update_yaxes(title=metric_label("payback_years", lang), row=1, col=1, secondary_y=True)
+    figure.update_yaxes(title=resolved_payback_label, row=1, col=1, secondary_y=True)
     figure.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, range=[0, 1], row=2, col=1)
     figure.update_xaxes(title=tr("common.chart.installed_kwp", lang), row=2, col=1)
     _apply_panel_count_axis(figure, curve, module_power_w, lang=lang, axis_name="xaxis3", overlay_axis="x")

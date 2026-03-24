@@ -17,7 +17,16 @@ from pv_product.simulator import calculate_capex_client
 from pv_product.utils import build_7x24_from_excel
 from services import collect_config_updates, ensure_template, load_config_from_excel, load_example_config, run_scan, run_scenario
 from services.io_excel import WorkbookContractError, _normalize_config_value
-from services.result_views import build_kpis, resolve_selected_candidate_key, resolve_selected_candidate_key_for_scenario
+from services.result_views import (
+    build_npv_figure,
+    build_kpis,
+    build_visible_horizon_candidate_summary,
+    resolve_payback_display_state,
+    resolve_selected_candidate_key,
+    resolve_selected_candidate_key_for_scenario,
+    summarize_candidate_for_horizon,
+    summarize_candidates_for_horizon,
+)
 from services.ui_schema import coerce_config_value, display_assumption_value, parse_assumption_input_value
 from services.validation import validate_config
 
@@ -260,6 +269,202 @@ def test_run_scenario_shapes_outputs() -> None:
     assert set(["Año_mes", "PV to load", "Battery to load", "Grid import"]).issubset(scenario.monthly_balance.columns)
     assert set(["Año_mes", "cumulative_npv", "monthly_savings"]).issubset(scenario.cash_flow.columns)
     assert isinstance(scenario.npv_curve, pd.DataFrame)
+
+
+def test_resolve_payback_display_state_marks_payback_within_visible_horizon() -> None:
+    state = resolve_payback_display_state(1.5, 2, payback_month=18)
+
+    assert state["project_payback_years"] == pytest.approx(1.5)
+    assert state["project_payback_month"] == 18
+    assert state["reaches_payback"] is True
+    assert state["within_visible_horizon"] is True
+    assert state["message_key"] is None
+    assert state["trace_payback_years"] == pytest.approx(1.5)
+
+
+def test_resolve_payback_display_state_marks_payback_outside_visible_horizon() -> None:
+    state = resolve_payback_display_state(1.5, 1, payback_month=18)
+
+    assert state["project_payback_years"] == pytest.approx(1.5)
+    assert state["reaches_payback"] is True
+    assert state["within_visible_horizon"] is False
+    assert state["message_key"] == "workbench.payback.note.visible_horizon"
+    assert state["trace_payback_years"] == pytest.approx(1.5)
+
+
+def test_resolve_payback_display_state_handles_missing_payback_cleanly() -> None:
+    state = resolve_payback_display_state(None, 5, payback_month=None)
+
+    assert state["project_payback_years"] is None
+    assert state["reaches_payback"] is False
+    assert state["within_visible_horizon"] is False
+    assert state["message_key"] == "workbench.payback.note.project_horizon"
+    assert state["trace_payback_years"] is None
+
+
+def test_resolve_payback_display_state_uses_years_when_payback_month_is_missing() -> None:
+    state = resolve_payback_display_state(1.5, 1, payback_month=None)
+
+    assert state["project_payback_years"] == pytest.approx(1.5)
+    assert state["project_payback_month"] is None
+    assert state["within_visible_horizon"] is False
+    assert state["message_key"] == "workbench.payback.note.visible_horizon"
+
+
+def test_summarize_candidate_for_horizon_truncates_npv_only() -> None:
+    monthly = pd.DataFrame(
+        {
+            "Año_mes": list(range(1, 25)),
+            "NPV_COP": [-120.0] * 12 + [-20.0, -10.0, -5.0, -1.0, -0.5, 5.0, 10.0, 15.0, 30.0, 40.0, 50.0, 60.0],
+            "Ahorro_COP": [10.0] * 24,
+            "Demanda_kWh": [100.0] * 24,
+            "Importacion_Red_kWh": [30.0] * 24,
+            "Exportacion_kWh": [5.0] * 24,
+            "PV_a_Carga_kWh": [55.0] * 24,
+            "Bateria_a_Carga_kWh": [15.0] * 24,
+        }
+    )
+    detail = {
+        "scan_order": 0,
+        "candidate_key": "12.000::None",
+        "kWp": 12.0,
+        "battery_name": "None",
+        "peak_ratio": 1.1,
+        "summary": {"cum_disc_final": 60.0, "payback_years": 1.5, "payback_month": 18, "capex_client": 1_000.0},
+        "monthly": monthly,
+    }
+
+    first_year = summarize_candidate_for_horizon(detail, 1)
+    full_horizon = summarize_candidate_for_horizon(detail, 2)
+
+    assert first_year["horizon_years"] == 1
+    assert first_year["horizon_months"] == 12
+    assert first_year["NPV_COP"] == -120.0
+    assert full_horizon["NPV_COP"] == 60.0
+
+
+def test_build_visible_horizon_candidate_summary_preserves_project_payback() -> None:
+    monthly = pd.DataFrame(
+        {
+            "Año_mes": list(range(1, 25)),
+            "NPV_COP": [-120.0] * 12 + [-20.0, -10.0, -5.0, -1.0, -0.5, 5.0, 10.0, 15.0, 30.0, 40.0, 50.0, 60.0],
+            "Ahorro_COP": [10.0] * 24,
+            "Demanda_kWh": [100.0] * 24,
+            "Importacion_Red_kWh": [30.0] * 24,
+            "Exportacion_kWh": [5.0] * 24,
+            "PV_a_Carga_kWh": [55.0] * 24,
+            "Bateria_a_Carga_kWh": [15.0] * 24,
+        }
+    )
+    detail = {
+        "scan_order": 0,
+        "candidate_key": "12.000::None",
+        "kWp": 12.0,
+        "battery_name": "None",
+        "peak_ratio": 1.1,
+        "summary": {"cum_disc_final": 60.0, "payback_years": 1.5, "payback_month": 18, "capex_client": 1_000.0},
+        "monthly": monthly,
+    }
+
+    presentation = build_visible_horizon_candidate_summary(detail, 1)
+    kpis = build_kpis(presentation)
+
+    assert presentation["project_summary"]["payback_years"] == pytest.approx(1.5)
+    assert presentation["project_summary"]["payback_month"] == 18
+    assert presentation["visible_horizon_summary"]["NPV_COP"] == -120.0
+    assert presentation["payback_display_state"]["message_key"] == "workbench.payback.note.visible_horizon"
+    assert kpis["NPV"] == -120.0
+    assert kpis["payback_years"] == pytest.approx(1.5)
+
+
+def test_summarize_candidates_for_horizon_rebuilds_display_order_and_best_flag() -> None:
+    monthly_base = pd.DataFrame(
+        {
+            "Año_mes": list(range(1, 25)),
+            "Ahorro_COP": [10.0] * 24,
+            "Demanda_kWh": [100.0] * 24,
+            "Importacion_Red_kWh": [25.0] * 24,
+            "Exportacion_kWh": [5.0] * 24,
+            "PV_a_Carga_kWh": [60.0] * 24,
+            "Bateria_a_Carga_kWh": [15.0] * 24,
+        }
+    )
+    detail_map = {
+        "12.000::None": {
+            "scan_order": 0,
+            "candidate_key": "12.000::None",
+            "kWp": 12.0,
+            "battery_name": "None",
+            "peak_ratio": 1.05,
+            "summary": {"cum_disc_final": 80.0, "payback_years": 1.5, "payback_month": 18, "capex_client": 1_000.0},
+            "monthly": monthly_base.assign(NPV_COP=[50.0] * 12 + [80.0] * 12),
+        },
+        "12.000::BAT-10": {
+            "scan_order": 1,
+            "candidate_key": "12.000::BAT-10",
+            "kWp": 12.0,
+            "battery_name": "BAT-10",
+            "peak_ratio": 1.05,
+            "summary": {"cum_disc_final": 120.0, "payback_years": 1.0, "payback_month": 12, "capex_client": 1_200.0},
+            "monthly": monthly_base.assign(NPV_COP=[30.0] * 12 + [120.0] * 12),
+        },
+        "18.000::None": {
+            "scan_order": 2,
+            "candidate_key": "18.000::None",
+            "kWp": 18.0,
+            "battery_name": "None",
+            "peak_ratio": 1.2,
+            "summary": {"cum_disc_final": 140.0, "payback_years": 1.0, "payback_month": 12, "capex_client": 1_500.0},
+            "monthly": monthly_base.assign(NPV_COP=[90.0] * 12 + [140.0] * 12),
+        },
+    }
+
+    horizon_table = summarize_candidates_for_horizon(detail_map, 1)
+    full_table = summarize_candidates_for_horizon(detail_map, 2)
+
+    assert list(horizon_table["candidate_key"]) == ["12.000::None", "12.000::BAT-10", "18.000::None"]
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::None", "NPV_COP"].iloc[0] == 50.0
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::BAT-10", "NPV_COP"].iloc[0] == 30.0
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::None", "payback_years"].iloc[0] == pytest.approx(1.5)
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::BAT-10", "payback_years"].iloc[0] == pytest.approx(1.0)
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::None", "best_battery_for_kwp"].iloc[0]
+    assert not horizon_table.loc[horizon_table["candidate_key"] == "12.000::BAT-10", "best_battery_for_kwp"].iloc[0]
+    assert not full_table.loc[full_table["candidate_key"] == "12.000::None", "best_battery_for_kwp"].iloc[0]
+    assert full_table.loc[full_table["candidate_key"] == "12.000::BAT-10", "best_battery_for_kwp"].iloc[0]
+
+
+def test_build_npv_figure_keeps_missing_payback_as_gap() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery": "None",
+                "NPV_COP": 10_000_000,
+                "payback_years": None,
+                "self_consumption_ratio": 0.45,
+                "peak_ratio": 1.1,
+                "scan_order": 0,
+            },
+            {
+                "candidate_key": "18.000::BAT-10",
+                "kWp": 18.0,
+                "battery": "BAT-10",
+                "NPV_COP": 16_000_000,
+                "payback_years": 6.2,
+                "self_consumption_ratio": 0.52,
+                "peak_ratio": 1.25,
+                "scan_order": 1,
+            },
+        ]
+    )
+
+    figure = build_npv_figure(table, lang="es", payback_label="Payback del proyecto [años]")
+    payback_trace = next(trace for trace in figure.data if trace.name == "Payback del proyecto [años]")
+
+    assert figure.layout.yaxis2.title.text == "Payback del proyecto [años]"
+    assert np.isnan(payback_trace.y[0])
+    assert payback_trace.hovertext[0].endswith(" -")
 
 
 def test_scan_payload_round_trip_preserves_detail_fields() -> None:

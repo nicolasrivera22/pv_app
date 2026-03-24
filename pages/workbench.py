@@ -73,10 +73,13 @@ from services.result_views import (
     build_cash_flow,
     build_cash_flow_figure,
     build_kpis,
+    build_visible_horizon_candidate_summary,
     build_monthly_balance,
     build_monthly_balance_figure,
     build_npv_figure,
     build_typical_day_figure,
+    format_horizon_year_value,
+    summarize_candidates_for_horizon,
 )
 from services.validation import BATTERY_REQUIRED_COLUMNS, INVERTER_REQUIRED_COLUMNS
 
@@ -234,7 +237,11 @@ def _selected_candidate_banner(detail: dict | None, *, lang: str = "es") -> list
         ]
     inverter_name = (((detail.get("inv_sel") or {}).get("inverter") or {}).get("name")) or fallback
     battery_name = format_metric("selected_battery", detail.get("battery_name", "None"), lang) if detail.get("battery_name") is not None else fallback
-    npv_value = detail.get("summary", {}).get("cum_disc_final")
+    visible_summary = detail.get("visible_horizon_summary") or {}
+    project_summary = detail.get("project_summary") or detail.get("summary") or {}
+    npv_value = visible_summary.get("NPV_COP")
+    if npv_value is None:
+        npv_value = project_summary.get("cum_disc_final")
     kwp_value = detail.get("kWp")
     banner_values = [
         (tr("workbench.selected_design.banner.kwp", lang), f"{float(kwp_value):.3f} kWp" if kwp_value is not None else fallback),
@@ -256,6 +263,62 @@ def _selected_candidate_banner(detail: dict | None, *, lang: str = "es") -> list
 
 def _has_viable_scan_result(scan_result) -> bool:
     return scan_result is not None and not scan_result.candidates.empty and bool(scan_result.candidate_details)
+
+
+def _scenario_horizon_years(active) -> int:
+    if active is None:
+        return 1
+    configured_years = (active.config_bundle.config or {}).get("years", 1)
+    try:
+        return max(1, int(float(configured_years)))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _resolved_candidate_horizon(active, slider_value) -> int:
+    max_years = _scenario_horizon_years(active)
+    try:
+        requested_years = int(float(slider_value))
+    except (TypeError, ValueError):
+        requested_years = max_years
+    return max(1, min(requested_years, max_years))
+
+
+def _candidate_horizon_marks(max_years: int) -> dict[int, str]:
+    if max_years <= 6:
+        marks = list(range(1, max_years + 1))
+    elif max_years <= 10:
+        marks = sorted({1, *range(2, max_years, 2), max_years})
+    else:
+        marks = sorted({1, max(2, round(max_years / 2)), max_years})
+    return {int(year): str(int(year)) for year in marks}
+
+
+def _visible_horizon_candidate_presentation(detail: dict | None, horizon_years: int) -> dict | None:
+    if not detail:
+        return detail
+    return build_visible_horizon_candidate_summary(detail, horizon_years)
+
+
+def _payback_note_for_presentation(detail: dict | None, *, lang: str = "es") -> dict[str, str]:
+    if not detail:
+        return {}
+    payback_state = detail.get("payback_display_state") or {}
+    message_key = payback_state.get("message_key")
+    if not message_key:
+        return {}
+    return {"payback_years": tr(str(message_key), lang)}
+
+
+def _apply_workbench_table_text(columns: list[dict], tooltip_header: dict[str, str], *, lang: str = "es") -> tuple[list[dict], dict[str, str]]:
+    next_columns = [dict(column) for column in columns]
+    next_tooltips = dict(tooltip_header)
+    next_tooltips["payback_years"] = tr("workbench.horizon.helper", lang)
+    for column in next_columns:
+        if column.get("id") == "payback_years":
+            column["name"] = tr("workbench.payback.project_axis_label", lang)
+            break
+    return next_columns, next_tooltips
 
 
 def _scan_max_evaluated_kwp(scan_result) -> float | None:
@@ -563,6 +626,7 @@ layout = html.Div(
         dcc.Store(id="workbench-latest-export-folder", storage_type="memory", data=""),
         dcc.Store(id="run-scan-choice-state", storage_type="memory", data=_run_choice_state()),
         dcc.Store(id="active-profile-table-state", storage_type="memory", data=_active_profile_table_state()),
+        dcc.Store(id="candidate-horizon-context", storage_type="memory", data={}),
         run_scan_choice_dialog(),
         html.Div(
             className="workbench-grid",
@@ -678,6 +742,8 @@ layout = html.Div(
     Output("candidate-explorer-title", "children"),
     Output("candidate-export-note", "children"),
     Output("candidate-explorer-intro", "children"),
+    Output("candidate-horizon-label", "children"),
+    Output("candidate-horizon-helper", "children"),
     Output("selected-candidate-kpi-title", "children"),
     Output("candidate-selection-helper", "children"),
     Output("selected-candidate-deep-dive-title", "children"),
@@ -743,6 +809,8 @@ def translate_workbench_page(language_value):
         tr("workbench.candidate_explorer", lang),
         tr("workbench.export.note", lang),
         tr("workbench.candidate_explorer.intro", lang),
+        tr("workbench.horizon.label", lang),
+        tr("workbench.horizon.helper", lang),
         tr("workbench.selected_design.summary", lang),
         tr("workbench.candidate_selection.helper", lang),
         tr("workbench.deep_dive.title", lang),
@@ -1809,6 +1877,53 @@ def cancel_run_scan_choice(_cancel_clicks, dialog_state, language_value):
 
 
 @callback(
+    Output("candidate-horizon-slider", "min"),
+    Output("candidate-horizon-slider", "max"),
+    Output("candidate-horizon-slider", "marks"),
+    Output("candidate-horizon-slider", "value"),
+    Output("candidate-horizon-slider", "disabled"),
+    Output("candidate-horizon-toolbar", "style"),
+    Output("candidate-horizon-value", "children"),
+    Output("candidate-horizon-context", "data"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+    State("candidate-horizon-slider", "value"),
+    State("candidate-horizon-context", "data"),
+)
+def sync_candidate_horizon_slider(session_payload, language_value, current_value, current_context):
+    lang = _lang(language_value)
+    _, state, active = _session_with_scan(session_payload, lang)
+    hidden_style = {"display": "none"}
+    if active is None or active.scan_result is None or not _has_viable_scan_result(active.scan_result):
+        return 1, 1, {1: "1"}, 1, True, hidden_style, "", {}
+
+    max_years = _scenario_horizon_years(active)
+    next_context = {
+        "scenario_id": active.scenario_id,
+        "scan_fingerprint": active.scan_fingerprint,
+        "max_years": max_years,
+    }
+    if next_context != (current_context or {}):
+        value = max_years
+    else:
+        try:
+            resolved_value = int(float(current_value))
+        except (TypeError, ValueError):
+            resolved_value = max_years
+        value = max(1, min(resolved_value, max_years))
+    return (
+        1,
+        max_years,
+        _candidate_horizon_marks(max_years),
+        value,
+        False,
+        {},
+        format_horizon_year_value(value, lang=lang),
+        next_context,
+    )
+
+
+@callback(
     Output("scenario-session-store", "data", allow_duplicate=True),
     Input("active-candidate-table", "selected_rows"),
     Input("active-npv-graph", "clickData"),
@@ -1853,8 +1968,9 @@ def persist_selected_candidate(selected_rows, click_data, table_rows, session_pa
     Output("active-candidate-table", "tooltip_header"),
     Input("scenario-session-store", "data"),
     Input("language-selector", "value"),
+    Input("candidate-horizon-slider", "value"),
 )
-def populate_results(session_payload, language_value):
+def populate_results(session_payload, language_value, horizon_slider_value):
     lang = _lang(language_value)
     _, state, active = _session_with_scan(session_payload, lang)
     empty = _empty_figure(tr("common.results", lang), tr("workbench.results.empty", lang))
@@ -1862,10 +1978,11 @@ def populate_results(session_payload, language_value):
         return [], "", {"display": "none"}, [], empty, [], empty, empty, empty, empty, empty, [], [], [], [], {}
 
     scan = active.scan_result
+    horizon_years = _resolved_candidate_horizon(active, horizon_slider_value)
     summary_strip = _scan_summary_strip(scan, lang=lang)
     discard_explainer, discard_explainer_style = _scan_discard_explainer(scan, lang=lang)
     selected_key = resolve_selected_candidate_key_for_scenario(scan, active.selected_candidate_key)
-    table = scan.candidates.copy()
+    table = summarize_candidates_for_horizon(scan.candidate_details, horizon_years)
     table["battery"] = table["battery"].replace({"None": tr("common.no_battery", lang)})
     visible_columns = [
         "kWp",
@@ -1880,6 +1997,7 @@ def populate_results(session_payload, language_value):
         "peak_ratio",
     ]
     columns, tooltip_header = build_display_columns(visible_columns, lang)
+    columns, tooltip_header = _apply_workbench_table_text(columns, tooltip_header, lang=lang)
     columns.extend(
         [
             {"name": "candidate_key", "id": "candidate_key"},
@@ -1888,13 +2006,17 @@ def populate_results(session_payload, language_value):
         ]
     )
     selected_index = table.index[table["candidate_key"] == selected_key].tolist() if selected_key else []
-    best_key = scan.best_candidate_key
+    best_key = None if table.empty else str(
+        table.sort_values(by=["NPV_COP", "scan_order"], ascending=[False, True], kind="mergesort").iloc[0]["candidate_key"]
+    )
     styles = _candidate_table_styles(selected_key, best_key)
     module_power_w = float(active.config_bundle.config.get("P_mod_W", 0.0) or 0.0)
     npv_figure = build_npv_figure(
         table,
         selected_key=selected_key,
         lang=lang,
+        horizon_years=horizon_years,
+        payback_label=tr("workbench.payback.project_axis_label", lang),
         module_power_w=module_power_w,
         discarded_points=scan.discarded_points,
     )
@@ -1920,16 +2042,22 @@ def populate_results(session_payload, language_value):
         )
 
     detail = scan.candidate_details[selected_key]
-    kpis = build_kpis(detail)
+    presentation_detail = _visible_horizon_candidate_presentation(detail, horizon_years)
+    kpis = build_kpis(presentation_detail)
     monthly_balance = build_monthly_balance(detail["monthly"], lang=lang)
     cash_flow = build_cash_flow(detail["monthly"])
     return (
         summary_strip,
         discard_explainer,
         discard_explainer_style,
-        render_kpi_cards(kpis, lang),
+        render_kpi_cards(
+            kpis,
+            lang,
+            label_overrides={"payback_years": tr("workbench.payback.project_label", lang)},
+            notes=_payback_note_for_presentation(presentation_detail, lang=lang),
+        ),
         npv_figure,
-        _selected_candidate_banner(detail, lang=lang),
+        _selected_candidate_banner(presentation_detail, lang=lang),
         build_monthly_balance_figure(monthly_balance, lang=lang),
         build_cash_flow_figure(cash_flow, lang=lang, k_wp=float(detail["kWp"]), module_power_w=module_power_w),
         build_annual_coverage_figure(detail, active.config_bundle.config, lang=lang),

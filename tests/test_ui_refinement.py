@@ -48,6 +48,7 @@ from services import (
     run_scenario_scan,
     save_project,
     tr,
+    update_selected_candidate,
 )
 from services.result_views import (
     build_annual_coverage_figure,
@@ -435,6 +436,8 @@ def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
     assert _find_component(section, "scan-summary-strip") is not None
     assert _find_component(section, "scan-discard-explainer") is not None
     assert _find_component(section, "active-kpi-cards") is not None
+    assert _find_component(section, "candidate-horizon-toolbar") is not None
+    assert _find_component(section, "candidate-horizon-slider") is not None
     assert _find_component(section, "active-npv-graph") is not None
     assert _find_component(section, "candidate-selection-helper") is not None
     assert _find_component(section, "selected-candidate-banner") is not None
@@ -463,11 +466,49 @@ def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
 def test_candidate_selection_affordances_and_styles_use_stable_candidate_keys() -> None:
     section = candidate_explorer_section()
     assert _find_component(section, "selected-candidate-kpi-title").children == tr("workbench.selected_design.summary", "es")
+    assert _find_component(section, "candidate-horizon-label").children == tr("workbench.horizon.label", "es")
     assert _find_component(section, "candidate-selection-helper").children == tr("workbench.candidate_selection.helper", "es")
 
     styles = workbench_page._candidate_table_styles("18.000::BAT-10", "12.000::None")
     assert styles[-1]["if"]["filter_query"] == '{candidate_key} = "18.000::BAT-10"'
     assert styles[-1]["backgroundColor"] == "#fee2e2"
+
+
+def test_candidate_horizon_slider_defaults_to_scan_horizon_and_preserves_current_value() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    payload = _session_payload(state)
+
+    minimum, maximum, marks, value, disabled, style, value_label, context = workbench_page.sync_candidate_horizon_slider(payload, "es", None, {})
+
+    assert minimum == 1
+    assert maximum == 5
+    assert marks[1] == "1"
+    assert value == 5
+    assert disabled is False
+    assert style == {}
+    assert value_label == "5 años"
+    assert context["scenario_id"] == state.active_scenario_id
+
+    preserved = workbench_page.sync_candidate_horizon_slider(payload, "es", 3, context)
+    assert preserved[3] == 3
+    assert preserved[6] == "3 años"
+
+
+def test_candidate_horizon_slider_hides_cleanly_without_results() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = _session_payload(state)
+
+    minimum, maximum, marks, value, disabled, style, value_label, context = workbench_page.sync_candidate_horizon_slider(payload, "es", None, {})
+
+    assert minimum == 1
+    assert maximum == 1
+    assert marks == {1: "1"}
+    assert value == 1
+    assert disabled is True
+    assert style == {"display": "none"}
+    assert value_label == ""
+    assert context == {}
 
 
 def test_selected_candidate_banner_tolerates_partial_detail_payload() -> None:
@@ -859,6 +900,7 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert "--assumption-control-height" in css_source
     assert ".assumption-editor-panel .Select-control" in css_source
     assert ".candidate-selection-helper" in css_source
+    assert ".candidate-horizon-toolbar" in css_source
     assert "body {" in css_source
     assert ".active-summary-copy" in css_source
     assert "grid-template-columns: minmax(0, 1fr) auto;" in css_source
@@ -1502,7 +1544,7 @@ def test_workbench_results_explain_all_discarded_scan() -> None:
         selected_rows,
         _styles,
         _tooltips,
-    ) = workbench_page.populate_results(payload, "es")
+    ) = workbench_page.populate_results(payload, "es", 1)
 
     assert len(summary_strip) == 4
     assert "restricción dominante actual" in explainer
@@ -1512,6 +1554,35 @@ def test_workbench_results_explain_all_discarded_scan() -> None:
     assert selected_rows == []
     assert monthly_figure.layout.annotations[0].text == tr("workbench.scan_discard.no_viable_detail", "es")
     assert npv_figure.data
+
+
+def test_populate_results_uses_horizon_adjusted_summary_without_losing_selection() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    non_best_key = next(key for key in scenario.scan_result.candidate_details if key != scenario.scan_result.best_candidate_key)
+    state = update_selected_candidate(state, scenario.scenario_id, non_best_key)
+    payload = _session_payload(state)
+
+    short_horizon = workbench_page.populate_results(payload, "es", 1)
+    full_horizon = workbench_page.populate_results(payload, "es", 5)
+
+    short_table_rows = short_horizon[11]
+    short_selected_rows = short_horizon[13]
+    full_table_rows = full_horizon[11]
+    full_selected_rows = full_horizon[13]
+
+    assert short_selected_rows
+    assert full_selected_rows
+    assert short_table_rows[short_selected_rows[0]]["candidate_key"] == non_best_key
+    assert full_table_rows[full_selected_rows[0]]["candidate_key"] == non_best_key
+    assert short_horizon[4].layout.title.text.endswith("Horizonte financiero: 1 año</sup>")
+    assert full_horizon[4].layout.title.text.endswith("Horizonte financiero: 5 años</sup>")
+
+    short_row = next(row for row in short_table_rows if row["candidate_key"] == non_best_key)
+    full_row = next(row for row in full_table_rows if row["candidate_key"] == non_best_key)
+    assert short_row["NPV_COP"] != full_row["NPV_COP"]
 
 
 def test_deep_dive_figure_builders_return_non_empty_plotly_figures() -> None:
