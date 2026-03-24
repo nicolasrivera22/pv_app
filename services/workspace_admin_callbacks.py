@@ -356,7 +356,7 @@ def translate_profile_table_activators(language_value):
     Output("demand-profile-general-panel", "style"),
     Output("demand-profile-weights-panel", "style"),
     Input("scenario-session-store", "data"),
-    Input("admin-show-all", "value"),
+    Input("admin-show-all", "value", allow_optional=True),
     Input("language-selector", "value"),
 )
 def populate_admin_page(session_payload, show_all_values, language_value):
@@ -592,15 +592,15 @@ def toggle_pricing_table_visibility(session_payload, assumption_input_ids, assum
     Input("scenario-session-store", "data"),
     Input({"type": "admin-assumption-input", "field": ALL}, "id"),
     Input({"type": "admin-assumption-input", "field": ALL}, "value"),
-    Input("inverter-table-editor", "data"),
-    Input("battery-table-editor", "data"),
-    Input("month-profile-editor", "data"),
-    Input("sun-profile-editor", "data"),
-    Input("price-kwp-editor", "data"),
-    Input("price-kwp-others-editor", "data"),
-    Input("demand-profile-editor", "data"),
-    Input("demand-profile-general-editor", "data"),
-    Input("demand-profile-weights-editor", "data"),
+    Input("inverter-table-editor", "data", allow_optional=True),
+    Input("battery-table-editor", "data", allow_optional=True),
+    Input("month-profile-editor", "data", allow_optional=True),
+    Input("sun-profile-editor", "data", allow_optional=True),
+    Input("price-kwp-editor", "data", allow_optional=True),
+    Input("price-kwp-others-editor", "data", allow_optional=True),
+    Input("demand-profile-editor", "data", allow_optional=True),
+    Input("demand-profile-general-editor", "data", allow_optional=True),
+    Input("demand-profile-weights-editor", "data", allow_optional=True),
     prevent_initial_call=True,
 )
 def sync_admin_draft(
@@ -659,13 +659,13 @@ def sync_admin_draft(
 @callback(
     Output("active-profile-table-state", "data"),
     Input({"type": "profile-table-activate", "table": ALL}, "n_clicks"),
-    Input("month-profile-editor", "active_cell"),
-    Input("sun-profile-editor", "active_cell"),
-    Input("demand-profile-weights-editor", "active_cell"),
-    Input("price-kwp-editor", "active_cell"),
-    Input("price-kwp-others-editor", "active_cell"),
-    Input("demand-profile-editor", "active_cell"),
-    Input("demand-profile-general-editor", "active_cell"),
+    Input("month-profile-editor", "active_cell", allow_optional=True),
+    Input("sun-profile-editor", "active_cell", allow_optional=True),
+    Input("demand-profile-weights-editor", "active_cell", allow_optional=True),
+    Input("price-kwp-editor", "active_cell", allow_optional=True),
+    Input("price-kwp-others-editor", "active_cell", allow_optional=True),
+    Input("demand-profile-editor", "active_cell", allow_optional=True),
+    Input("demand-profile-general-editor", "active_cell", allow_optional=True),
     State("active-profile-table-state", "data"),
     prevent_initial_call=True,
 )
@@ -682,6 +682,10 @@ def sync_active_profile_table(
 ):
     trigger = ctx.triggered_id
     current_table_id = str((active_state or {}).get("table_id") or "").strip() or None
+    activator_clicks = {
+        table_id: int(clicks or 0)
+        for table_id, clicks in zip(PROFILE_TABLE_IDS, _activator_clicks or [])
+    }
     active_cells = {
         "month-profile-editor": month_active_cell,
         "sun-profile-editor": sun_active_cell,
@@ -694,6 +698,8 @@ def sync_active_profile_table(
     if isinstance(trigger, dict) and trigger.get("type") == "profile-table-activate":
         table_id = str(trigger.get("table", "")).strip() or None
         if table_id is None:
+            raise PreventUpdate
+        if activator_clicks.get(table_id, 0) <= 0:
             raise PreventUpdate
         if table_id == current_table_id:
             return _active_profile_table_state()
@@ -708,11 +714,11 @@ def sync_active_profile_table(
 @callback(
     Output("active-profile-table-state", "data", allow_duplicate=True),
     Input("active-profile-table-state", "data"),
-    Input("price-kwp-panel", "style"),
-    Input("price-kwp-others-panel", "style"),
-    Input("demand-profile-panel", "style"),
-    Input("demand-profile-general-panel", "style"),
-    Input("demand-profile-weights-panel", "style"),
+    Input("price-kwp-panel", "style", allow_optional=True),
+    Input("price-kwp-others-panel", "style", allow_optional=True),
+    Input("demand-profile-panel", "style", allow_optional=True),
+    Input("demand-profile-general-panel", "style", allow_optional=True),
+    Input("demand-profile-weights-panel", "style", allow_optional=True),
     prevent_initial_call=True,
 )
 def sanitize_active_profile_table(
@@ -755,26 +761,26 @@ def sanitize_active_profile_table(
     Output("demand-profile-card", "className"),
     Output("demand-profile-general-card", "className"),
     Input("active-profile-table-state", "data"),
-    Input("month-profile-editor", "data"),
-    Input("month-profile-editor", "columns"),
-    Input("sun-profile-editor", "data"),
-    Input("sun-profile-editor", "columns"),
-    Input("demand-profile-weights-editor", "data"),
-    Input("demand-profile-weights-editor", "columns"),
-    Input("price-kwp-editor", "data"),
-    Input("price-kwp-editor", "columns"),
-    Input("price-kwp-others-editor", "data"),
-    Input("price-kwp-others-editor", "columns"),
-    Input("demand-profile-editor", "data"),
-    Input("demand-profile-editor", "columns"),
-    Input("demand-profile-general-editor", "data"),
-    Input("demand-profile-general-editor", "columns"),
+    Input("month-profile-editor", "data", allow_optional=True),
+    Input("month-profile-editor", "columns", allow_optional=True),
+    Input("sun-profile-editor", "data", allow_optional=True),
+    Input("sun-profile-editor", "columns", allow_optional=True),
+    Input("demand-profile-weights-editor", "data", allow_optional=True),
+    Input("demand-profile-weights-editor", "columns", allow_optional=True),
+    Input("price-kwp-editor", "data", allow_optional=True),
+    Input("price-kwp-editor", "columns", allow_optional=True),
+    Input("price-kwp-others-editor", "data", allow_optional=True),
+    Input("price-kwp-others-editor", "columns", allow_optional=True),
+    Input("demand-profile-editor", "data", allow_optional=True),
+    Input("demand-profile-editor", "columns", allow_optional=True),
+    Input("demand-profile-general-editor", "data", allow_optional=True),
+    Input("demand-profile-general-editor", "columns", allow_optional=True),
     Input("language-selector", "value"),
-    Input("price-kwp-panel", "style"),
-    Input("price-kwp-others-panel", "style"),
-    Input("demand-profile-panel", "style"),
-    Input("demand-profile-general-panel", "style"),
-    Input("demand-profile-weights-panel", "style"),
+    Input("price-kwp-panel", "style", allow_optional=True),
+    Input("price-kwp-others-panel", "style", allow_optional=True),
+    Input("demand-profile-panel", "style", allow_optional=True),
+    Input("demand-profile-general-panel", "style", allow_optional=True),
+    Input("demand-profile-weights-panel", "style", allow_optional=True),
 )
 def render_active_profile_chart(
     active_state,
@@ -872,8 +878,8 @@ def render_active_profile_chart(
 
 @callback(
     Output("inverter-table-editor", "data", allow_duplicate=True),
-    Input("add-inverter-row-btn", "n_clicks"),
-    State("inverter-table-editor", "data"),
+    Input("add-inverter-row-btn", "n_clicks", allow_optional=True),
+    State("inverter-table-editor", "data", allow_optional=True),
     prevent_initial_call=True,
 )
 def add_inverter_row(n_clicks, table_rows):
@@ -886,8 +892,8 @@ def add_inverter_row(n_clicks, table_rows):
 
 @callback(
     Output("battery-table-editor", "data", allow_duplicate=True),
-    Input("add-battery-row-btn", "n_clicks"),
-    State("battery-table-editor", "data"),
+    Input("add-battery-row-btn", "n_clicks", allow_optional=True),
+    State("battery-table-editor", "data", allow_optional=True),
     prevent_initial_call=True,
 )
 def add_battery_row(n_clicks, table_rows):
@@ -900,9 +906,9 @@ def add_battery_row(n_clicks, table_rows):
 
 @callback(
     Output("price-kwp-editor", "data", allow_duplicate=True),
-    Input("add-price-kwp-row-btn", "n_clicks"),
-    State("price-kwp-editor", "data"),
-    State("price-kwp-editor", "columns"),
+    Input("add-price-kwp-row-btn", "n_clicks", allow_optional=True),
+    State("price-kwp-editor", "data", allow_optional=True),
+    State("price-kwp-editor", "columns", allow_optional=True),
     prevent_initial_call=True,
 )
 def add_price_kwp_row(n_clicks, table_rows, table_columns):
@@ -918,9 +924,9 @@ def add_price_kwp_row(n_clicks, table_rows, table_columns):
 
 @callback(
     Output("price-kwp-others-editor", "data", allow_duplicate=True),
-    Input("add-price-kwp-others-row-btn", "n_clicks"),
-    State("price-kwp-others-editor", "data"),
-    State("price-kwp-others-editor", "columns"),
+    Input("add-price-kwp-others-row-btn", "n_clicks", allow_optional=True),
+    State("price-kwp-others-editor", "data", allow_optional=True),
+    State("price-kwp-others-editor", "columns", allow_optional=True),
     prevent_initial_call=True,
 )
 def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
@@ -937,20 +943,20 @@ def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
 @callback(
     Output("scenario-session-store", "data", allow_duplicate=True),
     Output("workbench-status", "children", allow_duplicate=True),
-    Input("apply-admin-btn", "n_clicks"),
+    Input("apply-admin-btn", "n_clicks", allow_optional=True),
     State("scenario-session-store", "data"),
     State("project-name-input", "value"),
     State({"type": "admin-assumption-input", "field": ALL}, "id"),
     State({"type": "admin-assumption-input", "field": ALL}, "value"),
-    State("inverter-table-editor", "data"),
-    State("battery-table-editor", "data"),
-    State("month-profile-editor", "data"),
-    State("sun-profile-editor", "data"),
-    State("price-kwp-editor", "data"),
-    State("price-kwp-others-editor", "data"),
-    State("demand-profile-editor", "data"),
-    State("demand-profile-general-editor", "data"),
-    State("demand-profile-weights-editor", "data"),
+    State("inverter-table-editor", "data", allow_optional=True),
+    State("battery-table-editor", "data", allow_optional=True),
+    State("month-profile-editor", "data", allow_optional=True),
+    State("sun-profile-editor", "data", allow_optional=True),
+    State("price-kwp-editor", "data", allow_optional=True),
+    State("price-kwp-others-editor", "data", allow_optional=True),
+    State("demand-profile-editor", "data", allow_optional=True),
+    State("demand-profile-general-editor", "data", allow_optional=True),
+    State("demand-profile-weights-editor", "data", allow_optional=True),
     State("language-selector", "value"),
     prevent_initial_call=True,
 )

@@ -28,7 +28,7 @@ def catalog_editor_section() -> html.Div:
         children=[
             html.Div(className="section-head", children=[html.H3(tr("workbench.catalogs", "es"), id="catalog-editor-title")]),
             html.Div(
-                className="catalog-grid",
+                className="catalog-stack",
                 children=[
                     html.Div(
                         className="subpanel",

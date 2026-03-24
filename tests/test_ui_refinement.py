@@ -359,6 +359,21 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
     assert catalog_table.tooltip_duration is None
 
 
+def test_catalog_editor_stacks_inverter_then_battery_tables() -> None:
+    section = catalog_editor_section()
+    stack = section.children[1]
+    first_panel, second_panel = stack.children
+
+    assert "catalog-stack" in str(getattr(stack, "className", "")).split()
+    assert len(stack.children) == 2
+    assert _find_component(first_panel, "inverter-editor-title") is not None
+    assert _find_component(first_panel, "inverter-table-editor") is not None
+    assert _find_component(first_panel, "battery-table-editor") is None
+    assert _find_component(second_panel, "battery-editor-title") is not None
+    assert _find_component(second_panel, "battery-table-editor") is not None
+    assert _find_component(second_panel, "inverter-table-editor") is None
+
+
 def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_controls() -> None:
     section = profile_editor_section()
     main_grid = _find_component(section, "profile-main-grid")
@@ -984,11 +999,23 @@ def test_profile_table_header_click_toggles_the_active_chart(monkeypatch) -> Non
         SimpleNamespace(triggered_id={"type": "profile-table-activate", "table": "sun-profile-editor"}),
     )
 
-    activated = workbench_page.sync_active_profile_table([], None, None, None, None, None, None, None, {"table_id": None})
-    cleared = workbench_page.sync_active_profile_table([], None, None, None, None, None, None, None, {"table_id": "sun-profile-editor"})
+    clicks = [0, 1, 0, 0, 0, 0, 0]
+    activated = workbench_page.sync_active_profile_table(clicks, None, None, None, None, None, None, None, {"table_id": None})
+    cleared = workbench_page.sync_active_profile_table(clicks, None, None, None, None, None, None, None, {"table_id": "sun-profile-editor"})
 
     assert activated == {"table_id": "sun-profile-editor"}
     assert cleared == {"table_id": None}
+
+
+def test_profile_table_header_mount_with_zero_clicks_does_not_auto_activate(monkeypatch) -> None:
+    monkeypatch.setattr(
+        workbench_page,
+        "ctx",
+        SimpleNamespace(triggered_id={"type": "profile-table-activate", "table": "month-profile-editor"}),
+    )
+
+    with pytest.raises(PreventUpdate):
+        workbench_page.sync_active_profile_table([0, 0, 0, 0, 0, 0, 0], None, None, None, None, None, None, None, {"table_id": None})
 
 
 def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -> None:

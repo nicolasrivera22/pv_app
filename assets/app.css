@@ -829,12 +829,16 @@ body {
     transform: translateY(0);
 }
 
-.catalog-grid,
+.catalog-stack,
 .chart-grid,
 .compare-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 1rem;
+}
+
+.catalog-stack {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
 }
 
 .profile-main-grid,
@@ -854,8 +858,14 @@ body {
 }
 
 .profile-main-grid .subpanel,
-.profile-secondary-grid .subpanel {
+.profile-secondary-grid .subpanel,
+.catalog-stack .subpanel {
     min-width: 0;
+}
+
+.chart-grid,
+.compare-grid {
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
 .profile-secondary-pricing-panel {
