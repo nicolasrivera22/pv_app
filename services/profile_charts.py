@@ -297,9 +297,9 @@ def _build_demand_weights_figure(rows: list[dict] | None, columns: list[dict] | 
     traces = [
         ("W_RES", "#0f766e", "solid", "scatter", False),
         ("W_IND", "#2563eb", "solid", "scatter", False),
-        ("W_TOTAL", "#7c3aed", "solid", "scatter", False),
-        ("W_RES_BASE", "#0f766e", "dash", "scatter", False),
-        ("W_IND_BASE", "#2563eb", "dash", "scatter", False),
+        # ("W_TOTAL", "#7c3aed", "solid", "scatter", False),
+        # ("W_RES_BASE", "#0f766e", "dash", "scatter", False),
+        # ("W_IND_BASE", "#2563eb", "dash", "scatter", False),
         ("TOTAL_kWh", "rgba(235, 37, 60, 0.41)", "dash", "bar", True),
     ]
     for key, color, dash, mode, secondary_y in traces:
