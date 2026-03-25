@@ -3,7 +3,7 @@ from .assumption_editor import assumption_editor_section, render_assumption_sect
 from .candidate_explorer import candidate_explorer_section
 from .catalog_editor import catalog_editor_section
 from .kpi_cards import render_kpi_cards
-from .profile_editor import profile_editor_section
+from .profile_editor import demand_profile_module, profile_editor_section
 from .selected_candidate_deep_dive import selected_candidate_deep_dive_section
 from .risk_charts import (
     build_ecdf_figure,
@@ -27,6 +27,7 @@ __all__ = [
     "build_histogram_figure",
     "candidate_explorer_section",
     "catalog_editor_section",
+    "demand_profile_module",
     "empty_risk_figure",
     "profile_editor_section",
     "render_assumption_sections",

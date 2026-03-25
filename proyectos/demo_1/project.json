@@ -2,13 +2,9 @@
   "format_version": 1,
   "name": "Demo",
   "slug": "demo_1",
-  "active_scenario_id": "scenario-9f9d2e1d",
+  "active_scenario_id": "scenario-3cf3eee7",
   "comparison_scenario_ids": [],
   "design_comparison_candidate_keys": {
-    "scenario-9f9d2e1d": [
-      "42.000::BAT-32",
-      "42.000::None"
-    ],
     "scenario-3cf3eee7": [
       "30.000::None",
       "12.000::None"
@@ -16,22 +12,13 @@
   },
   "scenarios": [
     {
-      "scenario_id": "scenario-9f9d2e1d",
-      "name": "Escenario 1",
+      "scenario_id": "scenario-3cf3eee7",
+      "name": "Escenario 2",
       "source_name": "PV_inputs.xlsx",
       "selected_candidate_key": null,
       "dirty": true,
       "last_run_at": null,
       "scan_fingerprint": null
-    },
-    {
-      "scenario_id": "scenario-3cf3eee7",
-      "name": "Escenario 2",
-      "source_name": "PV_inputs.xlsx",
-      "selected_candidate_key": "27.000::None",
-      "dirty": false,
-      "last_run_at": "2026-03-24T20:01:17",
-      "scan_fingerprint": "1180ada77b809f4e49fc2d8fbf5938e948ad8500ba4c2d9afeafb9777a63898e"
     }
   ],
   "ui_prefs": {

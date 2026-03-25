@@ -338,7 +338,7 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
     assert price_columns[1]["type"] == "numeric"
     assert battery_columns[0]["name"] == "Energía nominal [kWh]"
     assert battery_columns[1]["name"] == "Potencia máx [kW]"
-    assert weight_columns[0]["name"] == "W_RES"
+    assert weight_columns[0]["name"] == "Peso residencial"
     assert month_columns[0]["name"] == "Factor demanda"
     assert month_columns[1]["name"] == "Factor HSP"
     assert sun_columns[0]["name"] == "Participación solar [%]"
@@ -380,6 +380,8 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     main_chart = _find_component(section, "profile-main-chart-panel")
     secondary_grid = _find_component(section, "profile-secondary-grid")
     secondary_chart = _find_component(section, "profile-secondary-chart-panel")
+    relocation_card = _find_component(section, "profile-demand-relocated-card")
+    hidden_demand_shell = _find_component(section, "profile-demand-legacy-shell")
     activators = _find_components(
         section,
         lambda node: isinstance(getattr(node, "id", None), dict) and node.id.get("type") == "profile-table-activate",
@@ -389,63 +391,48 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     assert main_chart is not None
     assert secondary_grid is not None
     assert secondary_chart is not None
-    assert _find_component(section, "demand-profile-mode-panel") is not None
+    assert relocation_card is not None
+    assert hidden_demand_shell is not None
     assert _find_component(workbench_page.layout, "active-profile-table-state") is not None
-    assert len(main_grid.children) == 3
-    assert len(secondary_grid.children) == 5
-    assert [getattr(child, "id", None) for child in section.children[2:7]] == [
-        "demand-profile-mode-panel",
+    assert len(main_grid.children) == 2
+    assert len(secondary_grid.children) == 2
+    assert [getattr(child, "id", None) for child in section.children[2:8]] == [
         "profile-main-grid",
         "profile-main-chart-panel",
         "profile-secondary-grid",
+        "profile-demand-relocated-card",
         "profile-secondary-chart-panel",
+        "profile-demand-legacy-shell",
     ]
-    assert len(activators) == 7
+    assert len(activators) == 4
     assert {component.id["table"] for component in activators} == {
         "month-profile-editor",
         "sun-profile-editor",
-        "demand-profile-weights-editor",
         "price-kwp-editor",
         "price-kwp-others-editor",
-        "demand-profile-editor",
-        "demand-profile-general-editor",
     }
     assert _find_component(section, "month-profile-card") is not None
     assert _find_component(section, "sun-profile-card") is not None
-    assert _find_component(section, "demand-profile-weights-card") is not None
     assert _find_component(section, "price-kwp-card") is not None
     assert _find_component(section, "price-kwp-others-card") is not None
-    assert _find_component(section, "demand-profile-card") is not None
-    assert _find_component(section, "demand-profile-general-card") is not None
-    assert _find_component(section, "demand-profile-general-preview-card") is not None
-    assert _find_component(section, "demand-profile-mode-selector") is not None
-    assert _find_component(section, "demand-profile-type-selector") is not None
-    assert _find_component(section, "demand-profile-alpha-slider") is not None
-    assert _find_component(section, "demand-profile-energy-input") is not None
-    assert _find_component(section, "demand-profile-weights-preview-editor") is not None
+    assert _find_component(main_grid, "demand-profile-weights-card") is None
+    assert _find_component(secondary_grid, "demand-profile-card") is None
+    assert _find_component(secondary_grid, "demand-profile-general-card") is None
     assert _find_component(main_grid.children[0], "month-profile-title").children == tr("workbench.profiles.month", "es")
     assert _find_component(main_grid.children[1], "sun-profile-title").children == tr("workbench.profiles.sun", "es")
-    assert _find_component(main_grid.children[2], "demand-profile-weights-title").children == tr("workbench.profiles.demand_weights", "es")
-    assert _find_component(section, "demand-profile-mode-title").children == tr("workbench.profiles.mode.title", "es")
-    assert _find_component(section, "demand-profile-general-preview-title").children == tr("workbench.profiles.demand_general_preview", "es")
-    assert "profile-main-panel-wide" in str(_find_component(main_grid.children[2], "demand-profile-weights-panel").className)
+    assert _find_component(relocation_card, "profile-demand-relocated-title").children == tr("workspace.assumptions.demand.title", "es")
     assert _find_component(section, "month-profile-editor").page_size == 12
     assert _find_component(section, "sun-profile-editor").page_size == 12
-    assert _find_component(section, "demand-profile-weights-editor").page_size == 12
-    assert _find_component(section, "demand-profile-general-preview-editor").editable is False
     assert _find_component(section, "price-kwp-editor").page_size == 8
     assert _find_component(section, "price-kwp-others-editor").page_size == 8
     assert _find_component(section, "price-kwp-editor").row_deletable is True
     assert _find_component(section, "price-kwp-others-editor").row_deletable is True
     assert _find_component(section, "month-profile-editor").row_deletable is False
-    assert _find_component(section, "demand-profile-editor").row_deletable is False
     assert _find_component(section, "month-profile-tooltip").children == tr("workbench.profiles.tooltip.month", "es")
     assert _find_component(section, "sun-profile-tooltip").children == tr("workbench.profiles.tooltip.sun", "es")
     assert _find_component(section, "price-kwp-tooltip").children == tr("workbench.profiles.tooltip.price", "es")
     assert _find_component(section, "price-kwp-others-tooltip").children == tr("workbench.profiles.tooltip.price_others", "es")
-    assert _find_component(section, "demand-profile-tooltip").children == tr("workbench.profiles.tooltip.demand_weekday", "es")
-    assert _find_component(section, "demand-profile-general-tooltip").children == tr("workbench.profiles.tooltip.demand_general", "es")
-    assert _find_component(section, "demand-profile-weights-tooltip").children == tr("workbench.profiles.tooltip.demand_weights", "es")
+    assert _find_component(relocation_card, "profile-demand-relocated-copy").children == tr("workspace.admin.demand_moved.copy", "es")
     assert _find_component(section, "add-price-kwp-row-btn").children == tr("workbench.profiles.add_row", "es")
     assert _find_component(section, "add-price-kwp-others-row-btn").children == tr("workbench.profiles.add_row", "es")
     assert "profile-secondary-pricing-panel" in str(_find_component(section, "price-kwp-panel").className)
@@ -780,13 +767,13 @@ def test_workbench_assumption_context_callback_highlights_fixed_battery_selectio
     assert note_styles == [{"display": "block"}]
 
 
-def test_populate_assumptions_hides_monte_carlo_group_in_workbench() -> None:
+def test_populate_assumptions_includes_monte_carlo_group_in_general_assumptions() -> None:
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     payload = _session_payload(state, lang="es")
 
     rendered = workbench_page.populate_assumptions(payload, [], "es")
 
-    assert not any("Monte Carlo" in str(section.to_plotly_json()) for section in rendered)
+    assert any("Monte Carlo" in str(section.to_plotly_json()) for section in rendered)
 
 
 def test_risk_monte_carlo_context_callback_enables_manual_kwp_only_when_requested() -> None:
@@ -943,7 +930,15 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".profile-table-card-active" in css_source
     assert ".demand-profile-mode-panel" in css_source
     assert ".demand-profile-control-grid" in css_source
+    assert ".demand-profile-mode-option-label" in css_source
+    assert ".demand-profile-secondary-grid" in css_source
+    assert ".demand-profile-module .profile-table-card-shell" in css_source
+    assert "height: 380px !important;" in css_source
+    assert "min-height: 380px;" in css_source
     assert ".profile-table-subsection" in css_source
+    assert ".assumptions-subtabs" in css_source
+    assert ".assumptions-subtab-selected" in css_source
+    assert ".demand-relocated-card" in css_source
     assert ".workbench-state-strip" in css_source
     assert ".workbench-state-chip" in css_source
 
@@ -1007,8 +1002,8 @@ def test_run_scan_choice_dialog_disables_save_until_project_name_exists() -> Non
 
 
 def test_profile_table_activator_translation_uses_current_language() -> None:
-    assert workbench_page.translate_profile_table_activators("en") == ["Preview chart"] * 7
-    assert workbench_page.translate_profile_table_activators("es") == ["Ver gráfica"] * 7
+    assert workbench_page.translate_profile_table_activators("en") == ["Preview chart"] * 4
+    assert workbench_page.translate_profile_table_activators("es") == ["Ver gráfica"] * 4
 
 
 def test_profile_table_header_click_toggles_the_active_chart(monkeypatch) -> None:

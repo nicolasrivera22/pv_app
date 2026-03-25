@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 from app import create_app
 from pages import admin as admin_page
@@ -20,9 +21,11 @@ from services import (
     get_workspace_draft,
     load_example_config,
     partition_assumption_sections,
+    resolve_client_session,
     resolve_results_status_digest,
     upsert_workspace_draft,
 )
+from services.workspace_assumptions_callbacks import mutate_assumptions_state, sync_assumptions_demand_profile_views
 
 
 def _fast_bundle():
@@ -54,6 +57,21 @@ def _find_component(node, component_id: str):
     return _find_component(children, component_id)
 
 
+def _find_matching_component(node, predicate):
+    if predicate(node):
+        return node
+    children = getattr(node, "children", None)
+    if children is None:
+        return None
+    if isinstance(children, (list, tuple)):
+        for child in children:
+            found = _find_matching_component(child, predicate)
+            if found is not None:
+                return found
+        return None
+    return _find_matching_component(children, predicate)
+
+
 def test_partition_assumption_sections_routes_safe_and_internal_groups() -> None:
     sections = build_assumption_sections(load_example_config(), lang="es", show_all=True)
 
@@ -74,12 +92,13 @@ def test_partition_assumption_sections_routes_safe_and_internal_groups() -> None
         for field in section.get(bucket, [])
     }
 
-    assert {"Demanda y Perfil", "Sol y módulos", "Semilla", "Restricción de Proporción Pico"} <= client_groups
-    assert {"Economía", "Inversor", "Monte Carlo", "Precios"} <= admin_groups
+    assert {"Demanda y Perfil", "Sol y módulos", "Semilla", "Restricción de Proporción Pico", "Monte Carlo"} <= client_groups
+    assert {"Economía", "Inversor", "Precios"} <= admin_groups
     assert {"include_battery", "optimize_battery", "export_allowed"} <= client_fields
     assert {"battery_name", "bat_DoD", "bat_coupling", "bat_eta_rt"} <= admin_fields
     assert "pricing_mode" not in client_fields
-    assert "mc_PR_std" not in client_fields
+    assert "mc_PR_std" in client_fields
+    assert "Monte Carlo" not in admin_groups
     assert "price_total_COP" in admin_fields
 
 
@@ -156,6 +175,9 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(assumptions_layout, "assumptions-validation") is not None
     assert _find_component(assumptions_layout, "apply-assumptions-btn") is not None
     assert _find_component(assumptions_layout, "run-assumptions-scan-btn") is not None
+    assert _find_component(assumptions_layout, "assumptions-general-tab") is not None
+    assert _find_component(assumptions_layout, "assumptions-demand-tab") is not None
+    assert _find_component(assumptions_layout, "assumptions-demand-profile-mode-selector") is not None
     assert _find_component(assumptions_layout, "inverter-table-editor") is None
 
     assert _find_component(admin_layout, "admin-access-shell") is not None
@@ -168,6 +190,31 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(admin_layout, "inverter-table-editor") is None
     assert _find_component(admin_layout, "apply-admin-btn") is None
     assert _find_component(admin_layout, "run-assumptions-scan-btn") is None
+
+
+def test_assumptions_demand_tab_places_summary_strip_above_tables() -> None:
+    assumptions_layout = assumptions_page.layout() if callable(assumptions_page.layout) else assumptions_page.layout
+
+    control_strip = _find_component(assumptions_layout, "assumptions-demand-profile-control-strip")
+    relative_grid = _find_component(assumptions_layout, "assumptions-demand-profile-relative-grid")
+    weekday_table = _find_component(assumptions_layout, "assumptions-demand-profile-editor")
+    total_table = _find_component(assumptions_layout, "assumptions-demand-profile-general-editor")
+    relative_table = _find_component(assumptions_layout, "assumptions-demand-profile-weights-editor")
+
+    assert control_strip is not None
+    assert [child.id for child in control_strip.children[0].children] == [
+        "assumptions-demand-profile-energy-shell",
+        "assumptions-demand-profile-alpha-shell",
+        "assumptions-demand-profile-type-shell",
+    ]
+    assert [child.id for child in relative_grid.children] == [
+        "assumptions-demand-profile-weights-card",
+        "assumptions-demand-profile-weights-preview-card",
+    ]
+    assert weekday_table.page_size == 24
+    assert "DOW" in weekday_table.hidden_columns
+    assert total_table.page_size == 24
+    assert relative_table.page_size == 24
 
 
 def test_top_nav_exposes_results_and_assumptions_but_not_admin() -> None:
@@ -188,3 +235,74 @@ def test_admin_page_gracefully_handles_direct_access_without_active_scenario(mon
     assert _find_component(rendered, "admin-gating-note") is not None
     assert _find_component(rendered, "admin-setup-pin-input") is not None
     assert payload["active_scenario_id"] is None
+
+
+def test_assumptions_demand_tab_reacts_with_preview_and_chart() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = commit_client_session(bootstrap_client_session("es"), state).to_payload()
+
+    outputs = sync_assumptions_demand_profile_views(
+        "perfil hora dia de semana",
+        "mixta",
+        0.5,
+        1200,
+        None,
+        None,
+        None,
+        "demand",
+        "es",
+        payload,
+        [{"Dia": "Lunes", "DOW": 1, "HOUR": 0, "RES": 10, "IND": 5}],
+        None,
+        None,
+    )
+
+    weekday_rows, _total_rows, total_preview_rows, *_rest = outputs
+    energy_value = outputs[10]
+    energy_disabled = outputs[12]
+    chart_style = outputs[19]
+    chart_figure = outputs[-1]
+
+    assert weekday_rows[0]["TOTAL_kWh"] == 15
+    assert total_preview_rows[0]["HOUR"] == 0
+    assert abs(total_preview_rows[0]["TOTAL_kWh"] - (15 / 7)) < 1e-9
+    assert energy_value == 64.29
+    assert energy_disabled is True
+    assert chart_style["display"] == "grid"
+    assert len(chart_figure.data) == 1
+
+
+def test_apply_assumptions_persists_demand_mode_and_keeps_run_flow(monkeypatch) -> None:
+    clear_workspace_drafts()
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    active = state.get_scenario()
+    assert active is not None
+    relative_rows = active.config_bundle.demand_profile_weights_table.to_dict("records")
+    payload = commit_client_session(bootstrap_client_session("es"), state).to_payload()
+
+    monkeypatch.setattr("services.workspace_assumptions_callbacks.ctx", SimpleNamespace(triggered_id="apply-assumptions-btn"))
+
+    updated_payload, status, dialog_state = mutate_assumptions_state(
+        1,
+        0,
+        payload,
+        None,
+        [],
+        [],
+        "perfil horario relativo",
+        0.35,
+        900,
+        None,
+        None,
+        relative_rows,
+        "es",
+    )
+
+    _client_state, updated_state = resolve_client_session(updated_payload, language="es")
+    active = updated_state.get_scenario()
+
+    assert active is not None
+    assert active.config_bundle.config["use_excel_profile"] == "perfil horario relativo"
+    assert "aplic" in status.lower()
+    assert "ejecut" in status.lower() or "rerun" in status.lower()
+    assert dialog_state == {"open": False}

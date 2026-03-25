@@ -96,6 +96,12 @@ PROFILE_SECONDARY_TABLE_IDS = (
     "demand-profile-general-editor",
 )
 PROFILE_TABLE_IDS = (*PROFILE_MAIN_TABLE_IDS, *PROFILE_SECONDARY_TABLE_IDS)
+PROFILE_ACTIVATOR_TABLE_IDS = (
+    "month-profile-editor",
+    "sun-profile-editor",
+    "price-kwp-editor",
+    "price-kwp-others-editor",
+)
 PROFILE_TABLE_VISIBILITY_PANELS = {
     "price-kwp-editor": "price-kwp-panel",
     "price-kwp-others-editor": "price-kwp-others-panel",
@@ -450,6 +456,9 @@ def translate_admin_page_header(language_value):
     Output("price-kwp-tooltip", "children"),
     Output("price-kwp-others-title", "children"),
     Output("price-kwp-others-tooltip", "children"),
+    Output("profile-demand-relocated-title", "children"),
+    Output("profile-demand-relocated-copy", "children"),
+    Output("profile-demand-relocated-link", "children"),
     Output("demand-profile-title", "children"),
     Output("demand-profile-tooltip", "children"),
     Output("demand-profile-general-title", "children"),
@@ -490,6 +499,9 @@ def translate_admin_secure_content(language_value):
         tr("workbench.profiles.tooltip.price", lang),
         tr("workbench.profiles.price_others", lang),
         tr("workbench.profiles.tooltip.price_others", lang),
+        tr("workspace.assumptions.demand.title", lang),
+        tr("workspace.admin.demand_moved.copy", lang),
+        tr("workspace.admin.demand_moved.link", lang),
         tr("workbench.profiles.demand_weekday", lang),
         tr("workbench.profiles.tooltip.demand_weekday", lang),
         tr("workbench.profiles.demand_general", lang),
@@ -517,10 +529,12 @@ def translate_admin_secure_content(language_value):
 @callback(
     Output({"type": "profile-table-activate", "table": ALL}, "children"),
     Input("language-selector", "value"),
+    State({"type": "profile-table-activate", "table": ALL}, "id"),
 )
-def translate_profile_table_activators(language_value):
+def translate_profile_table_activators(language_value, activator_ids=None):
     lang = _lang(language_value)
-    return [tr("workbench.profiles.preview_chart", lang)] * len(PROFILE_TABLE_IDS)
+    count = len(activator_ids or PROFILE_ACTIVATOR_TABLE_IDS)
+    return [tr("workbench.profiles.preview_chart", lang)] * count
 
 
 @callback(
@@ -1026,6 +1040,7 @@ def sync_admin_draft(
     Input("price-kwp-others-editor", "active_cell", allow_optional=True),
     Input("demand-profile-editor", "active_cell", allow_optional=True),
     Input("demand-profile-general-editor", "active_cell", allow_optional=True),
+    State({"type": "profile-table-activate", "table": ALL}, "id"),
     State("active-profile-table-state", "data"),
     prevent_initial_call=True,
 )
@@ -1038,13 +1053,15 @@ def sync_active_profile_table(
     price_others_active_cell,
     demand_weekday_active_cell,
     demand_general_active_cell,
+    activator_ids,
     active_state,
 ):
     trigger = ctx.triggered_id
     current_table_id = str((active_state or {}).get("table_id") or "").strip() or None
     activator_clicks = {
-        table_id: int(clicks or 0)
-        for table_id, clicks in zip(PROFILE_TABLE_IDS, _activator_clicks or [])
+        str((component_id or {}).get("table", "")).strip(): int(clicks or 0)
+        for component_id, clicks in zip(activator_ids or [], _activator_clicks or [])
+        if str((component_id or {}).get("table", "")).strip()
     }
     active_cells = {
         "month-profile-editor": month_active_cell,

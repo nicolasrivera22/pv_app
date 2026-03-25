@@ -112,7 +112,7 @@ def test_validation_panel_uses_friendly_names_and_sections() -> None:
     assert "Batería fija" in text_es
 
 
-def test_validation_panel_routes_monte_carlo_fields_to_risk_section() -> None:
+def test_validation_panel_routes_monte_carlo_fields_to_assumptions_general_section() -> None:
     issues = [ValidationIssue("error", "mc_manual_kWp", "El valor de 'mc_manual_kWp' debe ser mayor que cero.")]
 
     rendered_en = render_validation_panel(issues, lang="en")
@@ -121,8 +121,8 @@ def test_validation_panel_routes_monte_carlo_fields_to_risk_section() -> None:
     text_en = _flatten_text(rendered_en)
     text_es = _flatten_text(rendered_es)
 
-    assert "Risk > Monte Carlo" in text_en
-    assert "Riesgo > Monte Carlo" in text_es
+    assert "Assumptions > General > Monte Carlo" in text_en
+    assert "Supuestos > Generales > Monte Carlo" in text_es
 
 
 def test_validation_messages_are_human_and_actionable() -> None:

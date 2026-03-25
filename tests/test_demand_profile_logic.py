@@ -4,6 +4,7 @@ import pytest
 
 import pandas as pd
 
+from services import load_example_config, tr
 from services.demand_profile_logic import (
     PROFILE_TYPE_INDUSTRIAL,
     PROFILE_TYPE_MIXED,
@@ -13,6 +14,7 @@ from services.demand_profile_logic import (
     derive_relative_profile,
     derive_total_preview_from_weekday,
 )
+from services.workspace_demand import build_demand_profile_ui_state, demand_mode_options
 
 
 def test_weekday_source_derives_total_kwh_from_res_and_ind() -> None:
@@ -107,3 +109,70 @@ def test_relative_profile_handles_zero_weight_sums_without_division_errors() -> 
     assert all(float(value) == pytest.approx(0.0) for value in frame["W_IND_BASE"])
     assert all(float(value) == pytest.approx(0.0) for value in frame["W_TOTAL"])
     assert all(float(value) == pytest.approx(0.0) for value in frame["TOTAL_kWh"])
+
+
+def test_workspace_demand_state_total_mode_fills_24_hours_and_month_display() -> None:
+    bundle = load_example_config()
+
+    state = build_demand_profile_ui_state(
+        bundle=bundle,
+        lang="es",
+        profile_mode_value="perfil general",
+        total_rows=[{"HOUR": 0, "RES": 2.0, "IND": 1.0}],
+    )
+
+    assert len(state["total_source_rows"]) == 24
+    assert state["total_source_rows"][0]["TOTAL_kWh"] == pytest.approx(3.0)
+    assert state["total_source_rows"][-1]["HOUR"] == 23
+    assert state["e_month_kwh"] == pytest.approx(90.0)
+    assert state["energy_disabled"] is True
+    assert state["visibility"]["demand-profile-general-panel"]["display"] == "block"
+
+
+def test_workspace_demand_state_weekday_mode_keeps_full_week_and_month_display() -> None:
+    bundle = load_example_config()
+
+    state = build_demand_profile_ui_state(
+        bundle=bundle,
+        lang="es",
+        profile_mode_value="perfil hora dia de semana",
+        weekday_rows=[{"Dia": "Lunes", "DOW": 1, "HOUR": 0, "RES": 4.0, "IND": 1.0}],
+    )
+
+    assert len(state["weekday_source_rows"]) == 168
+    assert state["weekday_source_rows"][0]["HOUR"] == 0
+    assert state["weekday_source_rows"][23]["HOUR"] == 23
+    assert state["weekday_source_rows"][24]["DOW"] == 2
+    assert state["e_month_kwh"] == pytest.approx(21.43)
+    assert state["visibility"]["demand-profile-general-preview-panel"]["display"] == "block"
+
+
+def test_workspace_demand_state_relative_mode_keeps_controls_visible_and_complete() -> None:
+    bundle = load_example_config()
+
+    state = build_demand_profile_ui_state(
+        bundle=bundle,
+        lang="es",
+        profile_mode_value="perfil horario relativo",
+        relative_profile_type_value="industrial",
+        alpha_mix_value=0.35,
+        e_month_value=2400,
+        relative_rows=[{"HOUR": 1, "W_RES": 2.0, "W_IND": 4.0}],
+    )
+
+    assert len(state["relative_source_rows"]) == 24
+    assert state["relative_source_rows"][0]["HOUR"] == 0
+    assert state["relative_source_rows"][-1]["HOUR"] == 23
+    assert state["weights_preview_style"]["display"] == "block"
+    assert state["relative_grid_style"]["display"] == "grid"
+    assert state["secondary_grid_style"]["display"] == "none"
+    assert state["alpha_disabled"] is True
+    assert state["energy_disabled"] is False
+
+
+def test_demand_mode_options_expose_option_tooltips() -> None:
+    options = demand_mode_options("es")
+
+    assert options[0]["label"].title == tr("workbench.profiles.mode.note.weekday", "es")
+    assert options[1]["label"].title == tr("workbench.profiles.mode.note.total", "es")
+    assert options[2]["label"].title == tr("workbench.profiles.mode.note.relative", "es")

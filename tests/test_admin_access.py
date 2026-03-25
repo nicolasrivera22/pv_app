@@ -26,6 +26,7 @@ from services.workspace_admin_callbacks import (
     populate_admin_page,
     render_admin_access_shell,
     setup_admin_session,
+    translate_profile_table_activators,
     unlock_admin_session,
 )
 
@@ -177,6 +178,18 @@ def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypa
     assert _find_component(rendered, "profile-editor-title") is not None
     assert _find_component(rendered, "inverter-table-editor") is not None
     assert _find_component(rendered, "admin-pin-input") is None
+
+
+def test_admin_profile_table_activator_translation_matches_visible_cards() -> None:
+    activator_ids = [
+        {"type": "profile-table-activate", "table": "month-profile-editor"},
+        {"type": "profile-table-activate", "table": "sun-profile-editor"},
+        {"type": "profile-table-activate", "table": "price-kwp-editor"},
+        {"type": "profile-table-activate", "table": "price-kwp-others-editor"},
+    ]
+
+    assert translate_profile_table_activators("es", activator_ids) == ["Ver gráfica"] * 4
+    assert translate_profile_table_activators("en", activator_ids) == ["Preview chart"] * 4
 
 
 def test_setup_admin_session_rejects_empty_pin(monkeypatch, tmp_path) -> None:
