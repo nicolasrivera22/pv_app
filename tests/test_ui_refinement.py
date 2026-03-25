@@ -338,7 +338,7 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
     assert price_columns[1]["type"] == "numeric"
     assert battery_columns[0]["name"] == "Energía nominal [kWh]"
     assert battery_columns[1]["name"] == "Potencia máx [kW]"
-    assert weight_columns[0]["name"] == "Peso res [%]"
+    assert weight_columns[0]["name"] == "W_RES"
     assert month_columns[0]["name"] == "Factor demanda"
     assert month_columns[1]["name"] == "Factor HSP"
     assert sun_columns[0]["name"] == "Participación solar [%]"
@@ -389,10 +389,12 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     assert main_chart is not None
     assert secondary_grid is not None
     assert secondary_chart is not None
+    assert _find_component(section, "demand-profile-mode-panel") is not None
     assert _find_component(workbench_page.layout, "active-profile-table-state") is not None
     assert len(main_grid.children) == 3
-    assert len(secondary_grid.children) == 4
-    assert [getattr(child, "id", None) for child in section.children[2:6]] == [
+    assert len(secondary_grid.children) == 5
+    assert [getattr(child, "id", None) for child in section.children[2:7]] == [
+        "demand-profile-mode-panel",
         "profile-main-grid",
         "profile-main-chart-panel",
         "profile-secondary-grid",
@@ -415,13 +417,22 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     assert _find_component(section, "price-kwp-others-card") is not None
     assert _find_component(section, "demand-profile-card") is not None
     assert _find_component(section, "demand-profile-general-card") is not None
+    assert _find_component(section, "demand-profile-general-preview-card") is not None
+    assert _find_component(section, "demand-profile-mode-selector") is not None
+    assert _find_component(section, "demand-profile-type-selector") is not None
+    assert _find_component(section, "demand-profile-alpha-slider") is not None
+    assert _find_component(section, "demand-profile-energy-input") is not None
+    assert _find_component(section, "demand-profile-weights-preview-editor") is not None
     assert _find_component(main_grid.children[0], "month-profile-title").children == tr("workbench.profiles.month", "es")
     assert _find_component(main_grid.children[1], "sun-profile-title").children == tr("workbench.profiles.sun", "es")
     assert _find_component(main_grid.children[2], "demand-profile-weights-title").children == tr("workbench.profiles.demand_weights", "es")
+    assert _find_component(section, "demand-profile-mode-title").children == tr("workbench.profiles.mode.title", "es")
+    assert _find_component(section, "demand-profile-general-preview-title").children == tr("workbench.profiles.demand_general_preview", "es")
     assert "profile-main-panel-wide" in str(_find_component(main_grid.children[2], "demand-profile-weights-panel").className)
     assert _find_component(section, "month-profile-editor").page_size == 12
     assert _find_component(section, "sun-profile-editor").page_size == 12
     assert _find_component(section, "demand-profile-weights-editor").page_size == 12
+    assert _find_component(section, "demand-profile-general-preview-editor").editable is False
     assert _find_component(section, "price-kwp-editor").page_size == 8
     assert _find_component(section, "price-kwp-others-editor").page_size == 8
     assert _find_component(section, "price-kwp-editor").row_deletable is True
@@ -930,6 +941,9 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".profile-table-activator" in css_source
     assert ".profile-chart-panel" in css_source
     assert ".profile-table-card-active" in css_source
+    assert ".demand-profile-mode-panel" in css_source
+    assert ".demand-profile-control-grid" in css_source
+    assert ".profile-table-subsection" in css_source
     assert ".workbench-state-strip" in css_source
     assert ".workbench-state-chip" in css_source
 
@@ -939,6 +953,11 @@ def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
     visibility = demand_profile_visibility("perfil horario relativo")
     assert visibility["demand-profile-weights-panel"]["display"] == "block"
     assert visibility["demand-profile-panel"]["display"] == "none"
+    assert visibility["demand-profile-general-preview-panel"]["display"] == "none"
+
+    weekday_visibility = demand_profile_visibility("perfil hora dia de semana")
+    assert weekday_visibility["demand-profile-panel"]["display"] == "block"
+    assert weekday_visibility["demand-profile-general-preview-panel"]["display"] == "block"
 
     edited_month = bundle.month_profile_table.copy()
     edited_month.loc[0, "Demand_month"] = 1.15

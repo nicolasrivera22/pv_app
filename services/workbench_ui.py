@@ -45,11 +45,13 @@ def demand_profile_visibility(profile_mode: str) -> dict[str, dict[str, str]]:
     visibility = {
         "demand-profile-panel": hidden,
         "demand-profile-general-panel": hidden,
+        "demand-profile-general-preview-panel": hidden,
         "demand-profile-weights-panel": hidden,
     }
     normalized = str(profile_mode or "").strip().lower()
     if normalized == "perfil hora dia de semana":
         visibility["demand-profile-panel"] = shown
+        visibility["demand-profile-general-preview-panel"] = shown
     elif normalized == "perfil general":
         visibility["demand-profile-general-panel"] = shown
     else:

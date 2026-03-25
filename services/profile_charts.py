@@ -8,6 +8,10 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from .demand_profile_logic import (
+    canonicalize_total_source,
+    canonicalize_weekday_source,
+)
 from .i18n import tr
 from .result_views import abbreviated_month_labels
 
@@ -295,11 +299,9 @@ def _build_demand_weights_figure(rows: list[dict] | None, columns: list[dict] | 
     frame = frame.sort_values(["HOUR"], kind="mergesort")
     figure = make_subplots(specs=[[{"secondary_y": True}]])
     traces = [
-        ("W_RES", "#0f766e", "solid", "scatter", False),
-        ("W_IND", "#2563eb", "solid", "scatter", False),
-        # ("W_TOTAL", "#7c3aed", "solid", "scatter", False),
-        # ("W_RES_BASE", "#0f766e", "dash", "scatter", False),
-        # ("W_IND_BASE", "#2563eb", "dash", "scatter", False),
+        ("W_RES_BASE", "#0f766e", "dash", "scatter", False),
+        ("W_IND_BASE", "#2563eb", "dash", "scatter", False),
+        ("W_TOTAL", "#7c3aed", "solid", "scatter", False),
         ("TOTAL_kWh", "rgba(235, 37, 60, 0.41)", "dash", "bar", True),
     ]
     for key, color, dash, mode, secondary_y in traces:
@@ -336,15 +338,9 @@ def _build_demand_weights_figure(rows: list[dict] | None, columns: list[dict] | 
 
 def _build_demand_weekday_figure(rows: list[dict] | None, columns: list[dict] | None, lang: str) -> go.Figure:
     column_map = _column_name_map(columns)
-    frame = _replace_blank_with_na(_frame(rows), ["DOW", "Dia", "HOUR", "TOTAL_kWh", "RES", "IND"])
-    frame = _coerce_numeric(frame, ["HOUR", "TOTAL_kWh", "RES", "IND"])
-    frame["DOW_RESOLVED"] = _resolve_weekday_numbers(frame)
-    if "TOTAL_kWh" not in frame:
-        frame["TOTAL_kWh"] = pd.NA
-    derived_total = frame["TOTAL_kWh"]
-    if "RES" in frame or "IND" in frame:
-        derived_total = derived_total.fillna(frame.get("RES", 0).fillna(0) + frame.get("IND", 0).fillna(0))
-    frame["TOTAL_RESOLVED"] = derived_total
+    frame = canonicalize_weekday_source(rows)
+    frame["DOW_RESOLVED"] = pd.to_numeric(frame["DOW"], errors="coerce")
+    frame["TOTAL_RESOLVED"] = frame["TOTAL_kWh"]
     frame = frame.loc[frame["DOW_RESOLVED"].notna() & frame["HOUR"].notna() & frame["TOTAL_RESOLVED"].notna()].copy()
     if frame.empty:
         return _empty_profile_figure(lang)
@@ -387,11 +383,8 @@ def _build_demand_weekday_figure(rows: list[dict] | None, columns: list[dict] | 
 
 def _build_demand_general_figure(rows: list[dict] | None, columns: list[dict] | None, lang: str) -> go.Figure:
     column_map = _column_name_map(columns)
-    frame = _coerce_numeric(_frame(rows), ["HOUR", "RES", "IND", "TOTAL_kWh"])
-    total_series = frame.get("TOTAL_kWh", pd.Series(dtype=float))
-    if "RES" in frame or "IND" in frame:
-        total_series = total_series.fillna(frame.get("RES", 0).fillna(0) + frame.get("IND", 0).fillna(0))
-    frame["TOTAL_RESOLVED"] = total_series
+    frame = canonicalize_total_source(rows)
+    frame["TOTAL_RESOLVED"] = frame["TOTAL_kWh"]
     frame = frame.loc[frame["HOUR"].notna() & ~(frame[["RES", "IND", "TOTAL_RESOLVED"]].isna().all(axis=1))].copy()
     if frame.empty:
         return _empty_profile_figure(lang)

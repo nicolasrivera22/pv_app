@@ -15,6 +15,13 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from pv_product.utils import DEFAULT_CONFIG, build_7x24_from_excel, solar_profile_24
 
+from .demand_profile_logic import (
+    PROFILE_TYPE_MIXED,
+    canonicalize_total_source,
+    canonicalize_weekday_source,
+    derive_relative_profile,
+    infer_relative_profile_type,
+)
 from .runtime_paths import bundled_workbook_path
 from .types import LoadedConfigBundle
 from .types import ValidationIssue
@@ -267,26 +274,25 @@ def _default_tables() -> dict[str, pd.DataFrame]:
         for hour in range(24):
             res = 0.8 + (0.3 if hour in (7, 8) else 0.0) + (0.7 if hour in (18, 19, 20) else 0.0)
             ind = 1.0 if (dow <= 5 and (8 <= hour < 18)) else 0.1
-            rows.append({"DOW": dow, "HOUR": hour, "RES": res, "IND": ind, "TOTAL_kWh": res + ind})
+            rows.append({"Dia": None, "DOW": dow, "HOUR": hour, "RES": res, "IND": ind, "TOTAL_kWh": res + ind})
     general_rows = []
     for hour in range(24):
         res = 0.8 + (0.3 if hour in (7, 8) else 0.0) + (0.7 if hour in (18, 19, 20) else 0.0)
         ind = 1.0 if 8 <= hour < 18 else 0.1
         general_rows.append({"HOUR": hour, "RES": res, "IND": ind, "TOTAL_kWh": res + ind})
-    weights_rows = []
-    total_sum = sum(row["TOTAL_kWh"] for row in general_rows)
-    for row in general_rows:
-        weights_rows.append(
+    weights_rows = derive_relative_profile(
+        [
             {
                 "HOUR": row["HOUR"],
-                "W_RES": row["RES"] / sum(r["RES"] for r in general_rows),
-                "W_IND": row["IND"] / sum(r["IND"] for r in general_rows),
-                "W_RES_BASE": row["RES"] / sum(r["RES"] for r in general_rows),
-                "W_IND_BASE": row["IND"] / sum(r["IND"] for r in general_rows),
-                "W_TOTAL": row["TOTAL_kWh"] / total_sum,
-                "TOTAL_kWh": row["TOTAL_kWh"] / total_sum,
+                "W_RES": row["RES"],
+                "W_IND": row["IND"],
             }
-        )
+            for row in general_rows
+        ],
+        profile_type=PROFILE_TYPE_MIXED,
+        alpha_mix=DEFAULT_CONFIG["alpha_mix"],
+        e_month_kwh=DEFAULT_CONFIG["E_month_kWh"],
+    ).to_dict("records")
     month_profile = pd.DataFrame(
         {"MONTH": list(range(1, 13)), "Demand_month": [1.0] * 12, "HSP_month": [DEFAULT_CONFIG["HSP"]] * 12}
     )
@@ -335,6 +341,14 @@ def _bundle_from_frames(
     source_name: str,
 ) -> LoadedConfigBundle:
     cfg, normalization_issues = _normalize_config(config)
+    demand_profile = canonicalize_weekday_source(demand_profile)
+    demand_profile_general = canonicalize_total_source(demand_profile_general)
+    demand_profile_weights = derive_relative_profile(
+        demand_profile_weights,
+        profile_type=infer_relative_profile_type(demand_profile_weights, alpha_mix=cfg.get("alpha_mix", 0.5)),
+        alpha_mix=cfg.get("alpha_mix", 0.5),
+        e_month_kwh=cfg.get("E_month_kWh", 0.0),
+    )
 
     if sun_profile is not None and {"HOUR", "SOL"}.issubset(sun_profile.columns):
         ordered_sun = sun_profile.sort_values("HOUR")

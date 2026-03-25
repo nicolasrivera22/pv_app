@@ -965,6 +965,101 @@ body {
     width: 100% !important;
 }
 
+.demand-profile-mode-panel {
+    display: grid;
+    gap: 0.85rem;
+    margin-bottom: 1rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.98) 100%);
+    border: 1px solid rgba(191, 219, 254, 0.9);
+    box-shadow: 0 16px 32px rgba(15, 23, 42, 0.04);
+}
+
+.demand-profile-mode-head {
+    margin-bottom: 0;
+}
+
+.demand-profile-mode-selector {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+}
+
+.demand-profile-mode-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.8rem 0.95rem;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: #fff;
+    color: #0f172a;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+}
+
+.demand-profile-mode-input,
+.demand-profile-type-input {
+    margin: 0;
+}
+
+.profile-mode-note,
+.profile-preview-copy {
+    margin: 0;
+    color: #475569;
+}
+
+.demand-profile-relative-controls {
+    display: grid;
+    gap: 0.85rem;
+    margin-top: 1rem;
+}
+
+.demand-profile-control-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.demand-profile-control-card {
+    min-width: 0;
+}
+
+.demand-profile-type-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.demand-profile-type-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    background: #f8fafc;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.profile-table-subsection {
+    display: grid;
+    gap: 0.55rem;
+    margin-top: 0.4rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid #e2e8f0;
+}
+
+.profile-table-subsection h5 {
+    margin: 0;
+    font-size: 0.97rem;
+}
+
+.demand-profile-inline-chart {
+    margin-top: 0.25rem;
+}
+
 .compare-grid > .panel {
     min-height: 100%;
 }
@@ -1242,6 +1337,10 @@ body {
     .profile-table-actions {
         margin-left: 0;
         justify-content: flex-start;
+    }
+
+    .demand-profile-control-grid {
+        grid-template-columns: 1fr;
     }
 
     .assumption-input-shell {
