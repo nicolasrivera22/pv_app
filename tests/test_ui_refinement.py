@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from app import _nav_link_class_name, create_app
+import services.workspace_shared_callbacks as shared_callbacks
 from components.risk_controls import risk_controls_section
 from components.risk_charts import risk_charts_section
 from components.risk_tables import risk_tables_section
@@ -169,6 +170,7 @@ def test_first_render_placeholders_are_spanish_first() -> None:
     sidebar = scenario_sidebar()
     rename_input = _find_component(sidebar, "rename-scenario-input")
     rename_note = _find_component(sidebar, "rename-scenario-note")
+    project_delete_btn = _find_component(sidebar, "delete-project-btn")
     risk_controls = risk_controls_section()
     risk_scenario_dropdown = _find_component(risk_controls, "risk-scenario-dropdown")
     risk_candidate_dropdown = _find_component(risk_controls, "risk-candidate-dropdown")
@@ -176,12 +178,27 @@ def test_first_render_placeholders_are_spanish_first() -> None:
     assert _find_component(sidebar, "scenario-start-title").children == tr("workbench.sidebar.start.title", "es")
     assert _find_component(sidebar, "scenario-upload-title").children == tr("workbench.import_excel.title", "es")
     assert _find_component(sidebar, "new-scenario-btn").children == tr("workbench.load_example", "es")
+    assert project_delete_btn is not None
     assert _find_component(sidebar, "scenario-dropdown") is None
     assert _find_component(sidebar, "set-active-scenario-btn") is None
     assert rename_input.placeholder == "Nombre del escenario"
     assert rename_note.children == tr("workbench.rename_active_note", "es")
     assert risk_scenario_dropdown.placeholder == "Selecciona un escenario completado"
     assert risk_candidate_dropdown.placeholder == "Selecciona un diseño factible"
+
+
+def test_project_toolbar_uses_two_row_grid_and_includes_delete_project() -> None:
+    sidebar = scenario_sidebar()
+    action_grid = _find_component_with_class(sidebar, "project-action-grid")
+
+    assert action_grid is not None
+    assert [child.id for child in action_grid.children] == [
+        "save-project-btn",
+        "open-project-btn",
+        "save-project-as-btn",
+        "delete-project-btn",
+    ]
+    assert all("project-action-btn" in str(getattr(child, "className", "")) for child in action_grid.children)
 
 
 def test_workspace_shell_empty_state_surfaces_start_ctas_and_disables_irrelevant_actions(monkeypatch) -> None:
@@ -952,6 +969,8 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".nav-link-active" in css_source
     assert ".sidebar-start-card" in css_source
     assert ".upload-box-action" in css_source
+    assert ".project-action-grid" in css_source
+    assert ".stacked-button-label" in css_source
     assert ".profile-main-grid" in css_source
     assert "minmax(0, 1.35fr)" in css_source
     assert ".profile-secondary-grid" in css_source
@@ -974,6 +993,41 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".demand-relocated-card" in css_source
     assert ".workbench-state-strip" in css_source
     assert ".workbench-state-chip" in css_source
+
+
+def test_delete_project_button_removes_selected_project_and_unbinds_current_session(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("services.runtime_paths.REPO_ROOT", tmp_path)
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = save_project(state, project_name="Demo", language="es")
+    payload = _session_payload(state)
+
+    monkeypatch.setattr(shared_callbacks, "ctx", SimpleNamespace(triggered_id="delete-project-btn"))
+
+    next_payload, status = shared_callbacks.mutate_workspace_session(
+        upload_contents=None,
+        _new_scenario_clicks=0,
+        _duplicate_clicks=0,
+        _rename_clicks=0,
+        _delete_clicks=0,
+        _scenario_pill_clicks=[],
+        _save_project_clicks=0,
+        _save_project_as_clicks=0,
+        _open_project_clicks=0,
+        _delete_project_clicks=1,
+        upload_filename=None,
+        rename_value=None,
+        project_name_value="Demo",
+        project_dropdown_value=state.project_slug,
+        session_payload=payload,
+        language_value="es",
+    )
+    _, next_state = shared_callbacks._session(next_payload, "es")
+
+    assert not Path(tmp_path / "proyectos" / "demo").exists()
+    assert status == tr("workbench.project.deleted", "es", name="Demo")
+    assert next_state.project_slug is None
+    assert next_state.project_name is None
+    assert next_state.project_dirty is True
 
 
 def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:

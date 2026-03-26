@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 from pathlib import Path
 
 from dash import ALL, Input, Output, State, callback, ctx
 from dash.exceptions import PreventUpdate
 
+from components.scenario_controls import stacked_button_label
 from .i18n import tr
-from .project_io import list_projects, open_project, save_project, save_project_as
+from .project_io import delete_project, list_projects, open_project, save_project, save_project_as
 from .runtime_paths import project_root
 from .scenario_session import (
     add_scenario,
@@ -99,6 +101,7 @@ def _workspace_state_strip_children(*, state, active, session_id: str, lang: str
     Output("save-project-btn", "children"),
     Output("save-project-as-btn", "children"),
     Output("open-project-btn", "children"),
+    Output("delete-project-btn", "children"),
     Output("scenario-start-title", "children"),
     Output("scenario-upload-title", "children"),
     Output("scenario-upload-copy", "children"),
@@ -122,9 +125,10 @@ def translate_workspace_shell(language_value):
         tr("workbench.project.name_placeholder", lang),
         tr("workbench.project.open_label", lang),
         tr("workbench.project.none", lang),
-        tr("workbench.project.save", lang),
-        tr("workbench.project.save_as", lang),
-        tr("workbench.project.open", lang),
+        stacked_button_label(tr("workbench.project.save", lang)),
+        stacked_button_label(tr("workbench.project.save_as", lang)),
+        stacked_button_label(tr("workbench.project.open", lang)),
+        stacked_button_label(tr("workbench.project.delete", lang)),
         tr("workbench.sidebar.start.title", lang),
         tr("workbench.import_excel.title", lang),
         tr("workbench.import_excel.copy", lang),
@@ -261,6 +265,7 @@ def populate_workspace_shell(session_payload, language_value):
     Input("save-project-btn", "n_clicks"),
     Input("save-project-as-btn", "n_clicks"),
     Input("open-project-btn", "n_clicks"),
+    Input("delete-project-btn", "n_clicks"),
     State("scenario-upload", "filename"),
     State("rename-scenario-input", "value"),
     State("project-name-input", "value"),
@@ -279,6 +284,7 @@ def mutate_workspace_session(
     _save_project_clicks,
     _save_project_as_clicks,
     _open_project_clicks,
+    _delete_project_clicks,
     upload_filename,
     rename_value,
     project_name_value,
@@ -321,6 +327,18 @@ def mutate_workspace_session(
             return (
                 client_state.to_payload(),
                 tr("workbench.project.opened", lang, name=state.project_name, path=str(project_root(state.project_slug))),
+            )
+
+        if trigger == "delete-project-btn":
+            if not project_dropdown_value:
+                raise ValueError(tr("workbench.project.delete_select_required", lang))
+            deleted_name = delete_project(project_dropdown_value)
+            if state.project_slug == project_dropdown_value:
+                state = replace(state, project_slug=None, project_name=None, project_dirty=True)
+            client_state = commit_client_session(client_state, state)
+            return (
+                client_state.to_payload(),
+                tr("workbench.project.deleted", lang, name=deleted_name),
             )
 
         if isinstance(trigger, str) and trigger in {"save-project-btn", "save-project-as-btn"}:

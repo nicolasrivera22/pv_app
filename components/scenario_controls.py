@@ -5,6 +5,16 @@ from dash import dcc, html
 from services.i18n import tr
 
 
+def stacked_button_label(label: str) -> html.Span:
+    parts = [part for part in str(label or "").split(" ") if part]
+    if not parts:
+        parts = [""]
+    return html.Span(
+        className="stacked-button-label",
+        children=[html.Span(part, className="stacked-button-word") for part in parts],
+    )
+
+
 def run_scan_choice_dialog() -> html.Div:
     return html.Div(
         id="run-scan-choice-dialog",
@@ -75,12 +85,13 @@ def scenario_sidebar() -> html.Div:
                         style={"display": "none"},
                     ),
                     html.Div(
-                        className="controls",
+                        className="project-action-grid",
                         style={"marginTop": "0.75rem"},
                         children=[
-                            html.Button(tr("workbench.project.save", "es"), id="save-project-btn", n_clicks=0, className="action-btn secondary"),
-                            html.Button(tr("workbench.project.save_as", "es"), id="save-project-as-btn", n_clicks=0, className="action-btn tertiary"),
-                            html.Button(tr("workbench.project.open", "es"), id="open-project-btn", n_clicks=0, className="action-btn tertiary"),
+                            html.Button(stacked_button_label(tr("workbench.project.save", "es")), id="save-project-btn", n_clicks=0, className="action-btn project-action-btn"),
+                            html.Button(stacked_button_label(tr("workbench.project.open", "es")), id="open-project-btn", n_clicks=0, className="action-btn secondary project-action-btn"),
+                            html.Button(stacked_button_label(tr("workbench.project.save_as", "es")), id="save-project-as-btn", n_clicks=0, className="action-btn tertiary project-action-btn"),
+                            html.Button(stacked_button_label(tr("workbench.project.delete", "es")), id="delete-project-btn", n_clicks=0, className="action-btn tertiary project-action-btn"),
                         ],
                     ),
                     html.Div(tr("workbench.project.unbound", "es"), id="project-status", className="status-line"),

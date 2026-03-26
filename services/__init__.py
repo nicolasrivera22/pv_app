@@ -45,7 +45,7 @@ from .export_artifacts import (
 )
 from .export_excel import export_comparison_workbook, export_design_comparison_workbook, export_scenario_workbook
 from .io_excel import TABLE_FILE_MAP, ensure_template, load_bundle_from_tables, load_config_from_excel, load_example_config, rebuild_config_bundle
-from .project_io import list_projects, load_project_bundle_from_tables, open_project, read_project_manifest, save_project, save_project_as
+from .project_io import delete_project, list_projects, load_project_bundle_from_tables, open_project, read_project_manifest, save_project, save_project_as
 from .profile_charts import ProfileChartRender, build_profile_chart
 from .runtime_paths import (
     assets_dir,
@@ -287,6 +287,7 @@ __all__ = [
     "get_session_state",
     "get_workspace_draft",
     "bundled_workbook_path",
+    "delete_project",
     "hydrate_scenario_scan",
     "load_config_from_excel",
     "load_bundle_from_tables",

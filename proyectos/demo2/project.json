@@ -1,0 +1,27 @@
+{
+  "format_version": 1,
+  "name": "Demo2",
+  "slug": "demo2",
+  "active_scenario_id": "scenario-3cf3eee7",
+  "comparison_scenario_ids": [],
+  "design_comparison_candidate_keys": {
+    "scenario-3cf3eee7": [
+      "30.000::None",
+      "12.000::None"
+    ]
+  },
+  "scenarios": [
+    {
+      "scenario_id": "scenario-3cf3eee7",
+      "name": "Escenario 2",
+      "source_name": "PV_inputs.xlsx",
+      "selected_candidate_key": null,
+      "dirty": true,
+      "last_run_at": null,
+      "scan_fingerprint": null
+    }
+  ],
+  "ui_prefs": {
+    "language": "es"
+  }
+}

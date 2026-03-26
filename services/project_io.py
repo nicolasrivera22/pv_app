@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -133,6 +134,15 @@ def save_project_as(
     language: str = "es",
 ) -> ScenarioSessionState:
     return save_project(state, project_name=project_name, slug=_slugify(project_name), language=language)
+
+
+def delete_project(slug: str) -> str:
+    manifest_path = _resolve_manifest_path_for_open(slug)
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Project '{slug}' not found.")
+    manifest = _read_manifest(manifest_path)
+    shutil.rmtree(manifest_path.parent)
+    return manifest.name
 
 
 def read_project_manifest(slug: str) -> ProjectManifest:

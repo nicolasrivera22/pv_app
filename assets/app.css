@@ -138,6 +138,31 @@ body {
     margin-bottom: 0.75rem;
 }
 
+.project-action-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+
+.project-action-btn {
+    width: 100%;
+    min-height: 4.2rem;
+    padding: 0.7rem 0.6rem;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.15;
+}
+
+.stacked-button-label {
+    display: inline-grid;
+    gap: 0.1rem;
+    justify-items: center;
+}
+
+.stacked-button-word {
+    display: block;
+}
+
 .upload-box {
     border: 2px dashed var(--color-border-default);
     border-radius: 14px;
@@ -267,6 +292,10 @@ body {
 
 .sidebar-panel .controls {
     flex-wrap: wrap;
+}
+
+.sidebar-panel .project-action-grid {
+    min-width: 0;
 }
 
 .sidebar-panel .upload-box {
