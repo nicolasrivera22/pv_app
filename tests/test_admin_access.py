@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+from dash.exceptions import PreventUpdate
+
 from app import create_app
 from pages import admin as admin_page
 from services import (
@@ -47,6 +50,14 @@ def _fast_bundle():
             "kWp_max": 18.0,
         },
     )
+
+
+def _admin_client_state(lang: str = "es"):
+    return replace(bootstrap_client_session(lang), ui_mode="admin")
+
+
+def _pro_client_state(lang: str = "es"):
+    return replace(bootstrap_client_session(lang), ui_mode="pro")
 
 
 def _find_component(node, component_id: str):
@@ -141,16 +152,15 @@ def test_admin_unlock_registry_is_scoped_per_session() -> None:
     assert is_admin_session_unlocked("session-a") is False
 
 
-def test_admin_page_defaults_to_setup_shell_when_pin_missing(monkeypatch, tmp_path) -> None:
+def test_admin_page_defaults_to_internal_gate_shell(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
 
     layout = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
 
     assert _find_component(layout, "admin-access-shell") is not None
-    assert _find_component(layout, "admin-setup-pin-input") is not None
-    assert _find_component(layout, "admin-setup-confirm-input") is not None
-    assert _find_component(layout, "admin-setup-btn") is not None
+    assert _find_component(layout, "admin-mode-gate") is not None
+    assert _find_component(layout, "admin-setup-pin-input") is None
     assert _find_component(layout, "admin-pin-input") is None
     assert _find_component(layout, "profile-editor-title") is None
 
@@ -160,7 +170,7 @@ def test_render_admin_access_shell_shows_setup_when_pin_missing(monkeypatch, tmp
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
 
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
 
     rendered = render_admin_access_shell(client_state.to_payload(), "es", {"revision": 1})
 
@@ -176,7 +186,7 @@ def test_render_admin_access_shell_shows_unlock_when_pin_is_configured(monkeypat
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
     set_admin_pin("2468")
 
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
 
     rendered = render_admin_access_shell(client_state.to_payload(), "es", {"revision": 1})
 
@@ -191,7 +201,7 @@ def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypa
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
 
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
     set_admin_pin("2468")
     grant_admin_session_access(client_state.session_id)
 
@@ -202,6 +212,30 @@ def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypa
     assert _find_component(rendered, "inverter-table-editor") is not None
     assert _find_component(rendered, "admin-pin-input") is None
     assert _find_component(rendered, "profile-demand-legacy-shell") is None
+
+
+def test_render_admin_access_shell_degrades_in_simple_mode(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    rendered = render_admin_access_shell(bootstrap_client_session("es").to_payload(), "es", {"revision": 1})
+
+    assert _find_component(rendered, "admin-mode-gate") is not None
+    assert _find_component(rendered, "admin-setup-pin-input") is None
+    assert _find_component(rendered, "admin-pin-input") is None
+
+
+def test_render_admin_access_shell_degrades_in_pro_mode(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    rendered = render_admin_access_shell(_pro_client_state("es").to_payload(), "es", {"revision": 1})
+
+    assert _find_component(rendered, "admin-mode-gate") is not None
+    assert _find_component(rendered, "admin-setup-pin-input") is None
+    assert _find_component(rendered, "admin-pin-input") is None
 
 
 def test_admin_profile_table_activator_translation_matches_visible_cards() -> None:
@@ -220,7 +254,7 @@ def test_setup_admin_session_rejects_empty_pin(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
 
     meta = setup_admin_session(1, client_state.to_payload(), "", "")
 
@@ -234,7 +268,7 @@ def test_setup_admin_session_rejects_whitespace_only_pin(monkeypatch, tmp_path) 
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
 
     meta = setup_admin_session(1, client_state.to_payload(), "   ", "   ")
 
@@ -248,7 +282,7 @@ def test_setup_admin_session_rejects_non_digit_pin(monkeypatch, tmp_path) -> Non
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
 
     meta = setup_admin_session(1, client_state.to_payload(), "12ab", "12ab")
 
@@ -262,7 +296,7 @@ def test_setup_admin_session_rejects_short_pin(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
 
     meta = setup_admin_session(1, client_state.to_payload(), "123", "123")
 
@@ -276,7 +310,7 @@ def test_setup_admin_session_rejects_mismatched_confirmation(monkeypatch, tmp_pa
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
 
     meta = setup_admin_session(1, client_state.to_payload(), "1234", "5678")
 
@@ -290,7 +324,7 @@ def test_setup_admin_session_trims_input_writes_hash_and_unlocks(monkeypatch, tm
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
 
     meta = setup_admin_session(1, client_state.to_payload(), " 1234 ", "1234")
 
@@ -309,7 +343,7 @@ def test_setup_admin_session_does_not_overwrite_existing_pin(monkeypatch, tmp_pa
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
     path = set_admin_pin("2468")
     before = path.read_text(encoding="utf-8")
 
@@ -327,7 +361,7 @@ def test_unlock_admin_session_grants_access_with_existing_pin(monkeypatch, tmp_p
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
     set_admin_pin("2468")
 
     meta = unlock_admin_session(1, client_state.to_payload(), "2468")
@@ -341,7 +375,7 @@ def test_unlock_admin_session_rejects_wrong_pin(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
     set_admin_pin("2468")
 
     meta = unlock_admin_session(1, client_state.to_payload(), "1357")
@@ -369,7 +403,7 @@ def test_populate_admin_page_renders_visible_admin_tables_for_example_bundle(mon
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
 
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
     set_admin_pin("2468")
     grant_admin_session_access(client_state.session_id)
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
@@ -398,7 +432,7 @@ def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(mo
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
 
-    client_state = bootstrap_client_session("es")
+    client_state = _admin_client_state("es")
     set_admin_pin("2468")
     grant_admin_session_access(client_state.session_id)
     bundle = load_config_from_excel(Path("PV_inputs.xlsx"))
@@ -416,3 +450,12 @@ def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(mo
     assert outputs[11]
     assert outputs[14]
     assert outputs[17]
+
+
+def test_setup_admin_session_is_blocked_outside_admin_mode(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    with pytest.raises(PreventUpdate):
+        setup_admin_session(1, bootstrap_client_session("es").to_payload(), "1234", "1234")

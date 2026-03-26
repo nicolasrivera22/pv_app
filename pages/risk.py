@@ -15,6 +15,7 @@ from components import (
     render_metadata_table,
     render_risk_monte_carlo_fields,
     render_risk_summary_cards,
+    render_ui_mode_gate,
     risk_charts_section,
     risk_controls_section,
     risk_tables_section,
@@ -49,6 +50,14 @@ from services.risk_ui import (
     validate_risk_run_inputs,
 )
 from services.ui_schema import coerce_config_value, parse_assumption_input_value
+from services.ui_mode import (
+    PAGE_RISK,
+    UI_MODE_SIMPLE,
+    gate_visibility_style,
+    page_body_style,
+    resolve_page_access,
+    resolve_ui_mode_from_payload,
+)
 
 register_page(__name__, path="/risk", name="Risk")
 
@@ -64,6 +73,10 @@ RISK_MONTE_CARLO_FIELDS = (
 
 def _lang(value: str | None) -> str:
     return value if value in {"en", "es"} else "es"
+
+
+def _risk_page_access(session_payload) -> object:
+    return resolve_page_access(PAGE_RISK, resolve_ui_mode_from_payload(session_payload))
 
 
 def _retain_samples(values: list[str] | None) -> bool:
@@ -96,23 +109,47 @@ layout = html.Div(
         dcc.Store(id="risk-latest-export-folder", storage_type="memory", data=""),
         dcc.Store(id="risk-result-store", storage_type="memory"),
         html.Div(
-            className="main-stack",
+            id="risk-mode-gate-shell",
+            children=render_ui_mode_gate(resolve_page_access(PAGE_RISK, UI_MODE_SIMPLE), lang="es", component_id="risk-mode-gate"),
+        ),
+        html.Div(
+            id="risk-page-content",
+            style={"display": "none"},
             children=[
-                risk_controls_section(),
-                dcc.Loading(
-                    type="default",
-                    children=html.Div(
-                        className="main-stack",
-                        children=[
-                            risk_charts_section(),
-                            risk_tables_section(),
-                        ],
-                    ),
+                html.Div(
+                    className="main-stack",
+                    children=[
+                        risk_controls_section(),
+                        dcc.Loading(
+                            type="default",
+                            children=html.Div(
+                                className="main-stack",
+                                children=[
+                                    risk_charts_section(),
+                                    risk_tables_section(),
+                                ],
+                            ),
+                        ),
+                    ],
                 ),
             ],
         ),
     ],
 )
+
+
+@callback(
+    Output("risk-mode-gate-shell", "children"),
+    Output("risk-mode-gate-shell", "style"),
+    Output("risk-page-content", "style"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+)
+def sync_risk_page_access(session_payload, language_value):
+    lang = _lang(language_value)
+    access = _risk_page_access(session_payload)
+    gate_children = render_ui_mode_gate(access, lang=lang, component_id="risk-mode-gate") if access.is_gated else []
+    return gate_children, gate_visibility_style(access), page_body_style(access)
 
 
 @callback(
@@ -183,6 +220,8 @@ def translate_risk_page(language_value):
     State("risk-scenario-dropdown", "value"),
 )
 def populate_risk_scenarios(session_payload, current_value):
+    if not _risk_page_access(session_payload).allowed:
+        return [], None
     _, state = resolve_client_session(session_payload, language="es")
     scenarios = ready_risk_scenarios(state)
     options = [{"label": scenario.name, "value": scenario.scenario_id} for scenario in scenarios]
@@ -211,6 +250,9 @@ def sync_risk_export_folder_button(folder_path):
 )
 def populate_risk_candidates(session_payload, scenario_id, language_value, current_candidate_key, current_n_simulations):
     lang = _lang(language_value)
+    access = _risk_page_access(session_payload)
+    if access.is_gated:
+        return [], None, current_n_simulations, render_risk_monte_carlo_fields([], empty_message=tr(access.body_key or "ui_mode.gate.risk.body", lang))
     _, state = resolve_scenario_session(session_payload, scenario_id=scenario_id, ensure_scan=True, language=lang)
     scenario = state.get_scenario(scenario_id)
     if scenario is None or scenario.scan_result is None or scenario.dirty:
@@ -344,6 +386,8 @@ def persist_risk_settings(
     session_payload,
     language_value,
 ):
+    if not _risk_page_access(session_payload).allowed:
+        raise PreventUpdate
     if scenario_id in (None, ""):
         raise PreventUpdate
     lang = _lang(language_value)
@@ -410,6 +454,8 @@ def run_risk_analysis(
     language_value,
 ):
     if not n_clicks:
+        raise PreventUpdate
+    if not _risk_page_access(session_payload).allowed:
         raise PreventUpdate
 
     lang = _lang(language_value)
@@ -554,6 +600,24 @@ def invalidate_risk_result(
 )
 def render_risk_results(session_payload, result_payload, scenario_id, language_value):
     lang = _lang(language_value)
+    access = _risk_page_access(session_payload)
+    if access.is_gated:
+        message = tr(access.body_key or "ui_mode.gate.risk.body", lang)
+        empty = empty_risk_figure(tr("risk.chart.npv_hist", lang), message)
+        return (
+            render_message_list([message]),
+            message,
+            [],
+            empty_risk_figure(tr("risk.chart.payback_hist", lang), message),
+            empty,
+            empty_risk_figure(tr("risk.chart.payback_ecdf", lang), message),
+            empty_risk_figure(tr("risk.chart.npv_ecdf", lang), message),
+            [],
+            [],
+            render_message_list([], empty_message=message),
+            html.Div(),
+            True,
+        )
     _, state = resolve_scenario_session(session_payload, scenario_id=scenario_id, ensure_scan=True, language=lang)
     ready = ready_risk_scenarios(state)
     if not ready:
@@ -707,6 +771,8 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
 )
 def export_risk_result_artifacts(n_clicks, result_payload, session_payload, language_value):
     if not n_clicks:
+        raise PreventUpdate
+    if not _risk_page_access(session_payload).allowed:
         raise PreventUpdate
     lang = _lang(language_value)
     payload = result_payload or {}

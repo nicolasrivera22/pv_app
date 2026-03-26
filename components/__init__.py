@@ -16,6 +16,7 @@ from .risk_controls import render_risk_monte_carlo_fields, risk_controls_section
 from .risk_tables import render_message_list, render_metadata_table, risk_tables_section
 from .scenario_controls import run_scan_choice_dialog, scenario_sidebar
 from .unifilar_diagram import render_schematic_inspector, render_schematic_legend, unifilar_diagram_section
+from .ui_mode_gate import render_ui_mode_gate
 from .validation_panel import render_validation_panel
 from .workspace_frame import workspace_frame
 
@@ -38,6 +39,7 @@ __all__ = [
     "render_risk_monte_carlo_fields",
     "render_schematic_inspector",
     "render_schematic_legend",
+    "render_ui_mode_gate",
     "render_validation_panel",
     "run_scan_choice_dialog",
     "risk_charts_section",

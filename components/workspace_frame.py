@@ -37,6 +37,7 @@ def workspace_frame(*, children: list, stores: list | None = None, show_internal
                     html.Div(
                         id="workspace-admin-entry",
                         className="workspace-admin-entry",
+                        style={"display": "none"},
                         children=[
                             html.Div(tr("workspace.internal.title", "es"), id="workspace-internal-title", className="workspace-admin-entry-title"),
                             html.Div(tr("workspace.internal.copy", "es"), id="workspace-internal-copy", className="workspace-admin-entry-copy"),

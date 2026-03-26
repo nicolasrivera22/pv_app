@@ -467,6 +467,56 @@ def test_build_npv_figure_keeps_missing_payback_as_gap() -> None:
     assert payback_trace.hovertext[0].endswith(" -")
 
 
+def test_build_npv_figure_renders_selected_overlay_for_non_curve_candidate() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery": "None",
+                "NPV_COP": 10_000_000,
+                "payback_years": 5.5,
+                "self_consumption_ratio": 0.45,
+                "peak_ratio": 1.1,
+                "scan_order": 0,
+            },
+            {
+                "candidate_key": "12.000::BAT-10",
+                "kWp": 12.0,
+                "battery": "BAT-10",
+                "NPV_COP": 9_000_000,
+                "payback_years": 5.9,
+                "self_consumption_ratio": 0.49,
+                "peak_ratio": 1.18,
+                "scan_order": 1,
+            },
+            {
+                "candidate_key": "18.000::None",
+                "kWp": 18.0,
+                "battery": "None",
+                "NPV_COP": 12_000_000,
+                "payback_years": 6.1,
+                "self_consumption_ratio": 0.51,
+                "peak_ratio": 1.22,
+                "scan_order": 2,
+            },
+        ]
+    )
+
+    figure = build_npv_figure(table, selected_key="12.000::BAT-10", lang="es", module_power_w=600.0)
+
+    selected_trace = next(trace for trace in figure.data if trace.name == "Diseño seleccionado")
+    best_trace = next(trace for trace in figure.data if trace.name == "Mejor diseño")
+
+    assert list(selected_trace.x) == pytest.approx([12.0])
+    assert list(selected_trace.y) == pytest.approx([9_000_000.0])
+    assert list(selected_trace.customdata[0]) == ["12.000::BAT-10", 20, "selected_overlay"]
+    assert selected_trace.marker.color == "#dc2626"
+    assert selected_trace.marker.line.color == "#7f1d1d"
+    assert selected_trace.marker.size == 18
+    assert list(best_trace.customdata[0]) == ["18.000::None", 30, "best_overlay"]
+
+
 def test_scan_payload_round_trip_preserves_detail_fields() -> None:
     scan = run_scan(_fast_bundle())
     restored = type(scan).from_payload(scan.to_payload())
@@ -554,6 +604,31 @@ def test_selected_candidate_helper_for_scenario_prefers_click_then_row_then_stor
         click_data=None,
     )
     assert stored_key == row_selected_key
+
+
+def test_selected_candidate_helper_for_scenario_prefers_curve_role_over_selected_overlay_role() -> None:
+    scan = run_scan(_fast_bundle())
+    same_kwp_rows = next(
+        group
+        for _, group in scan.candidates.groupby("kWp", sort=True)
+        if len(group.index) >= 2
+    )
+    ordered_rows = same_kwp_rows.sort_values(["NPV_COP", "scan_order"], ascending=[False, True], kind="mergesort").reset_index(drop=True)
+    curve_key = str(ordered_rows.iloc[0]["candidate_key"])
+    selected_overlay_key = str(ordered_rows.iloc[1]["candidate_key"])
+
+    selected_key = resolve_selected_candidate_key_for_scenario(
+        scan,
+        selected_overlay_key,
+        click_data={
+            "points": [
+                {"customdata": [selected_overlay_key, None, "selected_overlay"]},
+                {"customdata": [curve_key, None, "npv_curve"]},
+            ]
+        },
+    )
+
+    assert selected_key == curve_key
 
 
 def test_capex_semantics_variable_mode() -> None:

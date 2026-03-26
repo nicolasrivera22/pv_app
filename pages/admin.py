@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dash import dcc, html, register_page
 
-from components.admin_view import build_admin_access_shell
-from services.admin_access import admin_pin_configured
+from components.ui_mode_gate import render_ui_mode_gate
 from components.workspace_frame import workspace_frame
 import services.workspace_admin_callbacks as _workspace_admin_callbacks  # noqa: F401
 import services.workspace_shared_callbacks as _workspace_shared_callbacks  # noqa: F401
+from services.ui_mode import PAGE_ADMIN, UI_MODE_SIMPLE, resolve_page_access
 
 
 register_page(__name__, path="/admin", name="Admin")
@@ -33,11 +33,7 @@ def layout():
             ),
             html.Div(
                 id="admin-access-shell",
-                children=build_admin_access_shell(
-                    lang="es",
-                    configured=admin_pin_configured(),
-                    unlocked=False,
-                ),
+                children=render_ui_mode_gate(resolve_page_access(PAGE_ADMIN, UI_MODE_SIMPLE), lang="es", component_id="admin-mode-gate"),
             ),
         ],
     )

@@ -5,6 +5,7 @@ import base64
 from dash import Input, Output, State, callback, ctx, dash_table, dcc, html, register_page
 from dash.exceptions import PreventUpdate
 
+from components import render_ui_mode_gate
 from services import (
     MAX_COMPARE_DESIGNS,
     append_design_selection,
@@ -20,6 +21,14 @@ from services import (
     resolve_design_selection,
     set_design_comparison_candidates,
     tr,
+)
+from services.ui_mode import (
+    PAGE_COMPARE,
+    UI_MODE_SIMPLE,
+    gate_visibility_style,
+    page_body_style,
+    resolve_page_access,
+    resolve_ui_mode_from_payload,
 )
 
 register_page(__name__, path="/compare", name="Compare")
@@ -69,6 +78,10 @@ def _lang(value: str | None) -> str:
     return value if value in {"en", "es"} else "es"
 
 
+def _compare_page_access(session_payload) -> object:
+    return resolve_page_access(PAGE_COMPARE, resolve_ui_mode_from_payload(session_payload))
+
+
 def _download_payload(content: bytes, filename: str) -> dict:
     return {"content": base64.b64encode(content).decode("ascii"), "filename": filename, "base64": True}
 
@@ -89,147 +102,171 @@ def _table_columns(column_keys: list[str], lang: str, *, include_remove: bool = 
 layout = html.Div(
     className="page",
     children=[
-        dcc.Download(id="comparison-download"),
         html.Div(
-            className="main-stack",
+            id="compare-mode-gate-shell",
+            children=render_ui_mode_gate(resolve_page_access(PAGE_COMPARE, UI_MODE_SIMPLE), lang="es", component_id="compare-mode-gate"),
+        ),
+        html.Div(
+            id="compare-page-content",
+            style={"display": "none"},
             children=[
+                dcc.Download(id="comparison-download"),
                 html.Div(
-                    className="panel",
+                    className="main-stack",
                     children=[
                         html.Div(
-                            className="section-head",
+                            className="panel",
                             children=[
-                                html.H2(tr("compare.title", "es"), id="compare-page-title"),
                                 html.Div(
-                                    className="controls",
+                                    className="section-head",
                                     children=[
-                                        html.Button(tr("compare.add", "es"), id="compare-add-btn", n_clicks=0, className="action-btn"),
-                                        html.Button(tr("compare.clear", "es"), id="compare-clear-btn", n_clicks=0, className="action-btn secondary"),
-                                        html.Button(tr("compare.export", "es"), id="comparison-export-btn", n_clicks=0, className="action-btn tertiary"),
+                                        html.H2(tr("compare.title", "es"), id="compare-page-title"),
+                                        html.Div(
+                                            className="controls",
+                                            children=[
+                                                html.Button(tr("compare.add", "es"), id="compare-add-btn", n_clicks=0, className="action-btn"),
+                                                html.Button(tr("compare.clear", "es"), id="compare-clear-btn", n_clicks=0, className="action-btn secondary"),
+                                                html.Button(tr("compare.export", "es"), id="comparison-export-btn", n_clicks=0, className="action-btn tertiary"),
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                                html.P(tr("compare.intro", "es"), id="compare-page-intro"),
+                                html.P(tr("compare.flow_note", "es"), id="compare-flow-note", className="section-copy section-copy-wide"),
+                                html.Div(className="scenario-meta", children=[html.Span(tr("compare.active_scenario", "es"), id="compare-active-scenario-label"), html.Span(" — ", className="scenario-sep"), html.Span("", id="compare-active-scenario-value")]),
+                                html.Div("", id="comparison-export-progress", className="status-line", style={"display": "none"}),
+                                html.Div(tr("compare.state.no_active", "es"), id="compare-status", className="status-line"),
+                                html.Div("", id="compare-export-note", className="scenario-meta"),
+                            ],
+                        ),
+                        html.Div(
+                            className="compare-grid",
+                            children=[
+                                html.Div(
+                                    className="panel",
+                                    children=[
+                                        html.H3(tr("compare.available", "es"), id="compare-available-title"),
+                                        dash_table.DataTable(
+                                            id="available-design-table",
+                                            data=[],
+                                            columns=[],
+                                            hidden_columns=["candidate_key", "is_workbench_selected", "is_best_candidate"],
+                                            row_selectable="multi",
+                                            selected_rows=[],
+                                            sort_action="native",
+                                            filter_action="native",
+                                            page_size=10,
+                                            style_table={"overflowX": "auto"},
+                                            style_cell={
+                                                "padding": "0.45rem",
+                                                "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+                                                "fontSize": 12,
+                                                "color": "var(--color-text-primary)",
+                                            },
+                                            style_header={
+                                                "backgroundColor": "var(--color-primary-soft)",
+                                                "color": "var(--color-text-primary)",
+                                                "fontWeight": "bold",
+                                            },
+                                            tooltip_delay=0,
+                                            tooltip_duration=None,
+                                            tooltip_header={},
+                                        ),
+                                    ],
+                                ),
+                                html.Div(
+                                    className="panel",
+                                    children=[
+                                        html.H3(tr("compare.selected", "es"), id="compare-selected-title"),
+                                        html.Div(tr("compare.selected.empty", "es"), id="compare-selected-empty", className="section-copy"),
+                                        dash_table.DataTable(
+                                            id="selected-design-table",
+                                            data=[],
+                                            columns=[],
+                                            hidden_columns=["candidate_key"],
+                                            page_size=10,
+                                            style_table={"overflowX": "auto"},
+                                            style_cell={
+                                                "padding": "0.45rem",
+                                                "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+                                                "fontSize": 12,
+                                                "color": "var(--color-text-primary)",
+                                            },
+                                            style_header={
+                                                "backgroundColor": "var(--color-primary-soft)",
+                                                "color": "var(--color-text-primary)",
+                                                "fontWeight": "bold",
+                                            },
+                                            tooltip_delay=0,
+                                            tooltip_duration=None,
+                                            tooltip_header={},
+                                        ),
                                     ],
                                 ),
                             ],
                         ),
-                        html.P(tr("compare.intro", "es"), id="compare-page-intro"),
-                        html.P(tr("compare.flow_note", "es"), id="compare-flow-note", className="section-copy section-copy-wide"),
-                        html.Div(className="scenario-meta", children=[html.Span(tr("compare.active_scenario", "es"), id="compare-active-scenario-label"), html.Span(" — ", className="scenario-sep"), html.Span("", id="compare-active-scenario-value")]),
-                        html.Div("", id="comparison-export-progress", className="status-line", style={"display": "none"}),
-                        html.Div(tr("compare.state.no_active", "es"), id="compare-status", className="status-line"),
-                        html.Div("", id="compare-export-note", className="scenario-meta"),
-                    ],
-                ),
-                html.Div(
-                    className="compare-grid",
-                    children=[
-                        html.Div(
-                            className="panel",
-                            children=[
-                                html.H3(tr("compare.available", "es"), id="compare-available-title"),
-                                dash_table.DataTable(
-                                    id="available-design-table",
-                                    data=[],
-                                    columns=[],
-                                    hidden_columns=["candidate_key", "is_workbench_selected", "is_best_candidate"],
-                                    row_selectable="multi",
-                                    selected_rows=[],
-                                    sort_action="native",
-                                    filter_action="native",
-                                    page_size=10,
-                                    style_table={"overflowX": "auto"},
-                                    style_cell={
-                                        "padding": "0.45rem",
-                                        "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
-                                        "fontSize": 12,
-                                        "color": "var(--color-text-primary)",
-                                    },
-                                    style_header={
-                                        "backgroundColor": "var(--color-primary-soft)",
-                                        "color": "var(--color-text-primary)",
-                                        "fontWeight": "bold",
-                                    },
-                                    tooltip_delay=0,
-                                    tooltip_duration=None,
-                                    tooltip_header={},
-                                ),
-                            ],
-                        ),
-                        html.Div(
-                            className="panel",
-                            children=[
-                                html.H3(tr("compare.selected", "es"), id="compare-selected-title"),
-                                html.Div(tr("compare.selected.empty", "es"), id="compare-selected-empty", className="section-copy"),
-                                dash_table.DataTable(
-                                    id="selected-design-table",
-                                    data=[],
-                                    columns=[],
-                                    hidden_columns=["candidate_key"],
-                                    page_size=10,
-                                    style_table={"overflowX": "auto"},
-                                    style_cell={
-                                        "padding": "0.45rem",
-                                        "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
-                                        "fontSize": 12,
-                                        "color": "var(--color-text-primary)",
-                                    },
-                                    style_header={
-                                        "backgroundColor": "var(--color-primary-soft)",
-                                        "color": "var(--color-text-primary)",
-                                        "fontWeight": "bold",
-                                    },
-                                    tooltip_delay=0,
-                                    tooltip_duration=None,
-                                    tooltip_header={},
-                                ),
-                            ],
-                        ),
-                    ],
-                ),
-                dcc.Loading(
-                    type="default",
-                    children=html.Div(
-                        className="main-stack",
-                        children=[
-                            html.Div(
-                                className="panel",
+                        dcc.Loading(
+                            type="default",
+                            children=html.Div(
+                                className="main-stack",
                                 children=[
-                                    html.H3(tr("compare.summary", "es"), id="comparison-summary-title"),
-                                    html.P(tr("compare.summary.note", "es"), id="compare-summary-note", className="section-copy section-copy-wide"),
-                                    dash_table.DataTable(
-                                        id="comparison-summary-table",
-                                        data=[],
-                                        columns=[],
-                                        hidden_columns=["candidate_key"],
-                                        sort_action="native",
-                                        filter_action="native",
-                                        page_size=10,
-                                        style_table={"overflowX": "auto"},
-                                        style_cell={
-                                            "padding": "0.45rem",
-                                            "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
-                                            "fontSize": 12,
-                                            "color": "var(--color-text-primary)",
-                                        },
-                                        style_header={
-                                            "backgroundColor": "var(--color-primary-soft)",
-                                            "color": "var(--color-text-primary)",
-                                            "fontWeight": "bold",
-                                        },
-                                        tooltip_delay=0,
-                                        tooltip_duration=None,
-                                        tooltip_header={},
+                                    html.Div(
+                                        className="panel",
+                                        children=[
+                                            html.H3(tr("compare.summary", "es"), id="comparison-summary-title"),
+                                            html.P(tr("compare.summary.note", "es"), id="compare-summary-note", className="section-copy section-copy-wide"),
+                                            dash_table.DataTable(
+                                                id="comparison-summary-table",
+                                                data=[],
+                                                columns=[],
+                                                hidden_columns=["candidate_key"],
+                                                sort_action="native",
+                                                filter_action="native",
+                                                page_size=10,
+                                                style_table={"overflowX": "auto"},
+                                                style_cell={
+                                                    "padding": "0.45rem",
+                                                    "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+                                                    "fontSize": 12,
+                                                    "color": "var(--color-text-primary)",
+                                                },
+                                                style_header={
+                                                    "backgroundColor": "var(--color-primary-soft)",
+                                                    "color": "var(--color-text-primary)",
+                                                    "fontWeight": "bold",
+                                                },
+                                                tooltip_delay=0,
+                                                tooltip_duration=None,
+                                                tooltip_header={},
+                                            ),
+                                        ],
                                     ),
+                                    html.Div(className="compare-grid", children=[html.Div(className="panel", children=[dcc.Graph(id="comparison-annual-coverage-graph")]), html.Div(className="panel", children=[dcc.Graph(id="comparison-monthly-destination-graph")])]),
+                                    html.Div(className="panel", children=[dcc.Graph(id="comparison-typical-day-graph")]),
+                                    html.Div(className="panel", children=[dcc.Graph(id="comparison-npv-projection-graph")]),
                                 ],
                             ),
-                            html.Div(className="compare-grid", children=[html.Div(className="panel", children=[dcc.Graph(id="comparison-annual-coverage-graph")]), html.Div(className="panel", children=[dcc.Graph(id="comparison-monthly-destination-graph")])]),
-                            html.Div(className="panel", children=[dcc.Graph(id="comparison-typical-day-graph")]),
-                            html.Div(className="panel", children=[dcc.Graph(id="comparison-npv-projection-graph")]),
-                        ],
-                    ),
+                        ),
+                    ],
                 ),
             ],
         ),
     ],
 )
+
+
+@callback(
+    Output("compare-mode-gate-shell", "children"),
+    Output("compare-mode-gate-shell", "style"),
+    Output("compare-page-content", "style"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+)
+def sync_compare_page_access(session_payload, language_value):
+    lang = _lang(language_value)
+    access = _compare_page_access(session_payload)
+    gate_children = render_ui_mode_gate(access, lang=lang, component_id="compare-mode-gate") if access.is_gated else []
+    return gate_children, gate_visibility_style(access), page_body_style(access)
 
 
 @callback(
@@ -290,6 +327,8 @@ def mutate_design_comparison_selection(
     selected_rows,
     session_payload,
 ):
+    if not _compare_page_access(session_payload).allowed:
+        raise PreventUpdate
     trigger = ctx.triggered_id
     client_state, state = resolve_scenario_session(session_payload, ensure_scan=True, language="es")
     active = state.get_scenario()
@@ -358,11 +397,7 @@ def mutate_design_comparison_selection(
 )
 def populate_design_comparison(session_payload, language_value):
     lang = _lang(language_value)
-    _, state = resolve_scenario_session(session_payload, ensure_scan=True, language=lang)
-    active = state.get_scenario()
-    selected_keys = resolve_design_selection(state, active) if active is not None else ()
-    page_state = build_design_compare_state(active, selected_keys, lang=lang)
-
+    access = _compare_page_access(session_payload)
     available_columns, available_tooltips = _table_columns(AVAILABLE_VISIBLE_COLUMNS, lang)
     available_columns.extend(
         [
@@ -375,6 +410,37 @@ def populate_design_comparison(session_payload, language_value):
     selected_columns.append({"name": "candidate_key", "id": "candidate_key"})
     summary_columns, summary_tooltips = _table_columns(SUMMARY_VISIBLE_COLUMNS, lang)
     summary_columns.append({"name": "candidate_key", "id": "candidate_key"})
+    if access.is_gated:
+        empty_message = tr(access.body_key or "ui_mode.gate.compare.body", lang)
+        figures = build_design_comparison_figures(None, (), lang=lang, empty_message=empty_message)
+        return (
+            "—",
+            empty_message,
+            "",
+            [],
+            available_columns,
+            available_tooltips,
+            [],
+            [],
+            [],
+            selected_columns,
+            selected_tooltips,
+            {"display": "block"},
+            [],
+            summary_columns,
+            summary_tooltips,
+            figures["annual_coverage"],
+            figures["monthly_destination"],
+            figures["typical_day"],
+            figures["npv_projection"],
+            True,
+            True,
+            True,
+        )
+    _, state = resolve_scenario_session(session_payload, ensure_scan=True, language=lang)
+    active = state.get_scenario()
+    selected_keys = resolve_design_selection(state, active) if active is not None else ()
+    page_state = build_design_compare_state(active, selected_keys, lang=lang)
 
     active_name = active.name if active is not None else "—"
     if active is None or active.scan_result is None or active.dirty:
@@ -464,6 +530,8 @@ def populate_design_comparison(session_payload, language_value):
 )
 def export_design_comparison(n_clicks, session_payload, language_value):
     if not n_clicks:
+        raise PreventUpdate
+    if not _compare_page_access(session_payload).allowed:
         raise PreventUpdate
     lang = _lang(language_value)
     _, state = resolve_scenario_session(session_payload, ensure_scan=True, language=lang)

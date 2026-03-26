@@ -9,12 +9,12 @@ CLIENT_SAFE_GROUPS = {
     "Sol y módulos",
     "Semilla",
     "Restricción de Proporción Pico",
-    "Monte Carlo",
 }
 ADMIN_ONLY_GROUPS = {
     "Economía",
     "Inversor",
     "Precios",
+    "Monte Carlo",
 }
 CLIENT_SAFE_BATTERY_EXPORT_FIELDS = {
     "include_battery",

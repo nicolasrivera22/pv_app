@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 
 from components.admin_view import build_admin_access_shell
 from components.assumption_editor import render_assumption_sections
+from components.ui_mode_gate import render_ui_mode_gate
 from .admin_access import (
     admin_pin_configured,
     grant_admin_session_access,
@@ -30,6 +31,7 @@ from .workspace_actions import (
 )
 from .workspace_drafts import bind_workspace_draft_project, upsert_workspace_draft
 from .workspace_partitions import partition_assumption_sections
+from .ui_mode import PAGE_ADMIN, resolve_page_access, resolve_ui_mode_from_payload
 
 
 def _lang(value: str | None) -> str:
@@ -43,6 +45,10 @@ def _session(payload, language_value: str | None):
 def _admin_session(payload, language_value: str | None):
     client_state, state = _session(payload, language_value)
     return client_state, state, is_admin_session_unlocked(client_state.session_id)
+
+
+def _admin_page_access(payload) -> object:
+    return resolve_page_access(PAGE_ADMIN, resolve_ui_mode_from_payload(payload))
 
 
 def _admin_locked_meta(message_key: str | None = None, *, tone: str = "neutral") -> dict[str, object]:
@@ -213,6 +219,8 @@ ADMIN_EXCLUDED_FIELDS = {"use_excel_profile", "alpha_mix", "E_month_kWh"}
     prevent_initial_call=True,
 )
 def setup_admin_session(_setup_clicks, session_payload, pin_value, confirm_value):
+    if not _admin_page_access(session_payload).allowed:
+        raise PreventUpdate
     client_state, _state, _unlocked = _admin_session(session_payload, None)
     if admin_pin_configured():
         return _admin_locked_meta("workspace.admin.setup.already_configured", tone="info")
@@ -233,6 +241,8 @@ def setup_admin_session(_setup_clicks, session_payload, pin_value, confirm_value
     prevent_initial_call=True,
 )
 def unlock_admin_session(_unlock_clicks, session_payload, pin_value):
+    if not _admin_page_access(session_payload).allowed:
+        raise PreventUpdate
     client_state, _state, _unlocked = _admin_session(session_payload, None)
     if not admin_pin_configured():
         return _admin_locked_meta("workspace.admin.setup.ready", tone="info")
@@ -250,6 +260,9 @@ def unlock_admin_session(_unlock_clicks, session_payload, pin_value):
 )
 def render_admin_access_shell(session_payload, language_value, access_meta):
     lang = _lang(language_value)
+    access = _admin_page_access(session_payload)
+    if access.is_gated:
+        return render_ui_mode_gate(access, lang=lang, component_id="admin-mode-gate")
     _client_state, _state, unlocked = _admin_session(session_payload, lang)
     configured = admin_pin_configured()
     meta = access_meta or {}
@@ -368,6 +381,26 @@ def translate_profile_table_activators(language_value, activator_ids=None):
 )
 def populate_admin_page(session_payload, show_all_values, language_value):
     lang = _lang(language_value)
+    if not _admin_page_access(session_payload).allowed:
+        empty = ([], [], {})
+        return (
+            render_assumption_sections(
+                [],
+                show_all=False,
+                empty_message=tr("workbench.assumptions.none", lang),
+                advanced_label=tr("workbench.assumptions.advanced", lang),
+                input_id_type="admin-assumption-input",
+                field_card_type="admin-assumption-field-card",
+                context_note_type="admin-assumption-context-note",
+            ),
+            True,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+            *empty,
+        )
     client_state, state, unlocked = _admin_session(session_payload, lang)
     empty = ([], [], {})
     if not unlocked:
@@ -477,6 +510,8 @@ def sync_admin_assumption_context_ui(
     note_ids,
 ):
     lang = _lang(language_value)
+    if not _admin_page_access(session_payload).allowed:
+        raise PreventUpdate
     _client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         raise PreventUpdate
@@ -524,6 +559,10 @@ def sync_admin_assumption_context_ui(
 )
 def toggle_pricing_table_visibility(session_payload, assumption_input_ids, assumption_values, language_value):
     lang = _lang(language_value)
+    if not _admin_page_access(session_payload).allowed:
+        hidden = {"display": "none"}
+        placeholder_hidden = {"display": "none"}
+        return hidden, hidden, "", placeholder_hidden, "", placeholder_hidden
     client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         hidden = {"display": "none"}
@@ -588,6 +627,8 @@ def sync_admin_draft(
     price_kwp_rows,
     price_kwp_others_rows,
 ):
+    if not _admin_page_access(session_payload).allowed:
+        raise PreventUpdate
     client_state, state, unlocked = _admin_session(session_payload, None)
     if not unlocked:
         raise PreventUpdate
@@ -901,6 +942,8 @@ def apply_admin_edits(
     language_value,
 ):
     lang = _lang(language_value)
+    if not _admin_page_access(session_payload).allowed:
+        raise PreventUpdate
     client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         raise PreventUpdate

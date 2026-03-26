@@ -15,10 +15,10 @@
       "scenario_id": "scenario-3cf3eee7",
       "name": "Escenario 2",
       "source_name": "PV_inputs.xlsx",
-      "selected_candidate_key": null,
-      "dirty": true,
-      "last_run_at": null,
-      "scan_fingerprint": null
+      "selected_candidate_key": "30.000::None",
+      "dirty": false,
+      "last_run_at": "2026-03-26T08:41:50",
+      "scan_fingerprint": "26f17ee743349102a916d1a061c4e7c0a8e0cd78f6cda504f57fc55a72603203"
     }
   ],
   "ui_prefs": {

@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .ui_mode import normalize_ui_mode
+
 
 def _frame_to_payload(frame: pd.DataFrame) -> dict[str, Any]:
     return frame.to_dict(orient="split")
@@ -315,6 +317,7 @@ class ClientSessionState:
     project_name: str | None = None
     project_dirty: bool = False
     language: str = "es"
+    ui_mode: str = "simple"
     revision: int = 0
 
     def to_payload(self) -> dict[str, Any]:
@@ -331,6 +334,7 @@ class ClientSessionState:
             "project_name": self.project_name,
             "project_dirty": self.project_dirty,
             "language": self.language,
+            "ui_mode": normalize_ui_mode(self.ui_mode),
             "revision": self.revision,
         }
 
@@ -354,6 +358,7 @@ class ClientSessionState:
             project_name=payload.get("project_name"),
             project_dirty=bool(payload.get("project_dirty", False)),
             language=str(payload.get("language", "es")),
+            ui_mode=normalize_ui_mode(payload.get("ui_mode")),
             revision=int(payload.get("revision", 0) or 0),
         )
 

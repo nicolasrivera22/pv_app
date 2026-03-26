@@ -12,6 +12,7 @@ import pytest
 
 from app import _nav_link_class_name, create_app
 import services.workspace_shared_callbacks as shared_callbacks
+import services.workspace_results_callbacks as results_callbacks
 from components.risk_controls import risk_controls_section
 from components.risk_charts import risk_charts_section
 from components.risk_tables import risk_tables_section
@@ -44,6 +45,7 @@ from services import (
     load_example_config,
     normalize_price_table_rows,
     rebuild_bundle_from_ui,
+    resolve_client_session,
     run_monte_carlo,
     run_scan,
     run_scenario_scan,
@@ -1669,6 +1671,57 @@ def test_populate_results_uses_horizon_adjusted_summary_without_losing_selection
     short_row = next(row for row in short_table_rows if row["candidate_key"] == non_best_key)
     full_row = next(row for row in full_table_rows if row["candidate_key"] == non_best_key)
     assert short_row["NPV_COP"] != full_row["NPV_COP"]
+
+
+def test_graph_click_selection_updates_store_table_and_selected_marker() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+
+    initial_outputs = workbench_page.populate_results(_session_payload(state), "es", 5)
+    horizon_table = pd.DataFrame(initial_outputs[11])
+    same_kwp_rows = next(
+        group
+        for _, group in horizon_table.groupby("kWp", sort=True)
+        if len(group.index) >= 2
+    )
+    ordered_rows = same_kwp_rows.sort_values(["NPV_COP", "scan_order"], ascending=[False, True], kind="mergesort").reset_index(drop=True)
+    curve_key = str(ordered_rows.iloc[0]["candidate_key"])
+    selected_overlay_key = str(ordered_rows.iloc[1]["candidate_key"])
+    assert curve_key != selected_overlay_key
+
+    state = update_selected_candidate(state, scenario.scenario_id, selected_overlay_key)
+    payload = _session_payload(state)
+    table_rows = workbench_page.populate_results(payload, "es", 5)[11]
+
+    next_payload = results_callbacks.persist_selected_candidate(
+        [],
+        {
+            "points": [
+                {"customdata": [selected_overlay_key, None, "selected_overlay"]},
+                {"customdata": [curve_key, None, "npv_curve"]},
+            ]
+        },
+        table_rows,
+        payload,
+    )
+
+    _, next_state = resolve_client_session(next_payload, language="es")
+    active = next_state.get_scenario()
+    assert active is not None
+    assert active.selected_candidate_key == curve_key
+
+    outputs = workbench_page.populate_results(next_payload, "es", 5)
+    table_rows = outputs[11]
+    selected_rows = outputs[13]
+    npv_figure = outputs[4]
+
+    assert selected_rows
+    assert table_rows[selected_rows[0]]["candidate_key"] == curve_key
+    selected_trace = next(trace for trace in npv_figure.data if trace.name == "Diseño seleccionado")
+    assert list(selected_trace.customdata[0])[0] == curve_key
+    assert selected_trace.marker.color == "#dc2626"
 
 
 def test_deep_dive_figure_builders_return_non_empty_plotly_figures() -> None:

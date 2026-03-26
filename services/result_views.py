@@ -43,6 +43,16 @@ CANDIDATE_TABLE_COLUMNS = [
     "best_battery_for_kwp",
 ]
 NPV_CURVE_COLUMNS = ["kWp", "NPV_COP", "battery", "candidate_key", "payback_years", "self_consumption_ratio", "peak_ratio"]
+CLICK_ROLE_NPV_CURVE = "npv_curve"
+CLICK_ROLE_PAYBACK_CURVE = "payback_curve"
+CLICK_ROLE_SELECTED_OVERLAY = "selected_overlay"
+CLICK_ROLE_BEST_OVERLAY = "best_overlay"
+CLICK_POINT_ROLE_PRIORITY = {
+    CLICK_ROLE_NPV_CURVE: 0,
+    CLICK_ROLE_PAYBACK_CURVE: 1,
+    CLICK_ROLE_BEST_OVERLAY: 2,
+    CLICK_ROLE_SELECTED_OVERLAY: 3,
+}
 
 
 def candidate_key_for(k_wp: float, battery_name: str) -> str:
@@ -556,6 +566,28 @@ def _payback_trace_hover_lines(curve: pd.DataFrame, *, label: str, lang: str) ->
     ]
 
 
+def _candidate_overlay_row(candidate_table: pd.DataFrame, candidate_key: str | None) -> pd.DataFrame:
+    if candidate_table.empty or not candidate_key:
+        return pd.DataFrame()
+    selected = candidate_table[candidate_table["candidate_key"] == candidate_key]
+    if selected.empty:
+        return selected
+    return selected.sort_values(["scan_order", "kWp"], kind="mergesort").head(1).reset_index(drop=True)
+
+
+def _best_candidate_overlay_row(candidate_table: pd.DataFrame, *, exclude_candidate_key: str | None = None) -> pd.DataFrame:
+    if candidate_table.empty:
+        return candidate_table.iloc[0:0].copy()
+    best_row = candidate_table.sort_values(["NPV_COP", "scan_order", "kWp"], ascending=[False, True, True], kind="mergesort").head(1)
+    if exclude_candidate_key and str(best_row.iloc[0]["candidate_key"]) == str(exclude_candidate_key):
+        return candidate_table.iloc[0:0].copy()
+    return best_row.reset_index(drop=True)
+
+
+def _chart_point_customdata(frame: pd.DataFrame, *, point_role: str) -> pd.DataFrame:
+    return frame.assign(point_role=point_role)[["candidate_key", "panel_count", "point_role"]]
+
+
 def _add_viable_npv_traces(
     figure: go.Figure,
     curve: pd.DataFrame,
@@ -563,7 +595,8 @@ def _add_viable_npv_traces(
     lang: str,
     figure_title: str,
     payback_label: str,
-    selected_key: str | None,
+    best_row: pd.DataFrame,
+    selected_row: pd.DataFrame,
     row: int | None = None,
 ) -> None:
     add_trace_kwargs = {"row": row, "col": 1} if row is not None else {}
@@ -575,15 +608,28 @@ def _add_viable_npv_traces(
             name=figure_title,
             line={"color": "#2563eb", "width": 3},
             marker={"size": 9, "color": "#2563eb"},
-            customdata=curve[["candidate_key", "panel_count"]],
+            ids=curve["candidate_key"],
+            customdata=_chart_point_customdata(curve, point_role=CLICK_ROLE_NPV_CURVE),
             hovertext=_curve_hover_lines(curve, lang=lang, payback_label=payback_label),
             hovertemplate="%{hovertext}<extra></extra>",
         ),
         **add_trace_kwargs,
     )
-    if not selected_key:
-        return
-    selected_row = curve[curve["candidate_key"] == selected_key]
+    if not best_row.empty:
+        figure.add_trace(
+            go.Scatter(
+                x=best_row["kWp"],
+                y=best_row["NPV_COP"],
+                mode="markers",
+                marker={"size": 14, "color": "#16a34a", "line": {"width": 2, "color": "#166534"}},
+                name=tr("common.chart.best_design", lang),
+                ids=best_row["candidate_key"],
+                customdata=_chart_point_customdata(best_row, point_role=CLICK_ROLE_BEST_OVERLAY),
+                hovertext=_curve_hover_lines(best_row, lang=lang, payback_label=payback_label),
+                hovertemplate=tr("common.chart.best_design", lang) + "<br>%{hovertext}<extra></extra>",
+            ),
+            **add_trace_kwargs,
+        )
     if selected_row.empty:
         return
     figure.add_trace(
@@ -591,15 +637,12 @@ def _add_viable_npv_traces(
             x=selected_row["kWp"],
             y=selected_row["NPV_COP"],
             mode="markers",
-            marker={"size": 14, "color": "#b91c1c"},
+            marker={"size": 18, "color": "#dc2626", "line": {"width": 3, "color": "#7f1d1d"}},
             name=tr("common.chart.selected_design", lang),
-            customdata=selected_row[["candidate_key", "panel_count"]],
-            hovertemplate=(
-                tr("common.chart.selected_design", lang)
-                + "<br>"
-                + tr("common.chart.panels", lang)
-                + ": %{customdata[1]}<extra></extra>"
-            ),
+            ids=selected_row["candidate_key"],
+            customdata=_chart_point_customdata(selected_row, point_role=CLICK_ROLE_SELECTED_OVERLAY),
+            hovertext=_curve_hover_lines(selected_row, lang=lang, payback_label=payback_label),
+            hovertemplate=tr("common.chart.selected_design", lang) + "<br>%{hovertext}<extra></extra>",
         ),
         **add_trace_kwargs,
     )
@@ -643,6 +686,12 @@ def build_npv_figure(
     module_power_w: float | None = None,
     discarded_points: tuple[dict[str, Any], ...] | list[dict[str, Any]] | None = None,
 ) -> go.Figure:
+    display_table = candidate_table.copy()
+    display_table["battery_display"] = display_table["battery"].map(lambda value: format_metric("selected_battery", value, lang))
+    if module_power_w and float(module_power_w) > 0:
+        display_table["panel_count"] = display_table["kWp"].map(lambda value: int(round(float(value) / (float(module_power_w) / 1000.0))))
+    else:
+        display_table["panel_count"] = None
     curve = build_npv_curve(candidate_table)
     curve = curve.copy()
     curve["battery_display"] = curve["battery"].map(lambda value: format_metric("selected_battery", value, lang))
@@ -650,6 +699,8 @@ def build_npv_figure(
         curve["panel_count"] = curve["kWp"].map(lambda value: int(round(float(value) / (float(module_power_w) / 1000.0))))
     else:
         curve["panel_count"] = None
+    best_row = _best_candidate_overlay_row(display_table, exclude_candidate_key=selected_key)
+    selected_row = _candidate_overlay_row(display_table, selected_key)
     figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
     full_title = _npv_figure_title(figure_title, horizon_years=horizon_years, lang=lang)
     resolved_payback_label = payback_label or metric_label("payback_years", lang)
@@ -672,7 +723,8 @@ def build_npv_figure(
                 lang=lang,
                 figure_title=figure_title,
                 payback_label=resolved_payback_label,
-                selected_key=selected_key,
+                best_row=best_row,
+                selected_row=selected_row,
             )
             figure.add_trace(
                 go.Scatter(
@@ -682,6 +734,8 @@ def build_npv_figure(
                     name=resolved_payback_label,
                     line={"color": "#0f766e", "width": 2, "dash": "dash"},
                     marker={"size": 6, "color": "#0f766e"},
+                    ids=curve["candidate_key"],
+                    customdata=_chart_point_customdata(curve, point_role=CLICK_ROLE_PAYBACK_CURVE),
                     hovertext=_payback_trace_hover_lines(curve, label=resolved_payback_label, lang=lang),
                     hovertemplate="%{hovertext}<extra></extra>",
                 ),
@@ -723,7 +777,8 @@ def build_npv_figure(
             lang=lang,
             figure_title=figure_title,
             payback_label=resolved_payback_label,
-            selected_key=selected_key,
+            best_row=best_row,
+            selected_row=selected_row,
             row=1,
         )
         figure.add_trace(
@@ -734,6 +789,8 @@ def build_npv_figure(
                 name=resolved_payback_label,
                 line={"color": "#0f766e", "width": 2, "dash": "dash"},
                 marker={"size": 6, "color": "#0f766e"},
+                ids=curve["candidate_key"],
+                customdata=_chart_point_customdata(curve, point_role=CLICK_ROLE_PAYBACK_CURVE),
                 hovertext=_payback_trace_hover_lines(curve, label=resolved_payback_label, lang=lang),
                 hovertemplate="%{hovertext}<extra></extra>",
             ),
@@ -1126,6 +1183,37 @@ def resolve_selected_candidate_key(scan_result, selected_rows=None, table_rows=N
     return selected_key
 
 
+def _candidate_key_from_click_point(point: dict[str, Any]) -> str | None:
+    point_id = point.get("id")
+    if point_id not in (None, ""):
+        return str(point_id)
+    customdata = point.get("customdata")
+    if isinstance(customdata, str) and customdata.strip():
+        return customdata.strip()
+    if isinstance(customdata, (list, tuple)) and customdata:
+        candidate_key = customdata[0]
+        if candidate_key not in (None, ""):
+            return str(candidate_key)
+    if isinstance(customdata, dict):
+        candidate_key = customdata.get("candidate_key")
+        if candidate_key not in (None, ""):
+            return str(candidate_key)
+    return None
+
+
+def _click_point_role(point: dict[str, Any]) -> str | None:
+    customdata = point.get("customdata")
+    if isinstance(customdata, (list, tuple)) and len(customdata) >= 3:
+        point_role = customdata[2]
+        if point_role not in (None, ""):
+            return str(point_role)
+    if isinstance(customdata, dict):
+        point_role = customdata.get("point_role")
+        if point_role not in (None, ""):
+            return str(point_role)
+    return None
+
+
 def resolve_selected_candidate_key_for_scenario(
     scan_result,
     scenario_selected_key: str | None,
@@ -1134,12 +1222,18 @@ def resolve_selected_candidate_key_for_scenario(
     click_data: dict | None = None,
 ) -> str | None:
     if click_data and click_data.get("points"):
-        point = click_data["points"][0]
-        customdata = point.get("customdata")
-        if isinstance(customdata, (list, tuple)) and customdata:
-            candidate_key = customdata[0]
-            if candidate_key in scan_result.candidate_details:
-                return candidate_key
+        click_matches: list[tuple[int, int, str]] = []
+        for index, point in enumerate(click_data["points"]):
+            resolved_point = point or {}
+            candidate_key = _candidate_key_from_click_point(resolved_point)
+            if candidate_key not in scan_result.candidate_details:
+                continue
+            point_role = _click_point_role(resolved_point)
+            priority = CLICK_POINT_ROLE_PRIORITY.get(point_role, len(CLICK_POINT_ROLE_PRIORITY))
+            click_matches.append((priority, index, candidate_key))
+        if click_matches:
+            click_matches.sort(key=lambda match: (match[0], match[1]))
+            return click_matches[0][2]
     if selected_rows and table_rows:
         selected_key = resolve_selected_candidate_key(scan_result, selected_rows, table_rows)
         if selected_key in scan_result.candidate_details:

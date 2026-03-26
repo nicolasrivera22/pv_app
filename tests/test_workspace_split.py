@@ -92,13 +92,13 @@ def test_partition_assumption_sections_routes_safe_and_internal_groups() -> None
         for field in section.get(bucket, [])
     }
 
-    assert {"Demanda y Perfil", "Sol y módulos", "Semilla", "Restricción de Proporción Pico", "Monte Carlo"} <= client_groups
-    assert {"Economía", "Inversor", "Precios"} <= admin_groups
+    assert {"Demanda y Perfil", "Sol y módulos", "Semilla", "Restricción de Proporción Pico"} <= client_groups
+    assert {"Economía", "Inversor", "Precios", "Monte Carlo"} <= admin_groups
     assert {"include_battery", "optimize_battery", "export_allowed"} <= client_fields
     assert {"battery_name", "bat_DoD", "bat_coupling", "bat_eta_rt"} <= admin_fields
     assert "pricing_mode" not in client_fields
-    assert "mc_PR_std" in client_fields
-    assert "Monte Carlo" not in admin_groups
+    assert "mc_PR_std" not in client_fields
+    assert "mc_PR_std" in admin_fields
     assert "price_total_COP" in admin_fields
 
 
@@ -183,9 +183,8 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
 
     assert _find_component(admin_layout, "admin-access-shell") is not None
     assert _find_component(admin_layout, "admin-gating-note") is not None
-    assert _find_component(admin_layout, "admin-setup-pin-input") is not None
-    assert _find_component(admin_layout, "admin-setup-confirm-input") is not None
-    assert _find_component(admin_layout, "admin-setup-btn") is not None
+    assert _find_component(admin_layout, "admin-mode-gate") is not None
+    assert _find_component(admin_layout, "admin-setup-pin-input") is None
     assert _find_component(admin_layout, "admin-pin-input") is None
     assert _find_component(admin_layout, "profile-editor-title") is None
     assert _find_component(admin_layout, "inverter-table-editor") is None
@@ -235,7 +234,8 @@ def test_admin_page_gracefully_handles_direct_access_without_active_scenario(mon
     rendered = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
 
     assert _find_component(rendered, "admin-gating-note") is not None
-    assert _find_component(rendered, "admin-setup-pin-input") is not None
+    assert _find_component(rendered, "admin-mode-gate") is not None
+    assert _find_component(rendered, "admin-setup-pin-input") is None
     assert payload["active_scenario_id"] is None
 
 
