@@ -167,7 +167,7 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
 
     assert _find_component(results_layout, "deterministic-results-area") is not None
     assert _find_component(results_layout, "results-status-digest") is not None
-    assert _find_component(results_layout, "workspace-admin-entry") is not None
+    assert _find_component(results_layout, "workspace-admin-entry") is None
     assert _find_component(results_layout, "assumptions-sections") is None
     assert _find_component(results_layout, "inverter-table-editor") is None
 
@@ -177,6 +177,7 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(assumptions_layout, "run-assumptions-scan-btn") is not None
     assert _find_component(assumptions_layout, "assumptions-general-tab") is not None
     assert _find_component(assumptions_layout, "assumptions-demand-tab") is not None
+    assert _find_component(assumptions_layout, "workspace-admin-entry") is not None
     assert _find_component(assumptions_layout, "assumptions-demand-profile-mode-selector") is not None
     assert _find_component(assumptions_layout, "inverter-table-editor") is None
 
@@ -190,6 +191,7 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(admin_layout, "inverter-table-editor") is None
     assert _find_component(admin_layout, "apply-admin-btn") is None
     assert _find_component(admin_layout, "run-assumptions-scan-btn") is None
+    assert _find_component(admin_layout, "workspace-admin-entry") is None
 
 
 def test_assumptions_demand_tab_places_summary_strip_above_tables() -> None:

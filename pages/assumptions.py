@@ -16,6 +16,7 @@ layout = workspace_frame(
         dcc.Store(id="run-scan-choice-state", storage_type="memory", data={"open": False}),
         dcc.Store(id="assumptions-draft-meta", storage_type="memory", data={}),
     ],
+    show_internal_entry=True,
     children=[
         run_scan_choice_dialog(),
         html.Div(

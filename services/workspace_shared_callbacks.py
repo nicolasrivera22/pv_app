@@ -110,9 +110,6 @@ def _workspace_state_strip_children(*, state, active, session_id: str, lang: str
     Output("rename-scenario-input", "placeholder"),
     Output("rename-scenario-note", "children"),
     Output("rename-scenario-btn", "children"),
-    Output("workspace-internal-title", "children"),
-    Output("workspace-internal-copy", "children"),
-    Output("workspace-admin-link", "children"),
     Output("workspace-shell-title", "children"),
     Input("language-selector", "value"),
 )
@@ -139,9 +136,6 @@ def translate_workspace_shell(language_value):
         tr("workbench.rename_placeholder", lang),
         tr("workbench.rename_active_note", lang),
         tr("workbench.rename", lang),
-        tr("workspace.internal.title", lang),
-        tr("workspace.internal.copy", lang),
-        tr("workspace.internal.link", lang),
         tr("workspace.shell.title", lang),
     )
 
