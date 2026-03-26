@@ -27,8 +27,17 @@ def _profile_table(
         page_size=page_size,
         hidden_columns=hidden_columns or [],
         style_table={"overflowX": "auto"},
-        style_cell={"padding": "0.4rem", "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif", "fontSize": 12},
-        style_header={"backgroundColor": "#ede9fe", "fontWeight": "bold"},
+        style_cell={
+            "padding": "0.4rem",
+            "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+            "fontSize": 12,
+            "color": "var(--color-text-primary)",
+        },
+        style_header={
+            "backgroundColor": "var(--color-primary-soft)",
+            "color": "var(--color-text-primary)",
+            "fontWeight": "bold",
+        },
         style_data_conditional=style_data_conditional or [],
         tooltip_delay=0,
         tooltip_duration=None,
@@ -396,11 +405,11 @@ def demand_profile_module(
                         style_data_conditional=[
                             {
                                 "if": {"column_id": "TOTAL_kWh"},
-                                "backgroundColor": "#f8fafc",
-                            "color": "#475569",
-                            "fontWeight": "600",
-                        }
-                    ],
+                                "backgroundColor": "var(--color-surface-soft)",
+                                "color": "var(--color-text-secondary)",
+                                "fontWeight": "600",
+                            }
+                        ],
                 ),
                 _profile_panel(
                     total_card_id,
@@ -415,11 +424,11 @@ def demand_profile_module(
                         style_data_conditional=[
                             {
                                 "if": {"column_id": "TOTAL_kWh"},
-                                "backgroundColor": "#f8fafc",
-                            "color": "#475569",
-                            "fontWeight": "600",
-                        }
-                    ],
+                                "backgroundColor": "var(--color-surface-soft)",
+                                "color": "var(--color-text-secondary)",
+                                "fontWeight": "600",
+                            }
+                        ],
                 ),
                 _profile_panel(
                     preview_card_id,
@@ -537,17 +546,6 @@ def profile_editor_section() -> html.Div:
                 title_id="profile-secondary-chart-title",
                 subtitle_id="profile-secondary-chart-subtitle",
                 graph_id="profile-secondary-chart-graph",
-            ),
-            html.Div(
-                id="profile-demand-legacy-shell",
-                style={"display": "none"},
-                children=[
-                    demand_profile_module(
-                        show_activators=False,
-                        include_overview_chart=False,
-                        include_inline_relative_chart=True,
-                    )
-                ],
             ),
         ],
     )

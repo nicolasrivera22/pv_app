@@ -18,6 +18,7 @@ from services import (
     create_scenario_record,
     grant_admin_session_access,
     is_admin_session_unlocked,
+    load_config_from_excel,
     load_example_config,
     set_admin_pin,
     verify_admin_pin,
@@ -67,6 +68,28 @@ def _find_component(node, component_id: str):
                 return found
         return None
     return _find_component(children, component_id)
+
+
+def _find_pattern_component(node, component_type: str):
+    if isinstance(node, (list, tuple)):
+        for child in node:
+            found = _find_pattern_component(child, component_type)
+            if found is not None:
+                return found
+        return None
+    component_id = getattr(node, "id", None)
+    if isinstance(component_id, dict) and component_id.get("type") == component_type:
+        return node
+    children = getattr(node, "children", None)
+    if children is None:
+        return None
+    if isinstance(children, (list, tuple)):
+        for child in children:
+            found = _find_pattern_component(child, component_type)
+            if found is not None:
+                return found
+        return None
+    return _find_pattern_component(children, component_type)
 
 
 def test_admin_pin_path_resolves_outside_repo_in_source_mode(monkeypatch, tmp_path) -> None:
@@ -178,6 +201,7 @@ def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypa
     assert _find_component(rendered, "profile-editor-title") is not None
     assert _find_component(rendered, "inverter-table-editor") is not None
     assert _find_component(rendered, "admin-pin-input") is None
+    assert _find_component(rendered, "profile-demand-legacy-shell") is None
 
 
 def test_admin_profile_table_activator_translation_matches_visible_cards() -> None:
@@ -337,4 +361,58 @@ def test_populate_admin_page_returns_safe_empty_outputs_when_locked() -> None:
 
     assert disabled is True
     assert inverter_rows == []
-    assert _find_component(rendered_sections, "admin-assumption-input") is None
+    assert _find_pattern_component(rendered_sections, "admin-assumption-input") is None
+
+
+def test_populate_admin_page_renders_visible_admin_tables_for_example_bundle(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    client_state = bootstrap_client_session("es")
+    set_admin_pin("2468")
+    grant_admin_session_access(client_state.session_id)
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = commit_client_session(client_state, state).to_payload()
+
+    rendered_sections, disabled, inverter_rows, inverter_columns, _inverter_tooltips, battery_rows, battery_columns, _battery_tooltips, month_rows, month_columns, _month_tooltips, sun_rows, sun_columns, _sun_tooltips, price_rows, price_columns, _price_tooltips, price_other_rows, price_other_columns, _price_other_tooltips = populate_admin_page(payload, [], "es")
+
+    assert disabled is False
+    assert inverter_rows
+    assert battery_rows
+    assert month_rows
+    assert sun_rows
+    assert price_rows
+    assert price_other_rows
+    assert inverter_columns
+    assert battery_columns
+    assert month_columns
+    assert sun_columns
+    assert price_columns
+    assert price_other_columns
+    assert _find_pattern_component(rendered_sections, "admin-assumption-input") is not None
+
+
+def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    client_state = bootstrap_client_session("es")
+    set_admin_pin("2468")
+    grant_admin_session_access(client_state.session_id)
+    bundle = load_config_from_excel(Path("PV_inputs.xlsx"))
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Importado", bundle))
+    payload = commit_client_session(client_state, state).to_payload()
+
+    rendered = render_admin_access_shell(payload, "es", {"revision": 1})
+    outputs = populate_admin_page(payload, [], "es")
+
+    assert _find_component(rendered, "profile-demand-legacy-shell") is None
+    assert outputs[1] is False
+    assert outputs[2]
+    assert outputs[5]
+    assert outputs[8]
+    assert outputs[11]
+    assert outputs[14]
+    assert outputs[17]

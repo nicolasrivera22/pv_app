@@ -10,7 +10,7 @@ from dash.exceptions import PreventUpdate
 import pandas as pd
 import pytest
 
-from app import create_app
+from app import _nav_link_class_name, create_app
 from components.risk_controls import risk_controls_section
 from components.risk_charts import risk_charts_section
 from components.risk_tables import risk_tables_section
@@ -62,6 +62,7 @@ from services.result_views import (
 from services.result_views import build_cash_flow, build_cash_flow_figure
 from services.ui_schema import field_help, field_label, metric_label
 from services.workbench_ui import demand_profile_visibility, frame_from_rows
+from services.workspace_shared_callbacks import populate_workspace_shell
 
 
 def _fast_bundle():
@@ -147,6 +148,14 @@ def test_app_defaults_to_spanish() -> None:
     assert help_nav.children == "Ayuda"
 
 
+def test_nav_link_class_name_uses_exact_root_and_prefix_matches() -> None:
+    assert _nav_link_class_name("/", "/") == "nav-link nav-link-active"
+    assert _nav_link_class_name("/assumptions", "/") == "nav-link"
+    assert _nav_link_class_name("/assumptions", "/assumptions") == "nav-link nav-link-active"
+    assert _nav_link_class_name("/assumptions/demand", "/assumptions") == "nav-link nav-link-active"
+    assert _nav_link_class_name("/help/", "/help") == "nav-link nav-link-active"
+
+
 def test_help_page_renders_real_product_help_content() -> None:
     layout = help_page.layout() if callable(help_page.layout) else help_page.layout
     title = _find_component(layout, "help-page-title")
@@ -164,13 +173,33 @@ def test_first_render_placeholders_are_spanish_first() -> None:
     risk_scenario_dropdown = _find_component(risk_controls, "risk-scenario-dropdown")
     risk_candidate_dropdown = _find_component(risk_controls, "risk-candidate-dropdown")
 
-    assert _find_component(sidebar, "load-example-btn") is None
+    assert _find_component(sidebar, "scenario-start-title").children == tr("workbench.sidebar.start.title", "es")
+    assert _find_component(sidebar, "scenario-upload-title").children == tr("workbench.import_excel.title", "es")
+    assert _find_component(sidebar, "new-scenario-btn").children == tr("workbench.load_example", "es")
     assert _find_component(sidebar, "scenario-dropdown") is None
     assert _find_component(sidebar, "set-active-scenario-btn") is None
     assert rename_input.placeholder == "Nombre del escenario"
     assert rename_note.children == tr("workbench.rename_active_note", "es")
     assert risk_scenario_dropdown.placeholder == "Selecciona un escenario completado"
     assert risk_candidate_dropdown.placeholder == "Selecciona un diseño factible"
+
+
+def test_workspace_shell_empty_state_surfaces_start_ctas_and_disables_irrelevant_actions(monkeypatch) -> None:
+    monkeypatch.setattr("services.workspace_shared_callbacks.list_projects", lambda: [])
+    payload = _session_payload(ScenarioSessionState.empty())
+
+    outputs = populate_workspace_shell(payload, "es")
+
+    assert outputs[4] == tr("workbench.project.empty_note", "es")
+    assert outputs[5] == {"display": "block"}
+    assert outputs[7] is True
+    assert outputs[8] is True
+    assert outputs[9] is True
+    assert outputs[10] == {"display": "none"}
+    assert outputs[12] == tr("workbench.sidebar.start.copy", "es")
+    assert outputs[13] == {"display": "grid"}
+    assert outputs[14] == tr("workbench.no_active_scenario", "es")
+    assert outputs[15] == {"display": "block"}
 
 
 def test_risk_chart_section_stacks_full_width_cards_with_descriptions() -> None:
@@ -381,7 +410,6 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     secondary_grid = _find_component(section, "profile-secondary-grid")
     secondary_chart = _find_component(section, "profile-secondary-chart-panel")
     relocation_card = _find_component(section, "profile-demand-relocated-card")
-    hidden_demand_shell = _find_component(section, "profile-demand-legacy-shell")
     activators = _find_components(
         section,
         lambda node: isinstance(getattr(node, "id", None), dict) and node.id.get("type") == "profile-table-activate",
@@ -392,17 +420,16 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     assert secondary_grid is not None
     assert secondary_chart is not None
     assert relocation_card is not None
-    assert hidden_demand_shell is not None
+    assert _find_component(section, "profile-demand-legacy-shell") is None
     assert _find_component(workbench_page.layout, "active-profile-table-state") is not None
     assert len(main_grid.children) == 2
     assert len(secondary_grid.children) == 2
-    assert [getattr(child, "id", None) for child in section.children[2:8]] == [
+    assert [getattr(child, "id", None) for child in section.children[2:7]] == [
         "profile-main-grid",
         "profile-main-chart-panel",
         "profile-secondary-grid",
         "profile-demand-relocated-card",
         "profile-secondary-chart-panel",
-        "profile-demand-legacy-shell",
     ]
     assert len(activators) == 4
     assert {component.id["table"] for component in activators} == {
@@ -914,11 +941,17 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".assumption-editor-panel .Select-control" in css_source
     assert ".candidate-selection-helper" in css_source
     assert ".candidate-horizon-toolbar" in css_source
+    assert ":root {" in css_source
+    assert "--color-primary" in css_source
+    assert "--color-primary-soft" in css_source
     assert "body {" in css_source
     assert ".active-summary-copy" in css_source
     assert "grid-template-columns: minmax(0, 1fr) auto;" in css_source
     assert ".active-summary-top" in css_source
     assert ".active-summary-actions" in css_source
+    assert ".nav-link-active" in css_source
+    assert ".sidebar-start-card" in css_source
+    assert ".upload-box-action" in css_source
     assert ".profile-main-grid" in css_source
     assert "minmax(0, 1.35fr)" in css_source
     assert ".profile-secondary-grid" in css_source
@@ -1013,9 +1046,9 @@ def test_profile_table_header_click_toggles_the_active_chart(monkeypatch) -> Non
         SimpleNamespace(triggered_id={"type": "profile-table-activate", "table": "sun-profile-editor"}),
     )
 
-    clicks = [0, 1, 0, 0, 0, 0, 0]
-    activated = workbench_page.sync_active_profile_table(clicks, None, None, None, None, None, None, None, {"table_id": None})
-    cleared = workbench_page.sync_active_profile_table(clicks, None, None, None, None, None, None, None, {"table_id": "sun-profile-editor"})
+    clicks = [0, 1, 0, 0]
+    activated = workbench_page.sync_active_profile_table(clicks, None, None, None, None, {"table_id": None})
+    cleared = workbench_page.sync_active_profile_table(clicks, None, None, None, None, {"table_id": "sun-profile-editor"})
 
     assert activated == {"table_id": "sun-profile-editor"}
     assert cleared == {"table_id": None}
@@ -1029,7 +1062,7 @@ def test_profile_table_header_mount_with_zero_clicks_does_not_auto_activate(monk
     )
 
     with pytest.raises(PreventUpdate):
-        workbench_page.sync_active_profile_table([0, 0, 0, 0, 0, 0, 0], None, None, None, None, None, None, None, {"table_id": None})
+        workbench_page.sync_active_profile_table([0, 0, 0, 0], None, None, None, None, {"table_id": None})
 
 
 def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -> None:
@@ -1039,9 +1072,6 @@ def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -
         [],
         None,
         {"row": 2, "column": 1},
-        None,
-        None,
-        None,
         None,
         None,
         {"table_id": None},
@@ -1056,21 +1086,15 @@ def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -
             {"row": 2, "column": 1},
             None,
             None,
-            None,
-            None,
-            None,
             {"table_id": "sun-profile-editor"},
         )
 
 
 def test_hidden_profile_table_sanitization_clears_active_chart() -> None:
     cleared = workbench_page.sanitize_active_profile_table(
-        {"table_id": "demand-profile-editor"},
-        {"display": "block"},
+        {"table_id": "price-kwp-others-editor"},
         {"display": "block"},
         {"display": "none"},
-        {"display": "block"},
-        {"display": "block"},
     )
 
     assert cleared == {"table_id": None}
@@ -1080,11 +1104,8 @@ def test_profile_chart_render_routes_main_and_secondary_tables_and_marks_one_act
     bundle = load_example_config()
     month_columns, _ = build_table_display_columns("month_profile", list(bundle.month_profile_table.columns), "en")
     sun_columns, _ = build_table_display_columns("sun_profile", list(bundle.sun_profile_table.columns), "en")
-    demand_weights_columns, _ = build_table_display_columns("demand_profile_weights", list(bundle.demand_profile_weights_table.columns), "en")
     price_columns, _ = build_table_display_columns("cop_kwp", list(bundle.cop_kwp_table.columns), "en")
     price_others_columns, _ = build_table_display_columns("cop_kwp_others", list(bundle.cop_kwp_table_others.columns), "en")
-    demand_columns, _ = build_table_display_columns("demand_profile", list(bundle.demand_profile_table.columns), "en")
-    demand_general_columns, _ = build_table_display_columns("demand_profile_general", list(bundle.demand_profile_general_table.columns), "en")
 
     main = workbench_page.render_active_profile_chart(
         {"table_id": "sun-profile-editor"},
@@ -1092,20 +1113,11 @@ def test_profile_chart_render_routes_main_and_secondary_tables_and_marks_one_act
         month_columns,
         bundle.sun_profile_table.to_dict("records"),
         sun_columns,
-        bundle.demand_profile_weights_table.to_dict("records"),
-        demand_weights_columns,
         bundle.cop_kwp_table.to_dict("records"),
         price_columns,
         bundle.cop_kwp_table_others.to_dict("records"),
         price_others_columns,
-        bundle.demand_profile_table.to_dict("records"),
-        demand_columns,
-        bundle.demand_profile_general_table.to_dict("records"),
-        demand_general_columns,
         "en",
-        {"display": "block"},
-        {"display": "block"},
-        {"display": "block"},
         {"display": "block"},
         {"display": "block"},
     )
@@ -1115,20 +1127,11 @@ def test_profile_chart_render_routes_main_and_secondary_tables_and_marks_one_act
         month_columns,
         bundle.sun_profile_table.to_dict("records"),
         sun_columns,
-        bundle.demand_profile_weights_table.to_dict("records"),
-        demand_weights_columns,
         bundle.cop_kwp_table.to_dict("records"),
         price_columns,
         bundle.cop_kwp_table_others.to_dict("records"),
         price_others_columns,
-        bundle.demand_profile_table.to_dict("records"),
-        demand_columns,
-        bundle.demand_profile_general_table.to_dict("records"),
-        demand_general_columns,
         "en",
-        {"display": "block"},
-        {"display": "block"},
-        {"display": "block"},
         {"display": "block"},
         {"display": "block"},
     )
@@ -1148,33 +1151,21 @@ def test_hidden_active_profile_table_hides_chart_shells_and_active_classes() -> 
     bundle = load_example_config()
     month_columns, _ = build_table_display_columns("month_profile", list(bundle.month_profile_table.columns), "es")
     sun_columns, _ = build_table_display_columns("sun_profile", list(bundle.sun_profile_table.columns), "es")
-    demand_weights_columns, _ = build_table_display_columns("demand_profile_weights", list(bundle.demand_profile_weights_table.columns), "es")
     price_columns, _ = build_table_display_columns("cop_kwp", list(bundle.cop_kwp_table.columns), "es")
     price_others_columns, _ = build_table_display_columns("cop_kwp_others", list(bundle.cop_kwp_table_others.columns), "es")
-    demand_columns, _ = build_table_display_columns("demand_profile", list(bundle.demand_profile_table.columns), "es")
-    demand_general_columns, _ = build_table_display_columns("demand_profile_general", list(bundle.demand_profile_general_table.columns), "es")
 
     rendered = workbench_page.render_active_profile_chart(
-        {"table_id": "demand-profile-editor"},
+        {"table_id": "price-kwp-editor"},
         bundle.month_profile_table.to_dict("records"),
         month_columns,
         bundle.sun_profile_table.to_dict("records"),
         sun_columns,
-        bundle.demand_profile_weights_table.to_dict("records"),
-        demand_weights_columns,
         bundle.cop_kwp_table.to_dict("records"),
         price_columns,
         bundle.cop_kwp_table_others.to_dict("records"),
         price_others_columns,
-        bundle.demand_profile_table.to_dict("records"),
-        demand_columns,
-        bundle.demand_profile_general_table.to_dict("records"),
-        demand_general_columns,
         "es",
-        {"display": "block"},
-        {"display": "block"},
         {"display": "none"},
-        {"display": "block"},
         {"display": "block"},
     )
 

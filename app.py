@@ -12,6 +12,34 @@ from services.session_state import bootstrap_client_session
 configure_runtime_environment()
 
 
+NAV_LINK_TARGETS = (
+    ("nav-results-link", "/"),
+    ("nav-assumptions-link", "/assumptions"),
+    ("nav-compare-link", "/compare"),
+    ("nav-risk-link", "/risk"),
+    ("nav-help-link", "/help"),
+)
+
+
+def _normalize_pathname(pathname: str | None) -> str:
+    normalized = str(pathname or "").strip() or "/"
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    if normalized != "/":
+        normalized = normalized.rstrip("/")
+    return normalized or "/"
+
+
+def _nav_link_class_name(current_pathname: str | None, target_pathname: str) -> str:
+    current = _normalize_pathname(current_pathname)
+    target = _normalize_pathname(target_pathname)
+    if target == "/":
+        is_active = current == target
+    else:
+        is_active = current == target or current.startswith(f"{target}/")
+    return "nav-link nav-link-active" if is_active else "nav-link"
+
+
 def create_app() -> Dash:
     app = Dash(
         __name__,
@@ -72,6 +100,7 @@ def create_app() -> Dash:
         return html.Div(
             className="app-shell",
             children=[
+                dcc.Location(id="app-location"),
                 dcc.Store(
                     id="scenario-session-store",
                     storage_type="session",
@@ -108,11 +137,11 @@ def create_app() -> Dash:
                                 html.Nav(
                                     className="top-nav",
                                     children=[
-                                        dcc.Link(html.Span(tr("nav.results", "es"), id="nav-results-label"), href="/", className="nav-link"),
-                                        dcc.Link(html.Span(tr("nav.assumptions", "es"), id="nav-assumptions-label"), href="/assumptions", className="nav-link"),
-                                        dcc.Link(html.Span(tr("nav.compare", "es"), id="nav-compare-label"), href="/compare", className="nav-link"),
-                                        dcc.Link(html.Span(tr("nav.risk", "es"), id="nav-risk-label"), href="/risk", className="nav-link"),
-                                        dcc.Link(html.Span(tr("nav.help", "es"), id="nav-help-label"), href="/help", className="nav-link"),
+                                        dcc.Link(html.Span(tr("nav.results", "es"), id="nav-results-label"), id="nav-results-link", href="/", className="nav-link"),
+                                        dcc.Link(html.Span(tr("nav.assumptions", "es"), id="nav-assumptions-label"), id="nav-assumptions-link", href="/assumptions", className="nav-link"),
+                                        dcc.Link(html.Span(tr("nav.compare", "es"), id="nav-compare-label"), id="nav-compare-link", href="/compare", className="nav-link"),
+                                        dcc.Link(html.Span(tr("nav.risk", "es"), id="nav-risk-label"), id="nav-risk-link", href="/risk", className="nav-link"),
+                                        dcc.Link(html.Span(tr("nav.help", "es"), id="nav-help-label"), id="nav-help-link", href="/help", className="nav-link"),
                                     ],
                                 ),
                             ],
@@ -154,6 +183,18 @@ def translate_shell(language_value: str):
         tr("nav.risk", lang),
         tr("nav.help", lang),
     )
+
+
+@callback(
+    Output("nav-results-link", "className"),
+    Output("nav-assumptions-link", "className"),
+    Output("nav-compare-link", "className"),
+    Output("nav-risk-link", "className"),
+    Output("nav-help-link", "className"),
+    Input("app-location", "pathname"),
+)
+def sync_active_nav(pathname: str | None):
+    return tuple(_nav_link_class_name(pathname, target) for _, target in NAV_LINK_TARGETS)
 
 
 if __name__ == "__main__":

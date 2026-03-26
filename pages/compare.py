@@ -136,8 +136,17 @@ layout = html.Div(
                                     filter_action="native",
                                     page_size=10,
                                     style_table={"overflowX": "auto"},
-                                    style_cell={"padding": "0.45rem", "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif", "fontSize": 12},
-                                    style_header={"backgroundColor": "#e2e8f0", "fontWeight": "bold"},
+                                    style_cell={
+                                        "padding": "0.45rem",
+                                        "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+                                        "fontSize": 12,
+                                        "color": "var(--color-text-primary)",
+                                    },
+                                    style_header={
+                                        "backgroundColor": "var(--color-primary-soft)",
+                                        "color": "var(--color-text-primary)",
+                                        "fontWeight": "bold",
+                                    },
                                     tooltip_delay=0,
                                     tooltip_duration=None,
                                     tooltip_header={},
@@ -156,8 +165,17 @@ layout = html.Div(
                                     hidden_columns=["candidate_key"],
                                     page_size=10,
                                     style_table={"overflowX": "auto"},
-                                    style_cell={"padding": "0.45rem", "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif", "fontSize": 12},
-                                    style_header={"backgroundColor": "#e2e8f0", "fontWeight": "bold"},
+                                    style_cell={
+                                        "padding": "0.45rem",
+                                        "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+                                        "fontSize": 12,
+                                        "color": "var(--color-text-primary)",
+                                    },
+                                    style_header={
+                                        "backgroundColor": "var(--color-primary-soft)",
+                                        "color": "var(--color-text-primary)",
+                                        "fontWeight": "bold",
+                                    },
                                     tooltip_delay=0,
                                     tooltip_duration=None,
                                     tooltip_header={},
@@ -185,8 +203,17 @@ layout = html.Div(
                                         filter_action="native",
                                         page_size=10,
                                         style_table={"overflowX": "auto"},
-                                        style_cell={"padding": "0.45rem", "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif", "fontSize": 12},
-                                        style_header={"backgroundColor": "#e2e8f0", "fontWeight": "bold"},
+                                        style_cell={
+                                            "padding": "0.45rem",
+                                            "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+                                            "fontSize": 12,
+                                            "color": "var(--color-text-primary)",
+                                        },
+                                        style_header={
+                                            "backgroundColor": "var(--color-primary-soft)",
+                                            "color": "var(--color-text-primary)",
+                                            "fontWeight": "bold",
+                                        },
                                         tooltip_delay=0,
                                         tooltip_duration=None,
                                         tooltip_header={},
@@ -383,12 +410,12 @@ def populate_design_comparison(session_payload, language_value):
     available_styles = [
         {
             "if": {"filter_query": "{is_workbench_selected} = true"},
-            "backgroundColor": "#eff6ff",
+            "backgroundColor": "var(--color-primary-soft)",
             "fontWeight": "bold",
         },
         {
             "if": {"filter_query": "{is_best_candidate} = true"},
-            "backgroundColor": "#dcfce7",
+            "backgroundColor": "var(--color-success-soft)",
         },
     ]
     selected_display = selected_rows.copy()

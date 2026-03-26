@@ -230,11 +230,8 @@ def sync_active_profile_table(
     _activator_clicks,
     month_active_cell,
     sun_active_cell,
-    demand_weights_active_cell,
     price_active_cell,
     price_others_active_cell,
-    demand_weekday_active_cell,
-    demand_general_active_cell,
     active_state,
 ):
     trigger = ctx.triggered_id
@@ -242,11 +239,8 @@ def sync_active_profile_table(
     profile_table_ids = (
         "month-profile-editor",
         "sun-profile-editor",
-        "demand-profile-weights-editor",
         "price-kwp-editor",
         "price-kwp-others-editor",
-        "demand-profile-editor",
-        "demand-profile-general-editor",
     )
     activator_clicks = {
         table_id: int(clicks or 0)
@@ -255,11 +249,8 @@ def sync_active_profile_table(
     active_cells = {
         "month-profile-editor": month_active_cell,
         "sun-profile-editor": sun_active_cell,
-        "demand-profile-weights-editor": demand_weights_active_cell,
         "price-kwp-editor": price_active_cell,
         "price-kwp-others-editor": price_others_active_cell,
-        "demand-profile-editor": demand_weekday_active_cell,
-        "demand-profile-general-editor": demand_general_active_cell,
     }
     if isinstance(trigger, dict) and trigger.get("type") == "profile-table-activate":
         table_id = str(trigger.get("table", "")).strip() or None

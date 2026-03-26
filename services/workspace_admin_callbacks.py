@@ -9,23 +9,6 @@ import plotly.graph_objects as go
 
 from components.admin_view import build_admin_access_shell
 from components.assumption_editor import render_assumption_sections
-from .demand_profile_logic import (
-    PROFILE_MODE_RELATIVE,
-    PROFILE_MODE_TOTAL,
-    PROFILE_MODE_WEEKDAY,
-    PROFILE_TYPE_MIXED,
-    canonicalize_total_source,
-    canonicalize_weekday_source,
-    clamp_alpha_mix,
-    coerce_month_energy,
-    derive_relative_profile,
-    derive_total_preview_from_weekday,
-    frame_to_records,
-    infer_relative_profile_type,
-    normalize_profile_mode,
-    normalize_profile_type,
-    relative_preview_from_source,
-)
 from .admin_access import (
     admin_pin_configured,
     grant_admin_session_access,
@@ -39,7 +22,7 @@ from .project_io import save_project
 from .session_state import commit_client_session, resolve_client_session
 from .ui_schema import assumption_context_map, build_assumption_sections, build_table_display_columns
 from .validation import BATTERY_REQUIRED_COLUMNS, INVERTER_REQUIRED_COLUMNS
-from .workbench_ui import collect_config_updates, demand_profile_visibility, workbench_status_message
+from .workbench_ui import collect_config_updates, workbench_status_message
 from .workspace_actions import (
     apply_workspace_draft_to_state,
     resolve_workspace_bundle_for_display,
@@ -87,13 +70,10 @@ def _validate_admin_setup_pin(pin_value, confirm_value) -> str:
 PROFILE_MAIN_TABLE_IDS = (
     "month-profile-editor",
     "sun-profile-editor",
-    "demand-profile-weights-editor",
 )
 PROFILE_SECONDARY_TABLE_IDS = (
     "price-kwp-editor",
     "price-kwp-others-editor",
-    "demand-profile-editor",
-    "demand-profile-general-editor",
 )
 PROFILE_TABLE_IDS = (*PROFILE_MAIN_TABLE_IDS, *PROFILE_SECONDARY_TABLE_IDS)
 PROFILE_ACTIVATOR_TABLE_IDS = (
@@ -105,9 +85,6 @@ PROFILE_ACTIVATOR_TABLE_IDS = (
 PROFILE_TABLE_VISIBILITY_PANELS = {
     "price-kwp-editor": "price-kwp-panel",
     "price-kwp-others-editor": "price-kwp-others-panel",
-    "demand-profile-editor": "demand-profile-panel",
-    "demand-profile-general-editor": "demand-profile-general-panel",
-    "demand-profile-weights-editor": "demand-profile-weights-panel",
 }
 PROFILE_CARD_BASE_CLASS = "profile-table-card-shell"
 PROFILE_CARD_ACTIVE_CLASS = f"{PROFILE_CARD_BASE_CLASS} profile-table-card-active"
@@ -154,16 +131,10 @@ def _is_hidden_style(style: dict | None) -> bool:
 def _hidden_profile_tables(
     price_kwp_style: dict | None,
     price_kwp_others_style: dict | None,
-    demand_profile_style: dict | None,
-    demand_profile_general_style: dict | None,
-    demand_profile_weights_style: dict | None,
 ) -> set[str]:
     panel_styles = {
         "price-kwp-panel": price_kwp_style,
         "price-kwp-others-panel": price_kwp_others_style,
-        "demand-profile-panel": demand_profile_style,
-        "demand-profile-general-panel": demand_profile_general_style,
-        "demand-profile-weights-panel": demand_profile_weights_style,
     }
     return {
         table_id
@@ -230,142 +201,7 @@ def _normalize_compare_value(value):
     return value
 
 
-ADMIN_PROFILE_CONFIG_FIELDS = {"use_excel_profile", "alpha_mix", "E_month_kWh"}
-
-
-def _mark_columns_readonly(columns: list[dict] | None, readonly_columns: set[str]) -> list[dict]:
-    next_columns: list[dict] = []
-    for column in columns or []:
-        next_column = dict(column)
-        if str(next_column.get("id", "")) in readonly_columns:
-            next_column["editable"] = False
-        next_columns.append(next_column)
-    return next_columns
-
-
-def _mark_all_columns_readonly(columns: list[dict] | None) -> list[dict]:
-    return _mark_columns_readonly(columns, {str(column.get("id", "")) for column in columns or []})
-
-
-def _demand_mode_options(lang: str) -> list[dict[str, str]]:
-    return [
-        {"label": tr("workbench.profiles.mode.weekday", lang), "value": PROFILE_MODE_WEEKDAY},
-        {"label": tr("workbench.profiles.mode.total", lang), "value": PROFILE_MODE_TOTAL},
-        {"label": tr("workbench.profiles.mode.relative", lang), "value": PROFILE_MODE_RELATIVE},
-    ]
-
-
-def _relative_profile_type_options(lang: str) -> list[dict[str, str]]:
-    return [
-        {"label": tr("workbench.profiles.relative.type.residential", lang), "value": "residencial"},
-        {"label": tr("workbench.profiles.relative.type.industrial", lang), "value": "industrial"},
-        {"label": tr("workbench.profiles.relative.type.mixed", lang), "value": "mixta"},
-    ]
-
-
-def _demand_profile_mode_note(profile_mode: str, lang: str) -> str:
-    normalized = normalize_profile_mode(profile_mode)
-    if normalized == PROFILE_MODE_WEEKDAY:
-        return tr("workbench.profiles.mode.note.weekday", lang)
-    if normalized == PROFILE_MODE_RELATIVE:
-        return tr("workbench.profiles.mode.note.relative", lang)
-    return tr("workbench.profiles.mode.note.total", lang)
-
-
-def _profile_control_updates(
-    base_config: dict[str, object],
-    *,
-    assumption_input_ids,
-    assumption_values,
-    mode_value,
-    alpha_mix_value,
-    e_month_value,
-) -> dict[str, object]:
-    updates = collect_config_updates(assumption_input_ids, assumption_values, base_config)
-    updates["use_excel_profile"] = normalize_profile_mode(mode_value if mode_value is not None else updates.get("use_excel_profile"))
-    updates["alpha_mix"] = clamp_alpha_mix(alpha_mix_value if alpha_mix_value is not None else updates.get("alpha_mix"))
-    updates["E_month_kWh"] = coerce_month_energy(e_month_value if e_month_value is not None else updates.get("E_month_kWh"))
-    return updates
-
-
-def _build_demand_profile_ui_state(
-    *,
-    bundle,
-    lang: str,
-    profile_mode_value=None,
-    relative_profile_type_value=None,
-    alpha_mix_value=None,
-    e_month_value=None,
-    weekday_rows=None,
-    total_rows=None,
-    relative_rows=None,
-) -> dict[str, object]:
-    profile_mode = normalize_profile_mode(
-        profile_mode_value if profile_mode_value is not None else bundle.config.get("use_excel_profile", PROFILE_MODE_TOTAL)
-    )
-    alpha_mix = clamp_alpha_mix(alpha_mix_value if alpha_mix_value is not None else bundle.config.get("alpha_mix", 0.5))
-    e_month_kwh = coerce_month_energy(e_month_value if e_month_value is not None else bundle.config.get("E_month_kWh", 0.0))
-
-    weekday_source = canonicalize_weekday_source(weekday_rows if weekday_rows is not None else bundle.demand_profile_table)
-    total_source = canonicalize_total_source(total_rows if total_rows is not None else bundle.demand_profile_general_table)
-    resolved_profile_type = normalize_profile_type(
-        relative_profile_type_value
-        if relative_profile_type_value is not None
-        else infer_relative_profile_type(relative_rows if relative_rows is not None else bundle.demand_profile_weights_table, alpha_mix=alpha_mix)
-    )
-    relative_source = derive_relative_profile(
-        relative_rows if relative_rows is not None else bundle.demand_profile_weights_table,
-        profile_type=resolved_profile_type,
-        alpha_mix=alpha_mix,
-        e_month_kwh=e_month_kwh,
-    )
-    total_preview = derive_total_preview_from_weekday(weekday_source)
-    relative_preview = relative_preview_from_source(
-        relative_source,
-        profile_type=resolved_profile_type,
-        alpha_mix=alpha_mix,
-        e_month_kwh=e_month_kwh,
-    )
-    visibility = demand_profile_visibility(profile_mode)
-
-    weekday_columns, weekday_tooltips = build_table_display_columns("demand_profile", list(weekday_source.columns), lang)
-    total_columns, total_tooltips = build_table_display_columns("demand_profile_general", list(total_source.columns), lang)
-    relative_columns, relative_tooltips = build_table_display_columns("demand_profile_weights", list(relative_source.columns), lang)
-    total_preview_columns, total_preview_tooltips = build_table_display_columns("demand_profile_general", list(total_preview.columns), lang)
-    relative_preview_columns, relative_preview_tooltips = build_table_display_columns("demand_profile_weights", list(relative_preview.columns), lang)
-    relative_chart = build_profile_chart(
-        "demand-profile-weights-editor",
-        frame_to_records(relative_source),
-        relative_columns,
-        lang,
-    )
-
-    return {
-        "profile_mode": profile_mode,
-        "profile_type": resolved_profile_type,
-        "alpha_mix": alpha_mix,
-        "e_month_kwh": e_month_kwh,
-        "weekday_source_rows": frame_to_records(weekday_source),
-        "total_source_rows": frame_to_records(total_source),
-        "relative_source_rows": frame_to_records(relative_source),
-        "total_preview_rows": frame_to_records(total_preview),
-        "relative_preview_rows": frame_to_records(relative_preview),
-        "weekday_columns": _mark_columns_readonly(weekday_columns, {"TOTAL_kWh"}),
-        "weekday_tooltips": weekday_tooltips,
-        "total_columns": _mark_columns_readonly(total_columns, {"TOTAL_kWh"}),
-        "total_tooltips": total_tooltips,
-        "relative_columns": _mark_columns_readonly(relative_columns, {"W_RES_BASE", "W_IND_BASE", "W_TOTAL", "TOTAL_kWh"}),
-        "relative_tooltips": relative_tooltips,
-        "total_preview_columns": _mark_all_columns_readonly(total_preview_columns),
-        "total_preview_tooltips": total_preview_tooltips,
-        "relative_preview_columns": _mark_all_columns_readonly(relative_preview_columns),
-        "relative_preview_tooltips": relative_preview_tooltips,
-        "visibility": visibility,
-        "mode_note": _demand_profile_mode_note(profile_mode, lang),
-        "alpha_shell_style": {"display": "block"} if profile_mode == PROFILE_MODE_RELATIVE and resolved_profile_type == PROFILE_TYPE_MIXED else {"display": "none"},
-        "relative_chart_style": {"display": "grid"} if profile_mode == PROFILE_MODE_RELATIVE else {"display": "none"},
-        "relative_chart_figure": relative_chart.figure,
-    }
+ADMIN_EXCLUDED_FIELDS = {"use_excel_profile", "alpha_mix", "E_month_kWh"}
 
 
 @callback(
@@ -446,8 +282,6 @@ def translate_admin_page_header(language_value):
     Output("apply-admin-btn", "children"),
     Output("profile-editor-title", "children"),
     Output("profile-editor-note", "children"),
-    Output("demand-profile-mode-title", "children"),
-    Output("demand-profile-mode-copy", "children"),
     Output("month-profile-title", "children"),
     Output("month-profile-tooltip", "children"),
     Output("sun-profile-title", "children"),
@@ -459,20 +293,6 @@ def translate_admin_page_header(language_value):
     Output("profile-demand-relocated-title", "children"),
     Output("profile-demand-relocated-copy", "children"),
     Output("profile-demand-relocated-link", "children"),
-    Output("demand-profile-title", "children"),
-    Output("demand-profile-tooltip", "children"),
-    Output("demand-profile-general-title", "children"),
-    Output("demand-profile-general-tooltip", "children"),
-    Output("demand-profile-general-preview-title", "children"),
-    Output("demand-profile-weights-title", "children"),
-    Output("demand-profile-weights-tooltip", "children"),
-    Output("demand-profile-type-label", "children"),
-    Output("demand-profile-alpha-label", "children"),
-    Output("demand-profile-energy-label", "children"),
-    Output("demand-profile-weights-preview-title", "children"),
-    Output("demand-profile-weights-preview-copy", "children"),
-    Output("demand-profile-relative-chart-title", "children"),
-    Output("demand-profile-relative-chart-copy", "children"),
     Output("add-price-kwp-row-btn", "children"),
     Output("add-price-kwp-others-row-btn", "children"),
     Output("catalog-editor-title", "children"),
@@ -489,8 +309,6 @@ def translate_admin_secure_content(language_value):
         tr("workbench.assumptions.apply", lang),
         tr("workbench.profiles", lang),
         tr("workbench.profiles.note", lang),
-        tr("workbench.profiles.mode.title", lang),
-        tr("workbench.profiles.mode.copy", lang),
         tr("workbench.profiles.month", lang),
         tr("workbench.profiles.tooltip.month", lang),
         tr("workbench.profiles.sun", lang),
@@ -502,20 +320,6 @@ def translate_admin_secure_content(language_value):
         tr("workspace.assumptions.demand.title", lang),
         tr("workspace.admin.demand_moved.copy", lang),
         tr("workspace.admin.demand_moved.link", lang),
-        tr("workbench.profiles.demand_weekday", lang),
-        tr("workbench.profiles.tooltip.demand_weekday", lang),
-        tr("workbench.profiles.demand_general", lang),
-        tr("workbench.profiles.tooltip.demand_general", lang),
-        tr("workbench.profiles.demand_general_preview", lang),
-        tr("workbench.profiles.demand_weights", lang),
-        tr("workbench.profiles.tooltip.demand_weights", lang),
-        tr("workbench.profiles.relative.type", lang),
-        tr("workbench.profiles.relative.alpha", lang),
-        tr("workbench.profiles.relative.energy", lang),
-        tr("workbench.profiles.relative.preview", lang),
-        tr("workbench.profiles.relative.preview.copy", lang),
-        tr("workbench.profiles.relative.chart", lang),
-        tr("workbench.profiles.relative.chart.copy", lang),
         tr("workbench.profiles.add_row", lang),
         tr("workbench.profiles.add_row", lang),
         tr("workbench.catalogs", lang),
@@ -558,35 +362,6 @@ def translate_profile_table_activators(language_value, activator_ids=None):
     Output("price-kwp-others-editor", "data"),
     Output("price-kwp-others-editor", "columns"),
     Output("price-kwp-others-editor", "tooltip_header"),
-    Output("demand-profile-mode-selector", "options"),
-    Output("demand-profile-mode-selector", "value"),
-    Output("demand-profile-type-selector", "options"),
-    Output("demand-profile-type-selector", "value"),
-    Output("demand-profile-alpha-slider", "value"),
-    Output("demand-profile-energy-input", "value"),
-    Output("demand-profile-mode-note", "children"),
-    Output("demand-profile-editor", "data"),
-    Output("demand-profile-editor", "columns"),
-    Output("demand-profile-editor", "tooltip_header"),
-    Output("demand-profile-general-editor", "data"),
-    Output("demand-profile-general-editor", "columns"),
-    Output("demand-profile-general-editor", "tooltip_header"),
-    Output("demand-profile-general-preview-editor", "data"),
-    Output("demand-profile-general-preview-editor", "columns"),
-    Output("demand-profile-general-preview-editor", "tooltip_header"),
-    Output("demand-profile-weights-editor", "data"),
-    Output("demand-profile-weights-editor", "columns"),
-    Output("demand-profile-weights-editor", "tooltip_header"),
-    Output("demand-profile-weights-preview-editor", "data"),
-    Output("demand-profile-weights-preview-editor", "columns"),
-    Output("demand-profile-weights-preview-editor", "tooltip_header"),
-    Output("demand-profile-panel", "style"),
-    Output("demand-profile-general-panel", "style"),
-    Output("demand-profile-general-preview-panel", "style"),
-    Output("demand-profile-weights-panel", "style"),
-    Output("demand-profile-alpha-shell", "style"),
-    Output("demand-profile-relative-chart-shell", "style"),
-    Output("demand-profile-relative-chart", "figure"),
     Input("scenario-session-store", "data"),
     Input("admin-show-all", "value", allow_optional=True),
     Input("language-selector", "value"),
@@ -594,11 +369,8 @@ def translate_profile_table_activators(language_value, activator_ids=None):
 def populate_admin_page(session_payload, show_all_values, language_value):
     lang = _lang(language_value)
     client_state, state, unlocked = _admin_session(session_payload, lang)
+    empty = ([], [], {})
     if not unlocked:
-        empty = ([], [], {})
-        mode_options = _demand_mode_options(lang)
-        type_options = _relative_profile_type_options(lang)
-        hidden = {"display": "none"}
         return (
             render_assumption_sections(
                 [],
@@ -616,32 +388,9 @@ def populate_admin_page(session_payload, show_all_values, language_value):
             *empty,
             *empty,
             *empty,
-            mode_options,
-            PROFILE_MODE_TOTAL,
-            type_options,
-            PROFILE_TYPE_MIXED,
-            0.5,
-            0,
-            _demand_profile_mode_note(PROFILE_MODE_TOTAL, lang),
-            *empty,
-            *empty,
-            *empty,
-            *empty,
-            *empty,
-            hidden,
-            hidden,
-            hidden,
-            hidden,
-            hidden,
-            hidden,
-            go.Figure(),
         )
     active = state.get_scenario()
     if active is None:
-        empty = ([], [], {})
-        mode_options = _demand_mode_options(lang)
-        type_options = _relative_profile_type_options(lang)
-        hidden = {"display": "none"}
         return (
             render_assumption_sections(
                 [],
@@ -659,25 +408,6 @@ def populate_admin_page(session_payload, show_all_values, language_value):
             *empty,
             *empty,
             *empty,
-            mode_options,
-            PROFILE_MODE_TOTAL,
-            type_options,
-            PROFILE_TYPE_MIXED,
-            0.5,
-            0,
-            _demand_profile_mode_note(PROFILE_MODE_TOTAL, lang),
-            *empty,
-            *empty,
-            *empty,
-            *empty,
-            *empty,
-            hidden,
-            hidden,
-            hidden,
-            hidden,
-            hidden,
-            hidden,
-            go.Figure(),
         )
 
     display_bundle = resolve_workspace_bundle_for_display(client_state.session_id, active.scenario_id, active.config_bundle)
@@ -685,10 +415,9 @@ def populate_admin_page(session_payload, show_all_values, language_value):
         display_bundle,
         lang=lang,
         show_all="all" in (show_all_values or []),
-        exclude_fields=ADMIN_PROFILE_CONFIG_FIELDS,
+        exclude_fields=ADMIN_EXCLUDED_FIELDS,
     )
     partition = partition_assumption_sections(all_sections)
-    demand_state = _build_demand_profile_ui_state(bundle=display_bundle, lang=lang)
     inverter_columns, inverter_tooltips = build_table_display_columns("inverter_catalog", list(display_bundle.inverter_catalog.columns), lang)
     battery_columns, battery_tooltips = build_table_display_columns("battery_catalog", list(display_bundle.battery_catalog.columns), lang)
     month_columns, month_tooltips = build_table_display_columns("month_profile", list(display_bundle.month_profile_table.columns), lang)
@@ -724,113 +453,6 @@ def populate_admin_page(session_payload, show_all_values, language_value):
         display_bundle.cop_kwp_table_others.to_dict("records"),
         kwp_other_columns,
         kwp_other_tooltips,
-        _demand_mode_options(lang),
-        demand_state["profile_mode"],
-        _relative_profile_type_options(lang),
-        demand_state["profile_type"],
-        demand_state["alpha_mix"],
-        demand_state["e_month_kwh"],
-        demand_state["mode_note"],
-        demand_state["weekday_source_rows"],
-        demand_state["weekday_columns"],
-        demand_state["weekday_tooltips"],
-        demand_state["total_source_rows"],
-        demand_state["total_columns"],
-        demand_state["total_tooltips"],
-        demand_state["total_preview_rows"],
-        demand_state["total_preview_columns"],
-        demand_state["total_preview_tooltips"],
-        demand_state["relative_source_rows"],
-        demand_state["relative_columns"],
-        demand_state["relative_tooltips"],
-        demand_state["relative_preview_rows"],
-        demand_state["relative_preview_columns"],
-        demand_state["relative_preview_tooltips"],
-        demand_state["visibility"]["demand-profile-panel"],
-        demand_state["visibility"]["demand-profile-general-panel"],
-        demand_state["visibility"]["demand-profile-general-preview-panel"],
-        demand_state["visibility"]["demand-profile-weights-panel"],
-        demand_state["alpha_shell_style"],
-        demand_state["relative_chart_style"],
-        demand_state["relative_chart_figure"],
-    )
-
-
-@callback(
-    Output("demand-profile-editor", "data", allow_duplicate=True),
-    Output("demand-profile-general-editor", "data", allow_duplicate=True),
-    Output("demand-profile-general-preview-editor", "data", allow_duplicate=True),
-    Output("demand-profile-weights-editor", "data", allow_duplicate=True),
-    Output("demand-profile-weights-preview-editor", "data", allow_duplicate=True),
-    Output("demand-profile-panel", "style", allow_duplicate=True),
-    Output("demand-profile-general-panel", "style", allow_duplicate=True),
-    Output("demand-profile-general-preview-panel", "style", allow_duplicate=True),
-    Output("demand-profile-weights-panel", "style", allow_duplicate=True),
-    Output("demand-profile-mode-note", "children", allow_duplicate=True),
-    Output("demand-profile-alpha-shell", "style", allow_duplicate=True),
-    Output("demand-profile-relative-chart-shell", "style", allow_duplicate=True),
-    Output("demand-profile-relative-chart", "figure", allow_duplicate=True),
-    Input("demand-profile-mode-selector", "value"),
-    Input("demand-profile-type-selector", "value"),
-    Input("demand-profile-alpha-slider", "value"),
-    Input("demand-profile-energy-input", "value"),
-    Input("demand-profile-editor", "data_timestamp"),
-    Input("demand-profile-general-editor", "data_timestamp"),
-    Input("demand-profile-weights-editor", "data_timestamp"),
-    Input("language-selector", "value"),
-    State("scenario-session-store", "data"),
-    State("demand-profile-editor", "data"),
-    State("demand-profile-general-editor", "data"),
-    State("demand-profile-weights-editor", "data"),
-    prevent_initial_call=True,
-)
-def sync_admin_demand_profile_views(
-    profile_mode_value,
-    profile_type_value,
-    alpha_mix_value,
-    e_month_value,
-    _weekday_timestamp,
-    _total_timestamp,
-    _relative_timestamp,
-    language_value,
-    session_payload,
-    weekday_rows,
-    total_rows,
-    relative_rows,
-):
-    lang = _lang(language_value)
-    client_state, state, unlocked = _admin_session(session_payload, lang)
-    if not unlocked:
-        raise PreventUpdate
-    active = state.get_scenario()
-    if active is None:
-        raise PreventUpdate
-    display_bundle = resolve_workspace_bundle_for_display(client_state.session_id, active.scenario_id, active.config_bundle)
-    demand_state = _build_demand_profile_ui_state(
-        bundle=display_bundle,
-        lang=lang,
-        profile_mode_value=profile_mode_value,
-        relative_profile_type_value=profile_type_value,
-        alpha_mix_value=alpha_mix_value,
-        e_month_value=e_month_value,
-        weekday_rows=weekday_rows,
-        total_rows=total_rows,
-        relative_rows=relative_rows,
-    )
-    return (
-        demand_state["weekday_source_rows"],
-        demand_state["total_source_rows"],
-        demand_state["total_preview_rows"],
-        demand_state["relative_source_rows"],
-        demand_state["relative_preview_rows"],
-        demand_state["visibility"]["demand-profile-panel"],
-        demand_state["visibility"]["demand-profile-general-panel"],
-        demand_state["visibility"]["demand-profile-general-preview-panel"],
-        demand_state["visibility"]["demand-profile-weights-panel"],
-        demand_state["mode_note"],
-        demand_state["alpha_shell_style"],
-        demand_state["relative_chart_style"],
-        demand_state["relative_chart_figure"],
     )
 
 
@@ -947,36 +569,24 @@ def toggle_pricing_table_visibility(session_payload, assumption_input_ids, assum
     Input("scenario-session-store", "data"),
     Input({"type": "admin-assumption-input", "field": ALL}, "id"),
     Input({"type": "admin-assumption-input", "field": ALL}, "value"),
-    Input("demand-profile-mode-selector", "value", allow_optional=True),
-    Input("demand-profile-alpha-slider", "value", allow_optional=True),
-    Input("demand-profile-energy-input", "value", allow_optional=True),
     Input("inverter-table-editor", "data", allow_optional=True),
     Input("battery-table-editor", "data", allow_optional=True),
     Input("month-profile-editor", "data", allow_optional=True),
     Input("sun-profile-editor", "data", allow_optional=True),
     Input("price-kwp-editor", "data", allow_optional=True),
     Input("price-kwp-others-editor", "data", allow_optional=True),
-    Input("demand-profile-editor", "data", allow_optional=True),
-    Input("demand-profile-general-editor", "data", allow_optional=True),
-    Input("demand-profile-weights-editor", "data", allow_optional=True),
     prevent_initial_call=True,
 )
 def sync_admin_draft(
     session_payload,
     assumption_input_ids,
     assumption_values,
-    demand_profile_mode_value,
-    demand_profile_alpha_value,
-    demand_profile_energy_value,
     inverter_rows,
     battery_rows,
     month_profile_rows,
     sun_profile_rows,
     price_kwp_rows,
     price_kwp_others_rows,
-    demand_profile_rows,
-    demand_profile_general_rows,
-    demand_profile_weights_rows,
 ):
     client_state, state, unlocked = _admin_session(session_payload, None)
     if not unlocked:
@@ -984,19 +594,12 @@ def sync_admin_draft(
     active = state.get_scenario()
     if active is None:
         raise PreventUpdate
-    current_config = _profile_control_updates(
-        active.config_bundle.config,
-        assumption_input_ids=assumption_input_ids,
-        assumption_values=assumption_values,
-        mode_value=demand_profile_mode_value,
-        alpha_mix_value=demand_profile_alpha_value,
-        e_month_value=demand_profile_energy_value,
-    )
+    current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
     owned_fields = {
         str(component_id.get("field", "")).strip()
         for component_id in (assumption_input_ids or [])
         if str(component_id.get("field", "")).strip()
-    } | ADMIN_PROFILE_CONFIG_FIELDS
+    }
     overrides = {
         field: current_config.get(field)
         for field in owned_fields
@@ -1011,9 +614,6 @@ def sync_admin_draft(
             "sun_profile": sun_profile_rows,
             "cop_kwp_table": price_kwp_rows,
             "cop_kwp_table_others": price_kwp_others_rows,
-            "demand_profile": demand_profile_rows,
-            "demand_profile_general": demand_profile_general_rows,
-            "demand_profile_weights": demand_profile_weights_rows,
         },
     )
     draft = upsert_workspace_draft(
@@ -1035,11 +635,8 @@ def sync_admin_draft(
     Input({"type": "profile-table-activate", "table": ALL}, "n_clicks"),
     Input("month-profile-editor", "active_cell", allow_optional=True),
     Input("sun-profile-editor", "active_cell", allow_optional=True),
-    Input("demand-profile-weights-editor", "active_cell", allow_optional=True),
     Input("price-kwp-editor", "active_cell", allow_optional=True),
     Input("price-kwp-others-editor", "active_cell", allow_optional=True),
-    Input("demand-profile-editor", "active_cell", allow_optional=True),
-    Input("demand-profile-general-editor", "active_cell", allow_optional=True),
     State({"type": "profile-table-activate", "table": ALL}, "id"),
     State("active-profile-table-state", "data"),
     prevent_initial_call=True,
@@ -1048,11 +645,8 @@ def sync_active_profile_table(
     _activator_clicks,
     month_active_cell,
     sun_active_cell,
-    demand_weights_active_cell,
     price_active_cell,
     price_others_active_cell,
-    demand_weekday_active_cell,
-    demand_general_active_cell,
     activator_ids,
     active_state,
 ):
@@ -1066,11 +660,8 @@ def sync_active_profile_table(
     active_cells = {
         "month-profile-editor": month_active_cell,
         "sun-profile-editor": sun_active_cell,
-        "demand-profile-weights-editor": demand_weights_active_cell,
         "price-kwp-editor": price_active_cell,
         "price-kwp-others-editor": price_others_active_cell,
-        "demand-profile-editor": demand_weekday_active_cell,
-        "demand-profile-general-editor": demand_general_active_cell,
     }
     if isinstance(trigger, dict) and trigger.get("type") == "profile-table-activate":
         table_id = str(trigger.get("table", "")).strip() or None
@@ -1093,18 +684,12 @@ def sync_active_profile_table(
     Input("active-profile-table-state", "data"),
     Input("price-kwp-panel", "style", allow_optional=True),
     Input("price-kwp-others-panel", "style", allow_optional=True),
-    Input("demand-profile-panel", "style", allow_optional=True),
-    Input("demand-profile-general-panel", "style", allow_optional=True),
-    Input("demand-profile-weights-panel", "style", allow_optional=True),
     prevent_initial_call=True,
 )
 def sanitize_active_profile_table(
     active_state,
     price_kwp_style,
     price_kwp_others_style,
-    demand_profile_style,
-    demand_profile_general_style,
-    demand_profile_weights_style,
 ):
     active_table_id = str((active_state or {}).get("table_id") or "").strip() or None
     if active_table_id is None:
@@ -1112,9 +697,6 @@ def sanitize_active_profile_table(
     hidden_tables = _hidden_profile_tables(
         price_kwp_style,
         price_kwp_others_style,
-        demand_profile_style,
-        demand_profile_general_style,
-        demand_profile_weights_style,
     )
     if active_table_id in hidden_tables:
         return _active_profile_table_state()
@@ -1132,32 +714,20 @@ def sanitize_active_profile_table(
     Output("profile-secondary-chart-graph", "figure"),
     Output("month-profile-card", "className"),
     Output("sun-profile-card", "className"),
-    Output("demand-profile-weights-card", "className"),
     Output("price-kwp-card", "className"),
     Output("price-kwp-others-card", "className"),
-    Output("demand-profile-card", "className"),
-    Output("demand-profile-general-card", "className"),
     Input("active-profile-table-state", "data"),
     Input("month-profile-editor", "data", allow_optional=True),
     Input("month-profile-editor", "columns", allow_optional=True),
     Input("sun-profile-editor", "data", allow_optional=True),
     Input("sun-profile-editor", "columns", allow_optional=True),
-    Input("demand-profile-weights-editor", "data", allow_optional=True),
-    Input("demand-profile-weights-editor", "columns", allow_optional=True),
     Input("price-kwp-editor", "data", allow_optional=True),
     Input("price-kwp-editor", "columns", allow_optional=True),
     Input("price-kwp-others-editor", "data", allow_optional=True),
     Input("price-kwp-others-editor", "columns", allow_optional=True),
-    Input("demand-profile-editor", "data", allow_optional=True),
-    Input("demand-profile-editor", "columns", allow_optional=True),
-    Input("demand-profile-general-editor", "data", allow_optional=True),
-    Input("demand-profile-general-editor", "columns", allow_optional=True),
     Input("language-selector", "value"),
     Input("price-kwp-panel", "style", allow_optional=True),
     Input("price-kwp-others-panel", "style", allow_optional=True),
-    Input("demand-profile-panel", "style", allow_optional=True),
-    Input("demand-profile-general-panel", "style", allow_optional=True),
-    Input("demand-profile-weights-panel", "style", allow_optional=True),
 )
 def render_active_profile_chart(
     active_state,
@@ -1165,30 +735,18 @@ def render_active_profile_chart(
     month_columns,
     sun_rows,
     sun_columns,
-    demand_weights_rows,
-    demand_weights_columns,
     price_rows,
     price_columns,
     price_others_rows,
     price_others_columns,
-    demand_weekday_rows,
-    demand_weekday_columns,
-    demand_general_rows,
-    demand_general_columns,
     language_value,
     price_kwp_style,
     price_kwp_others_style,
-    demand_profile_style,
-    demand_profile_general_style,
-    demand_profile_weights_style,
 ):
     lang = _lang(language_value)
     hidden_tables = _hidden_profile_tables(
         price_kwp_style,
         price_kwp_others_style,
-        demand_profile_style,
-        demand_profile_general_style,
-        demand_profile_weights_style,
     )
     active_table_id = str((active_state or {}).get("table_id") or "").strip() or None
     if active_table_id in hidden_tables:
@@ -1211,20 +769,14 @@ def render_active_profile_chart(
     table_rows = {
         "month-profile-editor": month_rows,
         "sun-profile-editor": sun_rows,
-        "demand-profile-weights-editor": demand_weights_rows,
         "price-kwp-editor": price_rows,
         "price-kwp-others-editor": price_others_rows,
-        "demand-profile-editor": demand_weekday_rows,
-        "demand-profile-general-editor": demand_general_rows,
     }
     table_columns = {
         "month-profile-editor": month_columns,
         "sun-profile-editor": sun_columns,
-        "demand-profile-weights-editor": demand_weights_columns,
         "price-kwp-editor": price_columns,
         "price-kwp-others-editor": price_others_columns,
-        "demand-profile-editor": demand_weekday_columns,
-        "demand-profile-general-editor": demand_general_columns,
     }
     render = build_profile_chart(active_table_id, table_rows.get(active_table_id), table_columns.get(active_table_id), lang)
     visible_style = {"display": "grid"}
@@ -1325,18 +877,12 @@ def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
     State("project-name-input", "value"),
     State({"type": "admin-assumption-input", "field": ALL}, "id"),
     State({"type": "admin-assumption-input", "field": ALL}, "value"),
-    State("demand-profile-mode-selector", "value", allow_optional=True),
-    State("demand-profile-alpha-slider", "value", allow_optional=True),
-    State("demand-profile-energy-input", "value", allow_optional=True),
     State("inverter-table-editor", "data", allow_optional=True),
     State("battery-table-editor", "data", allow_optional=True),
     State("month-profile-editor", "data", allow_optional=True),
     State("sun-profile-editor", "data", allow_optional=True),
     State("price-kwp-editor", "data", allow_optional=True),
     State("price-kwp-others-editor", "data", allow_optional=True),
-    State("demand-profile-editor", "data", allow_optional=True),
-    State("demand-profile-general-editor", "data", allow_optional=True),
-    State("demand-profile-weights-editor", "data", allow_optional=True),
     State("language-selector", "value"),
     prevent_initial_call=True,
 )
@@ -1346,18 +892,12 @@ def apply_admin_edits(
     project_name_value,
     assumption_input_ids,
     assumption_values,
-    demand_profile_mode_value,
-    demand_profile_alpha_value,
-    demand_profile_energy_value,
     inverter_rows,
     battery_rows,
     month_profile_rows,
     sun_profile_rows,
     price_kwp_rows,
     price_kwp_others_rows,
-    demand_profile_rows,
-    demand_profile_general_rows,
-    demand_profile_weights_rows,
     language_value,
 ):
     lang = _lang(language_value)
@@ -1368,19 +908,12 @@ def apply_admin_edits(
         active = state.get_scenario()
         if active is None:
             raise PreventUpdate
-        current_config = _profile_control_updates(
-            active.config_bundle.config,
-            assumption_input_ids=assumption_input_ids,
-            assumption_values=assumption_values,
-            mode_value=demand_profile_mode_value,
-            alpha_mix_value=demand_profile_alpha_value,
-            e_month_value=demand_profile_energy_value,
-        )
+        current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
         owned_fields = {
             str(component_id.get("field", "")).strip()
             for component_id in (assumption_input_ids or [])
             if str(component_id.get("field", "")).strip()
-        } | ADMIN_PROFILE_CONFIG_FIELDS
+        }
         overrides = {
             field: current_config.get(field)
             for field in owned_fields
@@ -1395,9 +928,6 @@ def apply_admin_edits(
                 "sun_profile": sun_profile_rows,
                 "cop_kwp_table": price_kwp_rows,
                 "cop_kwp_table_others": price_kwp_others_rows,
-                "demand_profile": demand_profile_rows,
-                "demand_profile_general": demand_profile_general_rows,
-                "demand_profile_weights": demand_profile_weights_rows,
             },
         )
         upsert_workspace_draft(

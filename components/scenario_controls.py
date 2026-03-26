@@ -69,6 +69,12 @@ def scenario_sidebar() -> html.Div:
                     html.Label(tr("workbench.project.open_label", "es"), id="project-dropdown-label", className="input-label", style={"marginTop": "0.75rem"}),
                     dcc.Dropdown(id="project-dropdown", placeholder=tr("workbench.project.none", "es")),
                     html.Div(
+                        "",
+                        id="project-empty-note",
+                        className="status-line sidebar-note",
+                        style={"display": "none"},
+                    ),
+                    html.Div(
                         className="controls",
                         style={"marginTop": "0.75rem"},
                         children=[
@@ -89,13 +95,23 @@ def scenario_sidebar() -> html.Div:
                         className="section-head",
                         children=[html.H3(tr("workbench.active_scenario", "es"), id="active-scenario-label")],
                     ),
+                    html.Div(
+                        id="scenario-start-card",
+                        className="sidebar-start-card",
+                        children=[
+                            html.H4(tr("workbench.sidebar.start.title", "es"), id="scenario-start-title"),
+                            html.P("", id="scenario-start-copy", className="section-copy sidebar-start-copy"),
+                        ],
+                    ),
                     dcc.Upload(
                         id="scenario-upload",
                         children=html.Div(
-                            [
-                                html.Span(tr("workbench.upload.prefix", "es"), id="scenario-upload-prefix"),
-                                html.Span(tr("workbench.upload.link", "es"), id="scenario-upload-link", className="link"),
-                            ]
+                            className="upload-box-content",
+                            children=[
+                                html.Div(tr("workbench.import_excel.title", "es"), id="scenario-upload-title", className="upload-box-title"),
+                                html.Div(tr("workbench.import_excel.copy", "es"), id="scenario-upload-copy", className="upload-box-copy"),
+                                html.Div(tr("workbench.import_excel.action", "es"), id="scenario-upload-action", className="upload-box-action"),
+                            ],
                         ),
                         multiple=False,
                         className="upload-box",
@@ -103,17 +119,24 @@ def scenario_sidebar() -> html.Div:
                     html.Div(
                         className="controls",
                         children=[
-                            html.Button(tr("workbench.new_scenario", "es"), id="new-scenario-btn", n_clicks=0, className="action-btn"),
+                            html.Button(tr("workbench.load_example", "es"), id="new-scenario-btn", n_clicks=0, className="action-btn"),
                             html.Button(tr("workbench.duplicate", "es"), id="duplicate-scenario-btn", n_clicks=0, className="action-btn tertiary"),
                             html.Button(tr("workbench.delete", "es"), id="delete-scenario-btn", n_clicks=0, className="action-btn tertiary"),
                         ],
                     ),
                     html.Div(id="scenario-overview-list", className="scenario-list"),
-                    html.Div(tr("workbench.rename_active_note", "es"), id="rename-scenario-note", className="status-line sidebar-note"),
-                    html.Div(className="rename-row", children=[
-                        dcc.Input(id="rename-scenario-input", type="text", placeholder=tr("workbench.rename_placeholder", "es"), className="text-input"),
-                        html.Button(tr("workbench.rename", "es"), id="rename-scenario-btn", n_clicks=0, className="action-btn tertiary"),
-                    ]),
+                    html.Div("", id="scenario-empty-note", className="status-line sidebar-note", style={"display": "none"}),
+                    html.Div(
+                        id="scenario-rename-shell",
+                        className="sidebar-rename-shell",
+                        children=[
+                            html.Div(tr("workbench.rename_active_note", "es"), id="rename-scenario-note", className="status-line sidebar-note"),
+                            html.Div(className="rename-row", children=[
+                                dcc.Input(id="rename-scenario-input", type="text", placeholder=tr("workbench.rename_placeholder", "es"), className="text-input"),
+                                html.Button(tr("workbench.rename", "es"), id="rename-scenario-btn", n_clicks=0, className="action-btn tertiary"),
+                            ]),
+                        ],
+                    ),
                     html.Div(tr("workbench.run_pending", "es"), id="workbench-status", className="status-line"),
                 ],
             ),

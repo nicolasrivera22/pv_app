@@ -99,8 +99,10 @@ def _workspace_state_strip_children(*, state, active, session_id: str, lang: str
     Output("save-project-btn", "children"),
     Output("save-project-as-btn", "children"),
     Output("open-project-btn", "children"),
-    Output("scenario-upload-prefix", "children"),
-    Output("scenario-upload-link", "children"),
+    Output("scenario-start-title", "children"),
+    Output("scenario-upload-title", "children"),
+    Output("scenario-upload-copy", "children"),
+    Output("scenario-upload-action", "children"),
     Output("new-scenario-btn", "children"),
     Output("duplicate-scenario-btn", "children"),
     Output("delete-scenario-btn", "children"),
@@ -126,9 +128,11 @@ def translate_workspace_shell(language_value):
         tr("workbench.project.save", lang),
         tr("workbench.project.save_as", lang),
         tr("workbench.project.open", lang),
-        tr("workbench.upload.prefix", lang),
-        tr("workbench.upload.link", lang),
-        tr("workbench.new_scenario", lang),
+        tr("workbench.sidebar.start.title", lang),
+        tr("workbench.import_excel.title", lang),
+        tr("workbench.import_excel.copy", lang),
+        tr("workbench.import_excel.action", lang),
+        tr("workbench.load_example", lang),
         tr("workbench.duplicate", lang),
         tr("workbench.delete", lang),
         tr("workbench.active_scenario", lang),
@@ -147,8 +151,18 @@ def translate_workspace_shell(language_value):
     Output("project-dropdown", "value"),
     Output("project-name-input", "value"),
     Output("project-status", "children"),
+    Output("project-empty-note", "children"),
+    Output("project-empty-note", "style"),
     Output("rename-scenario-input", "value"),
+    Output("duplicate-scenario-btn", "disabled"),
+    Output("delete-scenario-btn", "disabled"),
+    Output("rename-scenario-btn", "disabled"),
+    Output("scenario-rename-shell", "style"),
     Output("scenario-overview-list", "children"),
+    Output("scenario-start-copy", "children"),
+    Output("scenario-start-card", "style"),
+    Output("scenario-empty-note", "children"),
+    Output("scenario-empty-note", "style"),
     Output("workspace-active-name", "children"),
     Output("workspace-active-run-status", "children"),
     Output("workspace-project-status", "children"),
@@ -162,6 +176,8 @@ def populate_workspace_shell(session_payload, language_value):
     lang = _lang(language_value)
     client_state, state = _session(session_payload, lang)
     project_options = _project_options()
+    project_empty_note = tr("workbench.project.empty_note", lang)
+    project_empty_style = {"display": "block"} if not project_options else {"display": "none"}
     project_status = (
         tr("workbench.project.bound", lang, name=state.project_name or state.project_slug)
         if state.project_slug
@@ -196,8 +212,18 @@ def populate_workspace_shell(session_payload, language_value):
             state.project_slug,
             state.project_name or "",
             project_status,
+            project_empty_note,
+            project_empty_style,
             "",
+            True,
+            True,
+            True,
+            {"display": "none"},
             pills,
+            tr("workbench.sidebar.start.copy", lang),
+            {"display": "grid"},
+            tr("workbench.no_active_scenario", lang),
+            {"display": "block"},
             tr("workbench.no_active_scenario", lang),
             tr("workbench.run_pending", lang),
             project_status,
@@ -210,8 +236,18 @@ def populate_workspace_shell(session_payload, language_value):
         state.project_slug,
         state.project_name or "",
         project_status,
+        project_empty_note,
+        project_empty_style,
         active.name,
+        False,
+        False,
+        False,
+        {"display": "grid"},
         pills,
+        tr("workbench.sidebar.start.copy", lang),
+        {"display": "none"},
+        "",
+        {"display": "none"},
         tr("workspace.shell.active", lang, name=active.name, source=active.source_name),
         run_status,
         project_status,
@@ -277,10 +313,10 @@ def mutate_workspace_session(
         if trigger == "new-scenario-btn":
             bundle = load_example_config()
             name = default_scenario_name(state, prefix="Escenario" if lang == "es" else "Scenario")
-            record = create_scenario_record(name, bundle, source_name="default")
+            record = create_scenario_record(name, bundle, source_name=bundle.source_name)
             state = add_scenario(state, record, make_active=True)
             client_state = commit_client_session(client_state, state)
-            return client_state.to_payload(), tr("workbench.new_scenario_created", lang, name=record.name)
+            return client_state.to_payload(), tr("workbench.loaded_example", lang, name=record.name)
 
         if trigger == "open-project-btn":
             if not project_dropdown_value:
