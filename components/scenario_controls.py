@@ -75,6 +75,7 @@ def scenario_sidebar() -> html.Div:
                         type="text",
                         placeholder=tr("workbench.project.name_placeholder", "es"),
                         className="text-input",
+                        style={"padding": "0.1rem"},
                     ),
                     html.Label(tr("workbench.project.open_label", "es"), id="project-dropdown-label", className="input-label", style={"marginTop": "0.75rem"}),
                     dcc.Dropdown(id="project-dropdown", placeholder=tr("workbench.project.none", "es")),

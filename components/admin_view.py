@@ -124,6 +124,7 @@ def admin_locked_card(
                 type="password",
                 placeholder=tr("workspace.admin.locked.pin_placeholder", lang),
                 className="text-input",
+                style={"padding-bottom": "0.5rem"}
             ),
             html.Div(
                 className="controls",

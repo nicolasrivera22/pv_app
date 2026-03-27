@@ -427,6 +427,38 @@ def test_populate_admin_page_renders_visible_admin_tables_for_example_bundle(mon
     assert _find_pattern_component(rendered_sections, "admin-assumption-input") is not None
 
 
+def test_populate_admin_page_rehydrates_immediately_after_unlock_with_same_session_payload(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    client_state = _admin_client_state("es")
+    set_admin_pin("2468")
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = commit_client_session(client_state, state).to_payload()
+
+    locked_outputs = populate_admin_page(payload, [], "es")
+    assert locked_outputs[1] is True
+    assert locked_outputs[2] == []
+
+    grant_admin_session_access(client_state.session_id)
+
+    unlocked_outputs = populate_admin_page(
+        payload,
+        [],
+        "es",
+        {"revision": 1, "message_key": "workspace.admin.locked.unlocked", "tone": "success"},
+    )
+
+    assert unlocked_outputs[1] is False
+    assert unlocked_outputs[2]
+    assert unlocked_outputs[5]
+    assert unlocked_outputs[8]
+    assert unlocked_outputs[11]
+    assert unlocked_outputs[14]
+    assert unlocked_outputs[17]
+
+
 def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()

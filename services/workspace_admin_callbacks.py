@@ -378,9 +378,11 @@ def translate_profile_table_activators(language_value, activator_ids=None):
     Input("scenario-session-store", "data"),
     Input("admin-show-all", "value", allow_optional=True),
     Input("language-selector", "value"),
+    Input("admin-access-meta", "data"),
 )
-def populate_admin_page(session_payload, show_all_values, language_value):
+def populate_admin_page(session_payload, show_all_values, language_value, access_meta=None):
     lang = _lang(language_value)
+    _access_meta = access_meta or {}
     if not _admin_page_access(session_payload).allowed:
         empty = ([], [], {})
         return (

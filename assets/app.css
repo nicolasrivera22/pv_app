@@ -798,6 +798,7 @@ body {
     font-size: 0.92rem;
     font-weight: 600;
     color: #334155;
+    /* padding: 0.35rem 0.95rem; */
 }
 
 .text-input {
