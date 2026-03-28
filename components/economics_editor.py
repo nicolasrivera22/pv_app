@@ -139,14 +139,6 @@ def economics_editor_section(*, lang: str = "es") -> html.Div:
                                         className="profile-table-actions",
                                         children=[
                                             html.Button(
-                                                tr("workspace.admin.economics.sync_hardware", lang),
-                                                id="sync-economics-hardware-costs-btn",
-                                                n_clicks=0,
-                                                className="action-btn tertiary profile-inline-btn",
-                                                disabled=True,
-                                                style={"display": "none"},
-                                            ),
-                                            html.Button(
                                                 tr("workbench.profiles.add_row", lang),
                                                 id="add-economics-cost-row-btn",
                                                 n_clicks=0,

@@ -349,7 +349,6 @@ def translate_admin_page_header(language_value):
     Output("add-price-kwp-others-row-btn", "children"),
     Output("add-economics-cost-row-btn", "children"),
     Output("add-economics-price-row-btn", "children"),
-    Output("sync-economics-hardware-costs-btn", "children"),
     Output("add-inverter-row-btn", "children"),
     Output("add-battery-row-btn", "children"),
     Output("add-panel-row-btn", "children"),
@@ -364,7 +363,6 @@ def translate_admin_secure_content(language_value):
         tr("workbench.profiles.add_row", lang),
         tr("workbench.profiles.add_row", lang),
         tr("workbench.profiles.add_row", lang),
-        tr("workspace.admin.economics.sync_hardware", lang),
         tr("workbench.add_row", lang),
         tr("workbench.add_row", lang),
         tr("workbench.add_row", lang),
@@ -1046,31 +1044,6 @@ def add_economics_price_row(n_clicks, table_rows, table_columns):
     rows = list(table_rows or [])
     rows.append(blank_row)
     return rows
-
-
-@callback(
-    Output("economics-cost-items-editor", "data", allow_duplicate=True),
-    Input("sync-economics-hardware-costs-btn", "n_clicks", allow_optional=True),
-    State("scenario-session-store", "data"),
-    State({"type": "admin-assumption-input", "field": ALL}, "id"),
-    State({"type": "admin-assumption-input", "field": ALL}, "value"),
-    State("inverter-table-editor", "data", allow_optional=True),
-    State("battery-table-editor", "data", allow_optional=True),
-    State("panel-table-editor", "data", allow_optional=True),
-    State("economics-cost-items-editor", "data", allow_optional=True),
-    prevent_initial_call=True,
-)
-def sync_economics_hardware_costs(
-    n_clicks,
-    session_payload,
-    assumption_input_ids,
-    assumption_values,
-    inverter_rows,
-    battery_rows,
-    panel_rows,
-    economics_cost_rows,
-):
-    raise PreventUpdate
 
 
 @callback(

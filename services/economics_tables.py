@@ -12,6 +12,7 @@ VALID_ECONOMICS_COST_BASES = {"fixed_project", "per_kwp", "per_panel", "per_inve
 VALID_ECONOMICS_PRICE_LAYERS = {"commercial", "sale"}
 VALID_ECONOMICS_PRICE_METHODS = {"markup_pct", "fixed_project", "per_kwp"}
 ECONOMICS_PRICE_PERCENT_METHODS = {"markup_pct"}
+RICH_MIGRATION_NOTE_PREFIX = "Migrated from prior economics schema"
 
 _RICH_COST_STAGE_MAP = {"technical_cost": "technical", "installed_cost": "installed"}
 _RICH_PRICE_LAYER_MAP = {"commercial_offer": "commercial", "final_sale_price": "sale"}
@@ -149,8 +150,38 @@ def _rich_origin_note(*, stage: str, method: str, value: Any) -> str:
     if not _is_missing(value):
         parts.append(f"value={value}")
     if not parts:
-        return "Migrated from prior economics schema."
-    return f"Migrated from prior economics schema ({', '.join(parts)})."
+        return f"{RICH_MIGRATION_NOTE_PREFIX}."
+    return f"{RICH_MIGRATION_NOTE_PREFIX} ({', '.join(parts)})."
+
+
+def economics_note_has_rich_migration(note: Any) -> bool:
+    return RICH_MIGRATION_NOTE_PREFIX in _strip_text(note)
+
+
+def _recovery_note(*, field: str, raw_value: Any) -> str:
+    if _is_missing(raw_value):
+        return f"Recovered invalid row ({field}=empty)."
+    return f"Recovered invalid row ({field}={raw_value!r})."
+
+
+def _invalid_name_warning(table_name: str, row_number: int) -> str:
+    return f"{table_name} fila {row_number}: se desactivó por nombre vacío."
+
+
+def _invalid_bool_warning(table_name: str, row_number: int) -> str:
+    return f"{table_name} fila {row_number}: se desactivó por booleano inválido en 'enabled'."
+
+
+def _invalid_enum_warning(table_name: str, row_number: int, field_name: str) -> str:
+    return f"{table_name} fila {row_number}: se desactivó por enum inválido en '{field_name}'."
+
+
+def _invalid_value_warning(table_name: str, row_number: int, field_name: str) -> str:
+    return f"{table_name} fila {row_number}: se desactivó por valor inválido en '{field_name}'."
+
+
+def _rich_migration_warning(table_name: str, row_number: int, method_value: str) -> str:
+    return f"{table_name} fila {row_number}: migrada desde schema rico y desactivada por método no soportado '{method_value}'."
 
 
 def _normalize_cost_row(record: dict[str, Any], *, row_number: int) -> tuple[dict[str, Any] | None, list[str]]:
@@ -164,36 +195,42 @@ def _normalize_cost_row(record: dict[str, Any], *, row_number: int) -> tuple[dic
     raw_basis = _strip_text(record.get("basis"))
     raw_method = _strip_text(record.get("calculation_method"))
     raw_amount = record.get("amount_COP") if "amount_COP" in record else record.get("value")
+    raw_enabled = record.get("enabled")
     enabled, enabled_invalid = _parse_enabled(record.get("enabled"))
-
-    if not name:
-        issues.append(f"Economics_Cost_Items fila {row_number}: falta 'name'; la fila se ignora.")
-        return None, issues
 
     stage = _RICH_COST_STAGE_MAP.get(raw_stage, raw_stage)
     basis = raw_basis or _RICH_COST_BASIS_MAP.get(raw_method, raw_method)
     amount = _coerce_numeric(raw_amount)
+    if not name:
+        issues.append(_invalid_name_warning("Economics_Cost_Items", row_number))
+        notes = _append_note(notes, _recovery_note(field="name", raw_value=record.get("name")))
+        enabled = False
 
     if enabled_invalid:
-        issues.append(f"Economics_Cost_Items fila {row_number}: 'enabled' inválido; la fila se desactiva.")
+        issues.append(_invalid_bool_warning("Economics_Cost_Items", row_number))
+        notes = _append_note(notes, _recovery_note(field="enabled", raw_value=raw_enabled))
         enabled = False
 
     if stage not in VALID_ECONOMICS_COST_STAGES:
-        issues.append(f"Economics_Cost_Items fila {row_number}: 'stage' inválido; se usa fallback y la fila se desactiva.")
-        notes = _append_note(notes, _rich_origin_note(stage=raw_stage, method=raw_method or raw_basis, value=raw_amount))
+        issues.append(_invalid_enum_warning("Economics_Cost_Items", row_number, "stage"))
+        notes = _append_note(notes, _recovery_note(field="stage", raw_value=record.get("stage")))
         stage = _fallback_cost_stage(name)
         enabled = False
 
     if basis not in VALID_ECONOMICS_COST_BASES:
-        issues.append(f"Economics_Cost_Items fila {row_number}: base o método no soportado; la fila se desactiva.")
-        notes = _append_note(notes, _rich_origin_note(stage=raw_stage, method=raw_method or raw_basis, value=raw_amount))
+        if raw_basis:
+            issues.append(_invalid_enum_warning("Economics_Cost_Items", row_number, "basis"))
+            notes = _append_note(notes, _recovery_note(field="basis", raw_value=record.get("basis")))
+        else:
+            issues.append(_rich_migration_warning("Economics_Cost_Items", row_number, raw_method or "<empty>"))
+            notes = _append_note(notes, _rich_origin_note(stage=raw_stage, method=raw_method or raw_basis, value=raw_amount))
         basis = "fixed_project"
         amount = 0.0
         enabled = False
 
     if amount is None:
-        issues.append(f"Economics_Cost_Items fila {row_number}: 'amount_COP' debe ser numérico; la fila se desactiva.")
-        notes = _append_note(notes, _rich_origin_note(stage=raw_stage, method=raw_method or raw_basis, value=raw_amount))
+        issues.append(_invalid_value_warning("Economics_Cost_Items", row_number, "amount_COP"))
+        notes = _append_note(notes, _recovery_note(field="amount_COP", raw_value=raw_amount))
         amount = 0.0
         enabled = False
 
@@ -219,38 +256,44 @@ def _normalize_price_row(record: dict[str, Any], *, row_number: int) -> tuple[di
     raw_method = _strip_text(record.get("method"))
     raw_calculation_method = _strip_text(record.get("calculation_method"))
     raw_value = record.get("value")
+    raw_enabled = record.get("enabled")
     enabled, enabled_invalid = _parse_enabled(record.get("enabled"))
-
-    if not name:
-        issues.append(f"Economics_Price_Items fila {row_number}: falta 'name'; la fila se ignora.")
-        return None, issues
 
     layer = raw_layer or _RICH_PRICE_LAYER_MAP.get(raw_stage, raw_stage)
     method = raw_method or _RICH_PRICE_METHOD_MAP.get(raw_calculation_method, raw_calculation_method)
     numeric_value = _coerce_numeric(raw_value, allow_percent_text=method in ECONOMICS_PRICE_PERCENT_METHODS)
     if numeric_value is not None and method in ECONOMICS_PRICE_PERCENT_METHODS and abs(numeric_value) > 1.0:
         numeric_value = numeric_value / 100.0
+    if not name:
+        issues.append(_invalid_name_warning("Economics_Price_Items", row_number))
+        notes = _append_note(notes, _recovery_note(field="name", raw_value=record.get("name")))
+        enabled = False
 
     if enabled_invalid:
-        issues.append(f"Economics_Price_Items fila {row_number}: 'enabled' inválido; la fila se desactiva.")
+        issues.append(_invalid_bool_warning("Economics_Price_Items", row_number))
+        notes = _append_note(notes, _recovery_note(field="enabled", raw_value=raw_enabled))
         enabled = False
 
     if layer not in VALID_ECONOMICS_PRICE_LAYERS:
-        issues.append(f"Economics_Price_Items fila {row_number}: 'layer' inválido; se usa fallback y la fila se desactiva.")
-        notes = _append_note(notes, _rich_origin_note(stage=raw_stage or raw_layer, method=raw_calculation_method or raw_method, value=raw_value))
+        issues.append(_invalid_enum_warning("Economics_Price_Items", row_number, "layer"))
+        notes = _append_note(notes, _recovery_note(field="layer", raw_value=record.get("layer") or record.get("stage")))
         layer = _fallback_price_layer(name)
         enabled = False
 
     if method not in VALID_ECONOMICS_PRICE_METHODS:
-        issues.append(f"Economics_Price_Items fila {row_number}: método no soportado; la fila se desactiva.")
-        notes = _append_note(notes, _rich_origin_note(stage=raw_stage or raw_layer, method=raw_calculation_method or raw_method, value=raw_value))
+        if raw_method:
+            issues.append(_invalid_enum_warning("Economics_Price_Items", row_number, "method"))
+            notes = _append_note(notes, _recovery_note(field="method", raw_value=record.get("method")))
+        else:
+            issues.append(_rich_migration_warning("Economics_Price_Items", row_number, raw_calculation_method or "<empty>"))
+            notes = _append_note(notes, _rich_origin_note(stage=raw_stage or raw_layer, method=raw_calculation_method or raw_method, value=raw_value))
         method = "fixed_project"
         numeric_value = 0.0
         enabled = False
 
     if numeric_value is None:
-        issues.append(f"Economics_Price_Items fila {row_number}: 'value' debe ser numérico; la fila se desactiva.")
-        notes = _append_note(notes, _rich_origin_note(stage=raw_stage or raw_layer, method=raw_calculation_method or raw_method, value=raw_value))
+        issues.append(_invalid_value_warning("Economics_Price_Items", row_number, "value"))
+        notes = _append_note(notes, _recovery_note(field="value", raw_value=raw_value))
         numeric_value = 0.0
         enabled = False
 

@@ -3,14 +3,15 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from dash.exceptions import PreventUpdate
 import pandas as pd
 import pandas.testing as pdt
 import pytest
 
 from components.economics_editor import economics_editor_section
+import services.workspace_admin_callbacks as admin_callbacks
 from services import (
     ScenarioSessionState,
+    ValidationIssue,
     add_scenario,
     bootstrap_client_session,
     clear_all_admin_session_access,
@@ -23,16 +24,18 @@ from services import (
     grant_admin_session_access,
     load_example_config,
     open_project,
+    refresh_bundle_issues,
     resolve_client_session,
     resolve_deterministic_scan,
     save_project,
     set_admin_pin,
 )
+from services.economics_tables import RICH_MIGRATION_NOTE_PREFIX, normalize_economics_cost_items_with_issues
 from services.project_io import projects_root
+from services.validation import localize_validation_message, validate_economics_tables
 from services.workspace_admin_callbacks import (
     apply_admin_edits,
     sync_admin_draft,
-    sync_economics_hardware_costs,
 )
 
 
@@ -255,8 +258,18 @@ def test_open_rich_economics_schema_migrates_in_memory_only_and_rewrites_on_save
     assert float(reopened_active.config_bundle.economics_price_items_table.iloc[0]["value"]) == pytest.approx(0.19)
     assert bool(reopened_active.config_bundle.economics_price_items_table.iloc[1]["enabled"]) is False
     assert "tax_pct" in str(reopened_active.config_bundle.economics_price_items_table.iloc[1]["notes"])
-    assert any(issue.field == "economics_cost_items" for issue in reopened_active.config_bundle.issues)
-    assert any(issue.field == "economics_price_items" for issue in reopened_active.config_bundle.issues)
+    cost_messages = [issue.message for issue in reopened_active.config_bundle.issues if issue.field == "economics_cost_items"]
+    price_messages = [issue.message for issue in reopened_active.config_bundle.issues if issue.field == "economics_price_items"]
+    assert "Economics_Cost_Items fila 2: migrada desde schema rico y desactivada por método no soportado 'pct_of_running_subtotal'." in cost_messages
+    assert "Economics_Cost_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in cost_messages
+    assert cost_messages.count(
+        "Economics_Cost_Items fila 2: migrada desde schema rico y desactivada por método no soportado 'pct_of_running_subtotal'."
+    ) == 1
+    assert "Economics_Price_Items fila 2: migrada desde schema rico y desactivada por método no soportado 'tax_pct'." in price_messages
+    assert "Economics_Price_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in price_messages
+    assert price_messages.count(
+        "Economics_Price_Items fila 2: migrada desde schema rico y desactivada por método no soportado 'tax_pct'."
+    ) == 1
 
     save_project(reopened, language="es")
     rewritten_cost = pd.read_csv(cost_path)
@@ -266,28 +279,204 @@ def test_open_rich_economics_schema_migrates_in_memory_only_and_rewrites_on_save
     assert list(rewritten_price.columns) == ["layer", "name", "method", "value", "enabled", "notes"]
     assert "calculation_method" not in rewritten_cost.columns
     assert "calculation_method" not in rewritten_price.columns
+    reopened_after_save = open_project(saved.project_slug)
+    reopened_after_save_active = reopened_after_save.get_scenario()
+
+    assert reopened_after_save_active is not None
+    post_save_cost_messages = [issue.message for issue in reopened_after_save_active.config_bundle.issues if issue.field == "economics_cost_items"]
+    post_save_price_messages = [issue.message for issue in reopened_after_save_active.config_bundle.issues if issue.field == "economics_price_items"]
+    assert "Economics_Cost_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in post_save_cost_messages
+    assert "Economics_Price_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in post_save_price_messages
+    assert not any("fila 2: migrada desde schema rico" in message for message in post_save_cost_messages)
+    assert not any("fila 2: migrada desde schema rico" in message for message in post_save_price_messages)
 
 
-def test_sync_economics_hardware_costs_is_hidden_and_inert(monkeypatch, tmp_path) -> None:
-    _client_state, _state, active, payload = _admin_payload(monkeypatch, tmp_path)
-    section = economics_editor_section(lang="es")
-    button = _find_component(section, "sync-economics-hardware-costs-btn")
+def test_normalize_invalid_economics_rows_preserves_disabled_row_and_source_row_number() -> None:
+    frame, issues = normalize_economics_cost_items_with_issues(
+        [
+            {"stage": "", "name": "", "basis": "", "amount_COP": "", "enabled": "", "notes": ""},
+            {"stage": "technical", "name": "   ", "basis": "per_kwp", "amount_COP": "oops", "enabled": True, "notes": "manual import"},
+            {"stage": "installed", "name": "Mano de obra", "basis": "per_kwp", "amount_COP": 12000, "enabled": True, "notes": ""},
+        ]
+    )
 
-    assert button is not None
-    assert button.disabled is True
-    assert button.style == {"display": "none"}
+    assert len(frame) == 2
+    invalid_row = frame.iloc[0]
+    assert invalid_row["name"] == ""
+    assert bool(invalid_row["enabled"]) is False
+    assert float(invalid_row["amount_COP"]) == pytest.approx(0.0)
+    assert "manual import" in str(invalid_row["notes"])
+    assert "Recovered invalid row (name=empty)." in str(invalid_row["notes"])
+    assert "Recovered invalid row (amount_COP='oops')." in str(invalid_row["notes"])
+    assert issues == [
+        "Economics_Cost_Items fila 2: se desactivó por nombre vacío.",
+        "Economics_Cost_Items fila 2: se desactivó por valor inválido en 'amount_COP'.",
+    ]
 
-    with pytest.raises(PreventUpdate):
-        sync_economics_hardware_costs(
-            1,
-            payload,
-            [],
-            [],
-            active.config_bundle.inverter_catalog.to_dict("records"),
-            active.config_bundle.battery_catalog.to_dict("records"),
-            active.config_bundle.panel_catalog.to_dict("records"),
-            active.config_bundle.economics_cost_items_table.to_dict("records"),
+
+def test_validate_economics_tables_only_emits_aggregated_operational_warnings() -> None:
+    bundle = _fast_bundle()
+    cost_frame = pd.DataFrame(
+        [
+            {"stage": "technical", "name": "Panel hardware", "basis": "per_panel", "amount_COP": 0.0, "enabled": True, "notes": ""},
+            {"stage": "technical", "name": "  panel hardware  ", "basis": "per_panel", "amount_COP": 0.0, "enabled": True, "notes": ""},
+            {"stage": "installed", "name": "", "basis": "fixed_project", "amount_COP": 0.0, "enabled": False, "notes": "Recovered invalid row (name='')."},
+            {
+                "stage": "installed",
+                "name": "Legacy contingency",
+                "basis": "fixed_project",
+                "amount_COP": 0.0,
+                "enabled": False,
+                "notes": f"{RICH_MIGRATION_NOTE_PREFIX} (stage=installed_cost, method=pct_of_running_subtotal, value=0.12).",
+            },
+        ],
+        columns=["stage", "name", "basis", "amount_COP", "enabled", "notes"],
+    )
+    price_frame = pd.DataFrame(
+        [
+            {"layer": "sale", "name": "Ajuste final", "method": "fixed_project", "value": 0.0, "enabled": True, "notes": ""},
+            {
+                "layer": "sale",
+                "name": "Taxes",
+                "method": "fixed_project",
+                "value": 0.0,
+                "enabled": False,
+                "notes": f"{RICH_MIGRATION_NOTE_PREFIX} (stage=final_sale_price, method=tax_pct, value=0.16).",
+            },
+        ],
+        columns=["layer", "name", "method", "value", "enabled", "notes"],
+    )
+
+    issues = validate_economics_tables(
+        replace(
+            bundle,
+            economics_cost_items_table=cost_frame,
+            economics_price_items_table=price_frame,
         )
+    )
+    messages = [issue.message for issue in issues]
+
+    assert "Economics_Cost_Items: nombres habilitados duplicados: Panel hardware." in messages
+    assert "Economics_Cost_Items: no hay filas habilitadas en 'installed'." in messages
+    assert "Economics_Price_Items: no hay filas habilitadas en 'commercial'." in messages
+    assert "Economics_Cost_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in messages
+    assert "Economics_Price_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in messages
+    assert not any("nombre vacío" in message for message in messages)
+    assert not any("valor inválido" in message for message in messages)
+    assert not any("enum inválido" in message for message in messages)
+
+
+def test_refresh_bundle_issues_dedupes_economics_warnings() -> None:
+    bundle = _fast_bundle()
+    changed_costs = bundle.economics_cost_items_table.copy()
+    changed_costs.loc[changed_costs["stage"] == "installed", "enabled"] = False
+    seed_message = "Economics_Cost_Items: no hay filas habilitadas en 'installed'."
+
+    refreshed = refresh_bundle_issues(
+        replace(
+            bundle,
+            economics_cost_items_table=changed_costs,
+            issues=(ValidationIssue("warning", "economics_cost_items", seed_message),),
+        )
+    )
+    messages = [issue.message for issue in refreshed.issues if issue.field == "economics_cost_items"]
+
+    assert messages.count(seed_message) == 1
+
+
+def test_apply_admin_edits_preserves_invalid_economics_rows_and_warnings_after_reopen(monkeypatch, tmp_path) -> None:
+    client_state, state, active, _payload = _admin_payload(monkeypatch, tmp_path)
+    state = save_project(state, project_name="Proyecto Economics Invalid Row", language="es")
+    payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+    assert active is not None
+
+    economics_cost_rows = active.config_bundle.economics_cost_items_table.to_dict("records")
+    economics_price_rows = active.config_bundle.economics_price_items_table.to_dict("records")
+    economics_cost_rows.append(
+        {
+            "stage": "technical",
+            "name": "   ",
+            "basis": "per_kwp",
+            "amount_COP": "oops",
+            "enabled": True,
+            "notes": "draft invalid",
+        }
+    )
+
+    next_payload, _status = apply_admin_edits(
+        1,
+        payload,
+        "Proyecto Economics Invalid Row",
+        [],
+        [],
+        active.config_bundle.inverter_catalog.to_dict("records"),
+        active.config_bundle.battery_catalog.to_dict("records"),
+        active.config_bundle.panel_catalog.to_dict("records"),
+        active.config_bundle.month_profile_table.to_dict("records"),
+        active.config_bundle.sun_profile_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table_others.to_dict("records"),
+        economics_cost_rows,
+        economics_price_rows,
+        "es",
+    )
+
+    _, updated_state = resolve_client_session(next_payload, language="es")
+    updated_active = updated_state.get_scenario()
+
+    assert updated_active is not None
+    invalid_rows = updated_active.config_bundle.economics_cost_items_table.loc[
+        updated_active.config_bundle.economics_cost_items_table["notes"].astype(str).str.contains("draft invalid", regex=False)
+    ]
+    assert len(invalid_rows) == 1
+    assert invalid_rows.iloc[0]["name"] == ""
+    assert bool(invalid_rows.iloc[0]["enabled"]) is False
+    updated_messages = [issue.message for issue in updated_active.config_bundle.issues if issue.field == "economics_cost_items"]
+    assert updated_messages.count("Economics_Cost_Items fila 9: se desactivó por nombre vacío.") == 1
+
+    reopened = open_project(updated_state.project_slug)
+    reopened_active = reopened.get_scenario()
+
+    assert reopened_active is not None
+    reopened_messages = [issue.message for issue in reopened_active.config_bundle.issues if issue.field == "economics_cost_items"]
+    assert reopened_messages.count("Economics_Cost_Items fila 9: se desactivó por nombre vacío.") == 1
+
+
+def test_economics_sync_button_is_removed_from_shell_and_callback_graph() -> None:
+    section = economics_editor_section(lang="es")
+    assert _find_component(section, "sync-economics-hardware-costs-btn") is None
+    assert hasattr(admin_callbacks, "sync_economics_hardware_costs") is False
+
+
+def test_localize_economics_validation_messages_are_stable_in_es_and_en() -> None:
+    row_issue = ValidationIssue(
+        "warning",
+        "economics_cost_items",
+        "Economics_Cost_Items fila 3: se desactivó por valor inválido en 'amount_COP'.",
+    )
+    aggregate_issue = ValidationIssue(
+        "warning",
+        "economics_price_items",
+        "Economics_Price_Items: no hay filas habilitadas en 'commercial'.",
+    )
+
+    assert (
+        localize_validation_message(row_issue, lang="en")
+        == "Row 3 in economics cost items was disabled because Amount is invalid."
+    )
+    assert (
+        localize_validation_message(row_issue, lang="es")
+        == "Fila 3 en las partidas de costo de economics: se desactivó porque Monto es inválido."
+    )
+    assert (
+        localize_validation_message(aggregate_issue, lang="en")
+        == "economics price items has no enabled rows in 'commercial'."
+    )
+    assert (
+        localize_validation_message(aggregate_issue, lang="es")
+        == "No hay filas activas en 'commercial' dentro de las partidas de precio de economics."
+    )
 
 
 def test_economics_changes_do_not_affect_deterministic_fingerprint_or_scan() -> None:
