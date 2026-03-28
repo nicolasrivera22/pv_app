@@ -5,12 +5,14 @@ from dash.exceptions import PreventUpdate
 import pandas as pd
 import plotly.graph_objects as go
 
+from pv_product.panel_catalog import PANEL_DERIVED_CONFIG_FIELDS, PANEL_SELECTION_CATALOG, apply_panel_selection
+
 from components import render_assumption_sections, render_validation_panel
 from .i18n import tr
 from .project_io import save_project
 from .scenario_session import run_scenario_scan
 from .session_state import commit_client_session, resolve_client_session
-from .ui_schema import assumption_context_map, build_assumption_sections
+from .ui_schema import assumption_context_map, build_assumption_sections, display_assumption_value
 from .workbench_ui import collect_config_updates, workbench_status_message
 from .workspace_actions import apply_workspace_draft_to_state, resolve_workspace_bundle_for_display, table_draft_rows
 from .workspace_demand import (
@@ -383,6 +385,7 @@ def populate_assumptions_page(session_payload, show_all_values, language_value):
 
 
 @callback(
+    Output({"type": "assumptions-input", "field": ALL}, "value"),
     Output({"type": "assumptions-input", "field": ALL}, "disabled"),
     Output({"type": "assumptions-field-card", "field": ALL}, "className"),
     Output({"type": "assumptions-context-note", "group": ALL}, "children"),
@@ -406,13 +409,27 @@ def sync_assumption_context_ui(
     _, state = _session(session_payload, lang)
     active = state.get_scenario()
     if active is None:
-        return [], [], [], []
+        return [], [], [], [], []
 
     current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
+    effective_config, panel_resolution = apply_panel_selection(current_config, active.config_bundle.panel_catalog)
     context = assumption_context_map(current_config, panel_catalog=active.config_bundle.panel_catalog, lang=lang)
     disabled_map = dict(context.get("field_disabled") or {})
     emphasis_map = dict(context.get("field_emphasis") or {})
     notes_map = dict(context.get("notes") or {})
+
+    next_values = list(assumption_values or [])
+    if panel_resolution.selection_mode == PANEL_SELECTION_CATALOG:
+        for index, component_id in enumerate(assumption_input_ids or []):
+            field_key = str((component_id or {}).get("field", "")).strip()
+            if field_key in PANEL_DERIVED_CONFIG_FIELDS:
+                next_values[index] = display_assumption_value(field_key, effective_config.get(field_key))
+    value_updates = [no_update for _ in (assumption_input_ids or [])]
+    if len(next_values) == len(assumption_values or []) and any(
+        _normalize_compare_value(updated) != _normalize_compare_value(current)
+        for updated, current in zip(next_values, assumption_values or [])
+    ):
+        value_updates = next_values
 
     disabled_values = [
         bool(disabled_map.get((component_id or {}).get("field", ""), False))
@@ -431,7 +448,7 @@ def sync_assumption_context_ui(
         for component_id in (note_ids or [])
     ]
     note_styles = [_assumption_note_style(message) for message in note_children]
-    return disabled_values, card_classes, note_children, note_styles
+    return value_updates, disabled_values, card_classes, note_children, note_styles
 
 
 @callback(

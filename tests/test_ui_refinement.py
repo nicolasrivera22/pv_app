@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
-from dash import dcc
+from dash import dcc, no_update
 from dash.exceptions import PreventUpdate
 import pandas as pd
 import pytest
@@ -741,7 +741,7 @@ def test_workbench_assumption_context_callback_disables_dependent_controls_and_s
         {"type": "assumption-context-note", "group": "Monte Carlo"},
     ]
 
-    disabled_values, card_classes, note_children, note_styles = workbench_page.sync_assumption_context_ui(
+    _value_updates, disabled_values, card_classes, note_children, note_styles = workbench_page.sync_assumption_context_ui(
         payload,
         input_ids,
         list(field_values.values()),
@@ -796,7 +796,7 @@ def test_workbench_assumption_context_callback_highlights_fixed_battery_selectio
     card_ids = [{"type": "assumption-field-card", "field": field} for field in field_values]
     note_ids = [{"type": "assumption-context-note", "group": "Controles de Batería y Exporte"}]
 
-    disabled_values, card_classes, note_children, note_styles = workbench_page.sync_assumption_context_ui(
+    _value_updates, disabled_values, card_classes, note_children, note_styles = workbench_page.sync_assumption_context_ui(
         payload,
         input_ids,
         list(field_values.values()),
@@ -814,6 +814,73 @@ def test_workbench_assumption_context_callback_highlights_fixed_battery_selectio
     assert "field-card-disabled" not in class_by_field["battery_name"]
     assert note_children == [tr("workbench.assumptions.context.battery.fixed", "en")]
     assert note_styles == [{"display": "block"}]
+
+
+def test_workbench_assumption_context_callback_refreshes_visible_panel_values_for_selected_catalog_panel() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = _session_payload(state, lang="es")
+    field_values = {
+        "panel_name": "PREM-620 Premium",
+        "P_mod_W": 600.0,
+        "Voc25": 50.0,
+        "Vmp25": 41.0,
+        "Isc": 14.0,
+        "panel_technology_mode": "standard",
+    }
+    input_ids = [{"type": "assumption-input", "field": field} for field in field_values]
+    card_ids = [{"type": "assumption-field-card", "field": field} for field in field_values]
+    note_ids = [{"type": "assumption-context-note", "group": "Sol y módulos"}]
+
+    value_updates, disabled_values, _card_classes, note_children, note_styles = workbench_page.sync_assumption_context_ui(
+        payload,
+        input_ids,
+        list(field_values.values()),
+        "es",
+        card_ids,
+        note_ids,
+    )
+
+    updated_by_field = dict(zip(field_values.keys(), value_updates))
+    disabled_by_field = dict(zip(field_values.keys(), disabled_values))
+
+    assert updated_by_field["panel_name"] == "PREM-620 Premium"
+    assert updated_by_field["P_mod_W"] == pytest.approx(620.0)
+    assert updated_by_field["Voc25"] == pytest.approx(52.0)
+    assert updated_by_field["Vmp25"] == pytest.approx(43.0)
+    assert updated_by_field["Isc"] == pytest.approx(14.4)
+    assert updated_by_field["panel_technology_mode"] == "premium"
+    assert disabled_by_field["P_mod_W"] is True
+    assert disabled_by_field["Voc25"] is True
+    assert disabled_by_field["Vmp25"] is True
+    assert disabled_by_field["Isc"] is True
+    assert disabled_by_field["panel_technology_mode"] is True
+    assert "modelo seleccionado" in note_children[0].lower()
+    assert note_styles == [{"display": "block"}]
+
+
+def test_workbench_assumption_context_callback_returns_wildcard_no_update_list_when_values_do_not_change() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = _session_payload(state, lang="es")
+    field_values = {
+        "panel_name": "__manual__",
+        "P_mod_W": 600.0,
+        "Voc25": 50.0,
+    }
+    input_ids = [{"type": "assumption-input", "field": field} for field in field_values]
+    card_ids = [{"type": "assumption-field-card", "field": field} for field in field_values]
+    note_ids = [{"type": "assumption-context-note", "group": "Sol y módulos"}]
+
+    value_updates, _disabled_values, _card_classes, _note_children, _note_styles = workbench_page.sync_assumption_context_ui(
+        payload,
+        input_ids,
+        list(field_values.values()),
+        "es",
+        card_ids,
+        note_ids,
+    )
+
+    assert len(value_updates) == len(input_ids)
+    assert all(item is no_update for item in value_updates)
 
 
 def test_populate_assumptions_keeps_monte_carlo_out_of_client_safe_general_assumptions() -> None:
