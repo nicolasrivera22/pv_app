@@ -549,3 +549,12 @@ def profile_editor_section() -> html.Div:
             ),
         ],
     )
+
+def _debug_bundle_rows(label, bundle):
+    print(f"\n=== {label} ===")
+    print("inverter:", len(bundle.inverter_catalog))
+    print("battery:", len(bundle.battery_catalog))
+    print("month:", len(bundle.month_profile_table))
+    print("sun:", len(bundle.sun_profile_table))
+    print("price:", len(bundle.cop_kwp_table))
+    print("price others:", len(bundle.cop_kwp_table_others))

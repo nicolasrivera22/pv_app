@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 
 from dash import ALL, Input, Output, State, callback, ctx
@@ -32,6 +33,8 @@ from .workspace_actions import (
 from .workspace_drafts import bind_workspace_draft_project, upsert_workspace_draft
 from .workspace_partitions import partition_assumption_sections
 from .ui_mode import PAGE_ADMIN, resolve_page_access, resolve_ui_mode_from_payload
+
+logger = logging.getLogger(__name__)
 
 
 def _lang(value: str | None) -> str:
@@ -94,6 +97,14 @@ PROFILE_TABLE_VISIBILITY_PANELS = {
 }
 PROFILE_CARD_BASE_CLASS = "profile-table-card-shell"
 PROFILE_CARD_ACTIVE_CLASS = f"{PROFILE_CARD_BASE_CLASS} profile-table-card-active"
+ADMIN_REQUIRED_TABLE_KEYS = (
+    "inverter_catalog",
+    "battery_catalog",
+    "month_profile",
+    "sun_profile",
+    "cop_kwp_table",
+    "cop_kwp_table_others",
+)
 
 
 def _project_is_bound(state) -> bool:
@@ -106,6 +117,28 @@ def _resolved_project_name(project_name_value, state) -> str:
 
 def _join_status_parts(*parts: str) -> str:
     return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def _admin_table_rows_payload(
+    inverter_rows,
+    battery_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    price_kwp_rows,
+    price_kwp_others_rows,
+) -> dict[str, list[dict[str, object]] | None]:
+    return {
+        "inverter_catalog": inverter_rows,
+        "battery_catalog": battery_rows,
+        "month_profile": month_profile_rows,
+        "sun_profile": sun_profile_rows,
+        "cop_kwp_table": price_kwp_rows,
+        "cop_kwp_table_others": price_kwp_others_rows,
+    }
+
+
+def _unhydrated_admin_tables(table_rows: dict[str, list[dict[str, object]] | None]) -> tuple[str, ...]:
+    return tuple(table_key for table_key in ADMIN_REQUIRED_TABLE_KEYS if table_rows.get(table_key) is None)
 
 
 def _active_profile_table_state(table_id: str | None = None) -> dict[str, str | None]:
@@ -637,6 +670,18 @@ def sync_admin_draft(
     active = state.get_scenario()
     if active is None:
         raise PreventUpdate
+    table_rows = _admin_table_rows_payload(
+        inverter_rows,
+        battery_rows,
+        month_profile_rows,
+        sun_profile_rows,
+        price_kwp_rows,
+        price_kwp_others_rows,
+    )
+    unhydrated_tables = _unhydrated_admin_tables(table_rows)
+    if unhydrated_tables:
+        logger.debug("sync_admin_draft skipped until hydrated tables=%s", list(unhydrated_tables))
+        raise PreventUpdate
     current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
     owned_fields = {
         str(component_id.get("field", "")).strip()
@@ -650,14 +695,13 @@ def sync_admin_draft(
     }
     rows_payload, owned_tables = table_draft_rows(
         base_bundle=active.config_bundle,
-        table_rows={
-            "inverter_catalog": inverter_rows,
-            "battery_catalog": battery_rows,
-            "month_profile": month_profile_rows,
-            "sun_profile": sun_profile_rows,
-            "cop_kwp_table": price_kwp_rows,
-            "cop_kwp_table_others": price_kwp_others_rows,
-        },
+        table_rows=table_rows,
+    )
+    logger.debug(
+        "sync_admin_draft scenario=%s owned_tables=%s draft_rows=%s",
+        active.scenario_id,
+        sorted(owned_tables),
+        {table_key: len(rows) for table_key, rows in rows_payload.items()},
     )
     draft = upsert_workspace_draft(
         client_state.session_id,
@@ -953,6 +997,18 @@ def apply_admin_edits(
         active = state.get_scenario()
         if active is None:
             raise PreventUpdate
+        table_rows = _admin_table_rows_payload(
+            inverter_rows,
+            battery_rows,
+            month_profile_rows,
+            sun_profile_rows,
+            price_kwp_rows,
+            price_kwp_others_rows,
+        )
+        unhydrated_tables = _unhydrated_admin_tables(table_rows)
+        if unhydrated_tables:
+            logger.debug("apply_admin_edits skipped until hydrated tables=%s", list(unhydrated_tables))
+            raise PreventUpdate
         current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
         owned_fields = {
             str(component_id.get("field", "")).strip()
@@ -966,14 +1022,13 @@ def apply_admin_edits(
         }
         rows_payload, owned_tables = table_draft_rows(
             base_bundle=active.config_bundle,
-            table_rows={
-                "inverter_catalog": inverter_rows,
-                "battery_catalog": battery_rows,
-                "month_profile": month_profile_rows,
-                "sun_profile": sun_profile_rows,
-                "cop_kwp_table": price_kwp_rows,
-                "cop_kwp_table_others": price_kwp_others_rows,
-            },
+            table_rows=table_rows,
+        )
+        logger.debug(
+            "apply_admin_edits scenario=%s owned_tables=%s draft_rows=%s",
+            active.scenario_id,
+            sorted(owned_tables),
+            {table_key: len(rows) for table_key, rows in rows_payload.items()},
         )
         upsert_workspace_draft(
             client_state.session_id,

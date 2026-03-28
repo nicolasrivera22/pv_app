@@ -3,7 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
+import traceback
 from uuid import uuid4
+
+from components.profile_editor import _debug_bundle_rows
 
 from .config_metadata import update_config_table_values
 from .cache import fingerprint_deterministic_input
@@ -155,9 +158,12 @@ def set_design_comparison_candidates(
 
 
 def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle: LoadedConfigBundle) -> ScenarioSessionState:
-    scenario = state.get_scenario(scenario_id)
+    scenario: ScenarioRecord | None = state.get_scenario(scenario_id)
     if scenario is None:
         raise KeyError(f"No existe el escenario '{scenario_id}'.")
+    _debug_bundle_rows(f"BEFORE update_scenario_bundle {scenario_id}", scenario.config_bundle)
+    _debug_bundle_rows(f"NEW bundle in update_scenario_bundle {scenario_id}", bundle)
+    traceback.print_stack(limit=8)
     refreshed_bundle = refresh_bundle_issues(bundle)
     updated = replace(
         scenario,

@@ -17,19 +17,24 @@ from services import (
     clear_admin_session_access,
     clear_all_admin_session_access,
     clear_session_states,
+    clear_workspace_drafts,
     commit_client_session,
     create_scenario_record,
+    get_workspace_draft,
     grant_admin_session_access,
     is_admin_session_unlocked,
     load_config_from_excel,
     load_example_config,
     set_admin_pin,
+    table_draft_rows,
     verify_admin_pin,
 )
 from services.workspace_admin_callbacks import (
+    apply_admin_edits,
     populate_admin_page,
     render_admin_access_shell,
     setup_admin_session,
+    sync_admin_draft,
     translate_profile_table_activators,
     unlock_admin_session,
 )
@@ -482,6 +487,95 @@ def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(mo
     assert outputs[11]
     assert outputs[14]
     assert outputs[17]
+
+
+def test_table_draft_rows_skips_unhydrated_admin_tables() -> None:
+    bundle = _fast_bundle()
+
+    rows_payload, owned_tables = table_draft_rows(
+        base_bundle=bundle,
+        table_rows={"inverter_catalog": None},
+    )
+
+    assert rows_payload == {}
+    assert owned_tables == set()
+
+
+def test_table_draft_rows_preserves_intentional_clearing_after_hydration() -> None:
+    bundle = _fast_bundle()
+
+    rows_payload, owned_tables = table_draft_rows(
+        base_bundle=bundle,
+        table_rows={"inverter_catalog": []},
+    )
+
+    assert "inverter_catalog" in owned_tables
+    assert rows_payload["inverter_catalog"] == []
+
+
+def test_sync_admin_draft_waits_for_all_admin_tables_to_hydrate(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    clear_workspace_drafts()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    client_state = _admin_client_state("es")
+    set_admin_pin("2468")
+    grant_admin_session_access(client_state.session_id)
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+
+    assert active is not None
+
+    with pytest.raises(PreventUpdate):
+        sync_admin_draft(
+            payload,
+            [],
+            [],
+            None,
+            active.config_bundle.battery_catalog.to_dict("records"),
+            active.config_bundle.month_profile_table.to_dict("records"),
+            active.config_bundle.sun_profile_table.to_dict("records"),
+            active.config_bundle.cop_kwp_table.to_dict("records"),
+            active.config_bundle.cop_kwp_table_others.to_dict("records"),
+        )
+
+    assert get_workspace_draft(client_state.session_id, active.scenario_id) is None
+
+
+def test_apply_admin_edits_waits_for_all_admin_tables_to_hydrate(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    clear_workspace_drafts()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    client_state = _admin_client_state("es")
+    set_admin_pin("2468")
+    grant_admin_session_access(client_state.session_id)
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+
+    assert active is not None
+
+    with pytest.raises(PreventUpdate):
+        apply_admin_edits(
+            1,
+            payload,
+            "Proyecto",
+            [],
+            [],
+            active.config_bundle.inverter_catalog.to_dict("records"),
+            active.config_bundle.battery_catalog.to_dict("records"),
+            None,
+            active.config_bundle.sun_profile_table.to_dict("records"),
+            active.config_bundle.cop_kwp_table.to_dict("records"),
+            active.config_bundle.cop_kwp_table_others.to_dict("records"),
+            "es",
+        )
+
+    assert get_workspace_draft(client_state.session_id, active.scenario_id) is None
 
 
 def test_setup_admin_session_is_blocked_outside_admin_mode(monkeypatch, tmp_path) -> None:

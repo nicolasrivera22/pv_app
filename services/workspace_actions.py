@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import logging
 from typing import Any
 
 import pandas as pd
@@ -16,6 +17,8 @@ from .validation import (
 )
 from .workbench_ui import collect_config_updates, frame_from_rows, rebuild_bundle_from_ui
 from .workspace_drafts import WorkspaceDraftState, clear_workspace_draft, get_workspace_draft
+
+logger = logging.getLogger(__name__)
 
 
 TABLE_BUNDLE_ATTRS = {
@@ -96,6 +99,9 @@ def table_draft_rows(
     draft_rows: dict[str, list[dict[str, Any]]] = {}
     owned_tables: set[str] = set()
     for table_key, rows in table_rows.items():
+        if rows is None:
+            logger.debug("table_draft_rows skipped unhydrated table=%s", table_key)
+            continue
         bundle_attr = TABLE_BUNDLE_ATTRS[table_key]
         base_frame = getattr(base_bundle, bundle_attr)
         columns = list(base_frame.columns)
@@ -103,6 +109,11 @@ def table_draft_rows(
         if _normalized_records(rows, columns) == _normalized_records(base_frame.to_dict("records"), columns):
             continue
         draft_rows[table_key] = frame_from_rows(rows, columns).to_dict("records")
+    logger.debug(
+        "table_draft_rows prepared owned_tables=%s draft_rows=%s",
+        sorted(owned_tables),
+        {table_key: len(rows) for table_key, rows in draft_rows.items()},
+    )
     return draft_rows, owned_tables
 
 
@@ -154,7 +165,13 @@ def apply_workspace_draft_to_state(
     base_bundle = active.config_bundle
     draft = get_workspace_draft(session_id, scenario_id)
     if draft is None:
+        logger.debug("apply_workspace_draft_to_state no draft for scenario=%s", scenario_id)
         return state, active
+    logger.debug(
+        "apply_workspace_draft_to_state scenario=%s draft_rows=%s",
+        scenario_id,
+        {table_key: len(rows) for table_key, rows in draft.table_rows.items()},
+    )
 
     config = dict(base_bundle.config)
     config.update(draft.config_overrides)

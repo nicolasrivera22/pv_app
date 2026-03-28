@@ -7,6 +7,7 @@ from pathlib import Path
 from dash import ALL, Input, Output, State, callback, ctx
 from dash.exceptions import PreventUpdate
 
+from components.profile_editor import _debug_bundle_rows
 from components.scenario_controls import stacked_button_label
 from .i18n import tr
 from .project_io import delete_project, list_projects, open_project, save_project, save_project_as
@@ -312,8 +313,10 @@ def mutate_workspace_session(
 
         if trigger == "new-scenario-btn":
             bundle = load_example_config()
+            _debug_bundle_rows("AFTER load_example_config", bundle)
             name = default_scenario_name(state, prefix="Escenario" if lang == "es" else "Scenario")
             record = create_scenario_record(name, bundle, source_name=bundle.source_name)
+            _debug_bundle_rows("AFTER create_scenario_record", record.config_bundle)
             state = add_scenario(state, record, make_active=True)
             client_state = commit_client_session(client_state, state)
             return client_state.to_payload(), tr("workbench.loaded_example", lang, name=record.name)
