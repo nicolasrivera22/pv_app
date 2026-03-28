@@ -893,15 +893,16 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
         "Dia": TableColumnUiSchema("Día", "Day", "Nombre opcional del dia asociado a la fila.", "Optional day name for the row."),
         "DOW": TableColumnUiSchema("Dia semana", "DOW", "Dia de la semana en la tabla 7x24.", "Day of week in the 7x24 table.", "integer", 0, "numeric"),
         "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del dia.", "Hour of the day.", "integer", 0, "numeric"),
-        "RES": TableColumnUiSchema("Residencial", "Residential", "Demanda residencial de esa hora.", "Residential demand for that hour.", "kwh", 2, "numeric"),
-        "IND": TableColumnUiSchema("Industrial", "Industrial", "Demanda industrial de esa hora.", "Industrial demand for that hour.", "kwh", 2, "numeric"),
-        "TOTAL_kWh": TableColumnUiSchema("Demanda total", "Total demand", "Demanda total derivada de la hora.", "Total hourly demand derived from RES + IND.", "kwh", 2, "numeric"),
+        "RES": TableColumnUiSchema("Demanda Residencial [kWh]", "Residential Demand [kWh]", "Demanda residencial de esa hora.", "Residential demand for that hour.", "kwh", 2, "numeric"),
+        
+        "IND": TableColumnUiSchema("Demanda Industrial [kWh]", "Industrial Demand [kWh]", "Demanda industrial de esa hora.", "Industrial demand for that hour.", "kwh", 2, "numeric"),
+        "TOTAL_kWh": TableColumnUiSchema("Demanda total [kWh]", "Total demand [kWh]", "Demanda total derivada de la hora.", "Total hourly demand derived from RES + IND.", "kwh", 2, "numeric"),
     },
     "demand_profile_general": {
         "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del dia.", "Hour of the day.", "integer", 0, "numeric"),
-        "RES": TableColumnUiSchema("Residencial", "Residential", "Demanda residencial de esa hora.", "Residential demand for that hour.", "kwh", 2, "numeric"),
-        "IND": TableColumnUiSchema("Industrial", "Industrial", "Demanda industrial de esa hora.", "Industrial demand for that hour.", "kwh", 2, "numeric"),
-        "TOTAL_kWh": TableColumnUiSchema("Demanda total", "Total demand", "Demanda total derivada de la hora.", "Total hourly demand derived from RES + IND.", "kwh", 2, "numeric"),
+        "RES": TableColumnUiSchema("Demanda Residencial [kWh]", "Residential Demand [kWh]", "Demanda residencial de esa hora.", "Residential demand for that hour.", "kwh", 2, "numeric"),
+        "IND": TableColumnUiSchema("Demanda Industrial [kWh]", "Industrial Demand [kWh]]", "Demanda industrial de esa hora.", "Industrial demand for that hour.", "kwh", 2, "numeric"),
+        "TOTAL_kWh": TableColumnUiSchema("Demanda total [kWh]", "Total demand [kWh]", "Demanda total derivada de la hora.", "Total hourly demand derived from RES + IND.", "kwh", 2, "numeric"),
     },
     "demand_profile_weights": {
         "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del dia.", "Hour of the day.", "integer", 0, "numeric"),
@@ -910,7 +911,7 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
         "W_RES_BASE": TableColumnUiSchema("Base residencial", "Residential base", "Base residencial usada para normalizar.", "Residential base used for normalization.", "percent", 3, "numeric"),
         "W_IND_BASE": TableColumnUiSchema("Base industrial", "Industrial base", "Base industrial usada para normalizar.", "Industrial base used for normalization.", "percent", 3, "numeric"),
         "W_TOTAL": TableColumnUiSchema("Peso total", "Total weight", "Peso total combinado.", "Combined total weight.", "percent", 3, "numeric"),
-        "TOTAL_kWh": TableColumnUiSchema("Demanda total", "Total demand", "Demanda total resultante.", "Resulting total demand.", "kwh", 2, "numeric"),
+        "TOTAL_kWh": TableColumnUiSchema("Demanda total [kWh]", "Total demand [kWh]", "Demanda total resultante.", "Resulting total demand.", "kwh", 2, "numeric"),
     },
 }
 
