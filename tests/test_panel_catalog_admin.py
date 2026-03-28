@@ -94,6 +94,8 @@ def test_sync_admin_draft_tracks_panel_catalog_changes(monkeypatch, tmp_path) ->
         active.config_bundle.sun_profile_table.to_dict("records"),
         active.config_bundle.cop_kwp_table.to_dict("records"),
         active.config_bundle.cop_kwp_table_others.to_dict("records"),
+        active.config_bundle.economics_cost_items_table.to_dict("records"),
+        active.config_bundle.economics_price_items_table.to_dict("records"),
     )
 
     draft = get_workspace_draft(client_state.session_id, active.scenario_id)
@@ -137,6 +139,8 @@ def test_apply_admin_edits_persists_panel_catalog_changes_across_save_and_reopen
         active.config_bundle.sun_profile_table.to_dict("records"),
         active.config_bundle.cop_kwp_table.to_dict("records"),
         active.config_bundle.cop_kwp_table_others.to_dict("records"),
+        active.config_bundle.economics_cost_items_table.to_dict("records"),
+        active.config_bundle.economics_price_items_table.to_dict("records"),
         "es",
     )
 

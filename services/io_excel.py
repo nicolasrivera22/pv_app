@@ -29,6 +29,12 @@ from .demand_profile_logic import (
     derive_relative_profile,
     infer_relative_profile_type,
 )
+from .economics_tables import (
+    default_economics_cost_items_table,
+    default_economics_price_items_table,
+    normalize_economics_cost_items_frame,
+    normalize_economics_price_items_frame,
+)
 from .runtime_paths import bundled_workbook_path
 from .types import LoadedConfigBundle
 from .types import ValidationIssue
@@ -50,7 +56,11 @@ TABLE_COLUMNS = {
     "Precios_kWp_relativos_Otros": ["MIN", "MAX", "PRECIO_POR_KWP"],
     "Inversor_Catalog": ["name", "AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max", "Imax_mppt", "n_mppt", "price_COP"],
     "Battery_Catalog": ["name", "nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"],
-    "Panel_Catalog": list(PANEL_CATALOG_COLUMNS),
+    # Keep workbook import backward-compatible with older panel catalogs that
+    # do not yet include price_COP. Canonical CSV persistence does include it.
+    "Panel_Catalog": [column for column in PANEL_CATALOG_COLUMNS if column != "price_COP"],
+    "Economics_Cost_Items": ["stage", "name", "calculation_method", "value", "enabled", "notes"],
+    "Economics_Price_Items": ["stage", "name", "calculation_method", "value", "enabled", "notes"],
 }
 TABLE_FILE_MAP = {
     "Config": "Config.csv",
@@ -64,6 +74,8 @@ TABLE_FILE_MAP = {
     "Inversor_Catalog": "Inversor_Catalog.csv",
     "Battery_Catalog": "Battery_Catalog.csv",
     "Panel_Catalog": "Panel_Catalog.csv",
+    "Economics_Cost_Items": "Economics_Cost_Items.csv",
+    "Economics_Price_Items": "Economics_Price_Items.csv",
 }
 
 CONFIG_KEY_ALIASES = {
@@ -337,6 +349,8 @@ def _default_tables() -> dict[str, pd.DataFrame]:
         "SUN_HSP_PROFILE": sun_profile,
         "Precios_kWp_relativos": prices,
         "Precios_kWp_relativos_Otros": prices_others,
+        "Economics_Cost_Items": default_economics_cost_items_table(),
+        "Economics_Price_Items": default_economics_price_items_table(),
     }
 
 
@@ -353,6 +367,8 @@ def _bundle_from_frames(
     sun_profile: pd.DataFrame | None,
     cop_kwp_table: pd.DataFrame,
     cop_kwp_table_others: pd.DataFrame,
+    economics_cost_items: pd.DataFrame | None,
+    economics_price_items: pd.DataFrame | None,
     source_name: str,
 ) -> LoadedConfigBundle:
     cfg, normalization_issues = _normalize_config(config)
@@ -368,6 +384,16 @@ def _bundle_from_frames(
         profile_type=infer_relative_profile_type(demand_profile_weights, alpha_mix=cfg.get("alpha_mix", 0.5)),
         alpha_mix=cfg.get("alpha_mix", 0.5),
         e_month_kwh=cfg.get("E_month_kWh", 0.0),
+    )
+    economics_cost_items = (
+        normalize_economics_cost_items_frame(economics_cost_items)
+        if economics_cost_items is not None
+        else default_economics_cost_items_table()
+    )
+    economics_price_items = (
+        normalize_economics_price_items_frame(economics_price_items)
+        if economics_price_items is not None
+        else default_economics_price_items_table()
     )
 
     if sun_profile is not None and {"HOUR", "SOL"}.issubset(sun_profile.columns):
@@ -424,6 +450,8 @@ def _bundle_from_frames(
         demand_profile_weights_table=demand_profile_weights.copy(),
         month_profile_table=month_profile.copy(),
         sun_profile_table=sun_profile.copy() if sun_profile is not None else pd.DataFrame(),
+        economics_cost_items_table=economics_cost_items.copy(),
+        economics_price_items_table=economics_price_items.copy(),
         source_name=source_name,
     )
     issues = [*normalization_issues, *panel_catalog_issues, *validate_config(bundle)]
@@ -471,6 +499,8 @@ def load_config_from_excel(path_or_bytes: str | bytes | Path | BytesIO) -> Loade
         sun_profile=sun_profile,
         cop_kwp_table=cop_kwp_table,
         cop_kwp_table_others=cop_kwp_table_others,
+        economics_cost_items=default_economics_cost_items_table(),
+        economics_price_items=default_economics_price_items_table(),
         source_name=source_name,
     )
 
@@ -508,6 +538,8 @@ def load_example_config() -> LoadedConfigBundle:
         sun_profile=tables["SUN_HSP_PROFILE"],
         cop_kwp_table=tables["Precios_kWp_relativos"],
         cop_kwp_table_others=tables["Precios_kWp_relativos_Otros"],
+        economics_cost_items=tables["Economics_Cost_Items"],
+        economics_price_items=tables["Economics_Price_Items"],
         source_name="default-example",
     )
 
@@ -527,6 +559,8 @@ def rebuild_config_bundle(
     sun_profile: pd.DataFrame | None = None,
     cop_kwp_table: pd.DataFrame | None = None,
     cop_kwp_table_others: pd.DataFrame | None = None,
+    economics_cost_items: pd.DataFrame | None = None,
+    economics_price_items: pd.DataFrame | None = None,
 ) -> LoadedConfigBundle:
     return _bundle_from_frames(
         config=config or dict(base_bundle.config),
@@ -541,6 +575,8 @@ def rebuild_config_bundle(
         sun_profile=sun_profile if sun_profile is not None else base_bundle.sun_profile_table,
         cop_kwp_table=cop_kwp_table if cop_kwp_table is not None else base_bundle.cop_kwp_table,
         cop_kwp_table_others=cop_kwp_table_others if cop_kwp_table_others is not None else base_bundle.cop_kwp_table_others,
+        economics_cost_items=economics_cost_items if economics_cost_items is not None else base_bundle.economics_cost_items_table,
+        economics_price_items=economics_price_items if economics_price_items is not None else base_bundle.economics_price_items_table,
         source_name=base_bundle.source_name,
     )
 
@@ -567,6 +603,8 @@ def load_bundle_from_tables(table_root: str | Path, *, source_name: str = "proje
     battery_catalog = _read_csv("Battery_Catalog")
     panel_catalog = _read_csv("Panel_Catalog", optional=True)
     sun_profile = _read_csv("SUN_HSP_PROFILE", optional=True)
+    economics_cost_items = _read_csv("Economics_Cost_Items", optional=True)
+    economics_price_items = _read_csv("Economics_Price_Items", optional=True)
 
     config: dict[str, Any] = {}
     assert config_table is not None
@@ -589,6 +627,8 @@ def load_bundle_from_tables(table_root: str | Path, *, source_name: str = "proje
         sun_profile=sun_profile,
         cop_kwp_table=cop_kwp_table,
         cop_kwp_table_others=cop_kwp_table_others,
+        economics_cost_items=economics_cost_items if economics_cost_items is not None else default_economics_cost_items_table(),
+        economics_price_items=economics_price_items if economics_price_items is not None else default_economics_price_items_table(),
         source_name=source_name,
     )
 

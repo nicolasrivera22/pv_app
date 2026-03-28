@@ -251,6 +251,8 @@ def test_project_round_trip_uses_canonical_csv_tables_and_restores_workspace(tmp
     assert (canonical_root / "Inversor_Catalog.csv").exists()
     assert (canonical_root / "Battery_Catalog.csv").exists()
     assert (canonical_root / "Panel_Catalog.csv").exists()
+    assert (canonical_root / "Economics_Cost_Items.csv").exists()
+    assert (canonical_root / "Economics_Price_Items.csv").exists()
 
     reopened = open_project(saved.project_slug)
     reopened_base = reopened.get_scenario(base.scenario_id)

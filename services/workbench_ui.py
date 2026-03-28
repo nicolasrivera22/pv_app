@@ -74,6 +74,8 @@ def rebuild_bundle_from_ui(
     sun_profile: pd.DataFrame,
     cop_kwp_table: pd.DataFrame,
     cop_kwp_table_others: pd.DataFrame,
+    economics_cost_items: pd.DataFrame | None = None,
+    economics_price_items: pd.DataFrame | None = None,
 ) -> LoadedConfigBundle:
     config_table = update_config_table_values(base_bundle.config_table, config_updates)
     return rebuild_config_bundle(
@@ -90,6 +92,8 @@ def rebuild_bundle_from_ui(
         sun_profile=sun_profile,
         cop_kwp_table=cop_kwp_table,
         cop_kwp_table_others=cop_kwp_table_others,
+        economics_cost_items=economics_cost_items if economics_cost_items is not None else base_bundle.economics_cost_items_table,
+        economics_price_items=economics_price_items if economics_price_items is not None else base_bundle.economics_price_items_table,
     )
 
 

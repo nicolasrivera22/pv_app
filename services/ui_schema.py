@@ -901,6 +901,23 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
         "length_m": TableColumnUiSchema("Largo [m]", "Length [m]", "Largo del panel para referencia de huella.", "Panel length for footprint reference.", "number", 3, "numeric"),
         "width_m": TableColumnUiSchema("Ancho [m]", "Width [m]", "Ancho del panel para referencia de huella.", "Panel width for footprint reference.", "number", 3, "numeric"),
         "panel_technology_mode": TableColumnUiSchema("Tecnología", "Technology", "Tecnología de generación asociada al modelo.", "Generation technology associated with the model.", "text", 0),
+        "price_COP": TableColumnUiSchema("Precio [COP]", "Price [COP]", "Costo de referencia del panel para la capa económica.", "Reference panel cost for the economics layer.", "currency_cop", 0, "numeric"),
+    },
+    "economics_cost_items": {
+        "stage": TableColumnUiSchema("Capa", "Layer", "Etapa económica a la que pertenece esta partida.", "Economic stage this line belongs to."),
+        "name": TableColumnUiSchema("Partida", "Item", "Nombre visible de la partida de costo.", "Visible cost item name."),
+        "calculation_method": TableColumnUiSchema("Método", "Method", "Método de cálculo: fijo, por unidad física o porcentaje sobre subtotal.", "Calculation method: fixed, per physical unit, or percentage over a subtotal."),
+        "value": TableColumnUiSchema("Valor [COP o %]", "Value [COP or %]", "Ingresa COP, COP por unidad o porcentaje según el método. Para métodos porcentuales usa 12 para 12%.", "Enter COP, COP per unit, or a percentage depending on the method. For percentage methods use 12 for 12%.", "text", 0, "numeric"),
+        "enabled": TableColumnUiSchema("Activo", "Enabled", "Permite desactivar temporalmente esta partida sin eliminarla.", "Lets you temporarily disable this line without deleting it."),
+        "notes": TableColumnUiSchema("Notas", "Notes", "Notas internas para explicar la fuente o el uso de la partida.", "Internal notes that explain the source or intent of the line."),
+    },
+    "economics_price_items": {
+        "stage": TableColumnUiSchema("Capa", "Layer", "Etapa comercial a la que pertenece este ajuste.", "Commercial stage this adjustment belongs to."),
+        "name": TableColumnUiSchema("Ajuste", "Adjustment", "Nombre visible del ajuste comercial o final.", "Visible commercial or final-price adjustment name."),
+        "calculation_method": TableColumnUiSchema("Método", "Method", "Método de cálculo: markup, descuento, impuesto o monto fijo.", "Calculation method: markup, discount, tax, or fixed amount."),
+        "value": TableColumnUiSchema("Valor [COP o %]", "Value [COP or %]", "Ingresa COP, COP por kWp o porcentaje según el método. Para métodos porcentuales usa 12 para 12%.", "Enter COP, COP per kWp, or a percentage depending on the method. For percentage methods use 12 for 12%.", "text", 0, "numeric"),
+        "enabled": TableColumnUiSchema("Activo", "Enabled", "Permite desactivar temporalmente este ajuste sin eliminarlo.", "Lets you temporarily disable this adjustment without deleting it."),
+        "notes": TableColumnUiSchema("Notas", "Notes", "Notas internas para aclarar el criterio comercial o fiscal.", "Internal notes that clarify the commercial or tax rationale."),
     },
     "month_profile": {
         "MONTH": TableColumnUiSchema("Mes", "Month", "Mes del año.", "Month of the year.", "integer", 0, "numeric"),

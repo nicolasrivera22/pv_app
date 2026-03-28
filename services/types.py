@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .economics_tables import default_economics_cost_items_table, default_economics_price_items_table
 from .ui_mode import normalize_ui_mode
 
 
@@ -68,6 +69,8 @@ class LoadedConfigBundle:
     demand_profile_weights_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     month_profile_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     sun_profile_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    economics_cost_items_table: pd.DataFrame = field(default_factory=default_economics_cost_items_table)
+    economics_price_items_table: pd.DataFrame = field(default_factory=default_economics_price_items_table)
     source_name: str = "config.xlsx"
     issues: tuple[ValidationIssue, ...] = ()
 
@@ -90,6 +93,8 @@ class LoadedConfigBundle:
             "demand_profile_weights_table": _frame_to_payload(self.demand_profile_weights_table),
             "month_profile_table": _frame_to_payload(self.month_profile_table),
             "sun_profile_table": _frame_to_payload(self.sun_profile_table),
+            "economics_cost_items_table": _frame_to_payload(self.economics_cost_items_table),
+            "economics_price_items_table": _frame_to_payload(self.economics_price_items_table),
             "source_name": self.source_name,
             "issues": [issue.to_payload() for issue in self.issues],
         }
@@ -114,6 +119,8 @@ class LoadedConfigBundle:
             demand_profile_weights_table=_frame_from_payload(payload["demand_profile_weights_table"]) if "demand_profile_weights_table" in payload else pd.DataFrame(),
             month_profile_table=_frame_from_payload(payload["month_profile_table"]) if "month_profile_table" in payload else pd.DataFrame(),
             sun_profile_table=_frame_from_payload(payload["sun_profile_table"]) if "sun_profile_table" in payload else pd.DataFrame(),
+            economics_cost_items_table=_frame_from_payload(payload["economics_cost_items_table"]) if "economics_cost_items_table" in payload else default_economics_cost_items_table(),
+            economics_price_items_table=_frame_from_payload(payload["economics_price_items_table"]) if "economics_price_items_table" in payload else default_economics_price_items_table(),
             source_name=payload.get("source_name", "config.xlsx"),
             issues=tuple(ValidationIssue.from_payload(issue) for issue in payload.get("issues", [])),
         )

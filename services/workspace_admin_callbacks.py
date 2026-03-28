@@ -18,12 +18,26 @@ from .admin_access import (
     set_admin_pin,
     verify_admin_pin,
 )
+from .economics_tables import (
+    economics_cost_items_rows_from_editor,
+    economics_cost_items_rows_to_editor,
+    economics_price_items_rows_from_editor,
+    economics_price_items_rows_to_editor,
+    seed_hardware_cost_rows_from_catalogs,
+)
 from .i18n import tr
 from .profile_charts import build_profile_chart
 from .project_io import save_project
 from .session_state import commit_client_session, resolve_client_session
 from .ui_schema import assumption_context_map, build_assumption_sections, build_table_display_columns
-from .validation import BATTERY_REQUIRED_COLUMNS, INVERTER_REQUIRED_COLUMNS, PANEL_REQUIRED_COLUMNS
+from .validation import (
+    BATTERY_REQUIRED_COLUMNS,
+    INVERTER_REQUIRED_COLUMNS,
+    PANEL_REQUIRED_COLUMNS,
+    normalize_battery_catalog_rows,
+    normalize_inverter_catalog_rows,
+    normalize_panel_catalog_rows,
+)
 from .workbench_ui import collect_config_updates, workbench_status_message
 from .workspace_actions import (
     apply_workspace_draft_to_state,
@@ -103,6 +117,8 @@ ADMIN_REQUIRED_TABLE_KEYS = (
     "panel_catalog",
     "month_profile",
     "sun_profile",
+    "economics_cost_items",
+    "economics_price_items",
     "cop_kwp_table",
     "cop_kwp_table_others",
 )
@@ -126,6 +142,8 @@ def _admin_table_rows_payload(
     panel_rows,
     month_profile_rows,
     sun_profile_rows,
+    economics_cost_rows,
+    economics_price_rows,
     price_kwp_rows,
     price_kwp_others_rows,
 ) -> dict[str, list[dict[str, object]] | None]:
@@ -135,6 +153,8 @@ def _admin_table_rows_payload(
         "panel_catalog": panel_rows,
         "month_profile": month_profile_rows,
         "sun_profile": sun_profile_rows,
+        "economics_cost_items": economics_cost_rows,
+        "economics_price_items": economics_price_rows,
         "cop_kwp_table": price_kwp_rows,
         "cop_kwp_table_others": price_kwp_others_rows,
     }
@@ -329,25 +349,11 @@ def translate_admin_page_header(language_value):
 @callback(
     Output("admin-show-all", "options"),
     Output("apply-admin-btn", "children"),
-    Output("profile-editor-title", "children"),
-    Output("profile-editor-note", "children"),
-    Output("month-profile-title", "children"),
-    Output("month-profile-tooltip", "children"),
-    Output("sun-profile-title", "children"),
-    Output("sun-profile-tooltip", "children"),
-    Output("price-kwp-title", "children"),
-    Output("price-kwp-tooltip", "children"),
-    Output("price-kwp-others-title", "children"),
-    Output("price-kwp-others-tooltip", "children"),
-    Output("profile-demand-relocated-title", "children"),
-    Output("profile-demand-relocated-copy", "children"),
-    Output("profile-demand-relocated-link", "children"),
     Output("add-price-kwp-row-btn", "children"),
     Output("add-price-kwp-others-row-btn", "children"),
-    Output("catalog-editor-title", "children"),
-    Output("inverter-editor-title", "children"),
-    Output("battery-editor-title", "children"),
-    Output("panel-editor-title", "children"),
+    Output("add-economics-cost-row-btn", "children"),
+    Output("add-economics-price-row-btn", "children"),
+    Output("sync-economics-hardware-costs-btn", "children"),
     Output("add-inverter-row-btn", "children"),
     Output("add-battery-row-btn", "children"),
     Output("add-panel-row-btn", "children"),
@@ -358,25 +364,11 @@ def translate_admin_secure_content(language_value):
     return (
         [{"label": tr("workbench.assumptions.show_all", lang), "value": "all"}],
         tr("workbench.assumptions.apply", lang),
-        tr("workbench.profiles", lang),
-        tr("workbench.profiles.note", lang),
-        tr("workbench.profiles.month", lang),
-        tr("workbench.profiles.tooltip.month", lang),
-        tr("workbench.profiles.sun", lang),
-        tr("workbench.profiles.tooltip.sun", lang),
-        tr("workbench.profiles.price", lang),
-        tr("workbench.profiles.tooltip.price", lang),
-        tr("workbench.profiles.price_others", lang),
-        tr("workbench.profiles.tooltip.price_others", lang),
-        tr("workspace.assumptions.demand.title", lang),
-        tr("workspace.admin.demand_moved.copy", lang),
-        tr("workspace.admin.demand_moved.link", lang),
         tr("workbench.profiles.add_row", lang),
         tr("workbench.profiles.add_row", lang),
-        tr("workbench.catalogs", lang),
-        tr("workbench.catalogs.inverters", lang),
-        tr("workbench.catalogs.batteries", lang),
-        tr("workbench.catalogs.panels", lang),
+        tr("workbench.profiles.add_row", lang),
+        tr("workbench.profiles.add_row", lang),
+        tr("workspace.admin.economics.sync_hardware", lang),
         tr("workbench.add_row", lang),
         tr("workbench.add_row", lang),
         tr("workbench.add_row", lang),
@@ -418,6 +410,12 @@ def translate_profile_table_activators(language_value, activator_ids=None):
     Output("price-kwp-others-editor", "data"),
     Output("price-kwp-others-editor", "columns"),
     Output("price-kwp-others-editor", "tooltip_header"),
+    Output("economics-cost-items-editor", "data"),
+    Output("economics-cost-items-editor", "columns"),
+    Output("economics-cost-items-editor", "tooltip_header"),
+    Output("economics-price-items-editor", "data"),
+    Output("economics-price-items-editor", "columns"),
+    Output("economics-price-items-editor", "tooltip_header"),
     Input("scenario-session-store", "data"),
     Input("admin-show-all", "value", allow_optional=True),
     Input("language-selector", "value"),
@@ -439,6 +437,8 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
                 context_note_type="admin-assumption-context-note",
             ),
             True,
+            *empty,
+            *empty,
             *empty,
             *empty,
             *empty,
@@ -468,6 +468,8 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
             *empty,
             *empty,
             *empty,
+            *empty,
+            *empty,
         )
     active = state.get_scenario()
     if active is None:
@@ -482,6 +484,8 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
                 context_note_type="admin-assumption-context-note",
             ),
             True,
+            *empty,
+            *empty,
             *empty,
             *empty,
             *empty,
@@ -506,6 +510,16 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
     sun_columns, sun_tooltips = build_table_display_columns("sun_profile", list(display_bundle.sun_profile_table.columns), lang)
     kwp_columns, kwp_tooltips = build_table_display_columns("cop_kwp", list(display_bundle.cop_kwp_table.columns), lang)
     kwp_other_columns, kwp_other_tooltips = build_table_display_columns("cop_kwp_others", list(display_bundle.cop_kwp_table_others.columns), lang)
+    economics_cost_columns, economics_cost_tooltips = build_table_display_columns(
+        "economics_cost_items",
+        list(display_bundle.economics_cost_items_table.columns),
+        lang,
+    )
+    economics_price_columns, economics_price_tooltips = build_table_display_columns(
+        "economics_price_items",
+        list(display_bundle.economics_price_items_table.columns),
+        lang,
+    )
     return (
         render_assumption_sections(
             partition.admin_sections,
@@ -538,6 +552,12 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
         display_bundle.cop_kwp_table_others.to_dict("records"),
         kwp_other_columns,
         kwp_other_tooltips,
+        economics_cost_items_rows_to_editor(display_bundle.economics_cost_items_table),
+        economics_cost_columns,
+        economics_cost_tooltips,
+        economics_price_items_rows_to_editor(display_bundle.economics_price_items_table),
+        economics_price_columns,
+        economics_price_tooltips,
     )
 
 
@@ -667,6 +687,8 @@ def toggle_pricing_table_visibility(session_payload, assumption_input_ids, assum
     Input("sun-profile-editor", "data", allow_optional=True),
     Input("price-kwp-editor", "data", allow_optional=True),
     Input("price-kwp-others-editor", "data", allow_optional=True),
+    Input("economics-cost-items-editor", "data", allow_optional=True),
+    Input("economics-price-items-editor", "data", allow_optional=True),
     prevent_initial_call=True,
 )
 def sync_admin_draft(
@@ -680,6 +702,8 @@ def sync_admin_draft(
     sun_profile_rows,
     price_kwp_rows,
     price_kwp_others_rows,
+    economics_cost_rows,
+    economics_price_rows,
 ):
     if not _admin_page_access(session_payload).allowed:
         raise PreventUpdate
@@ -695,6 +719,8 @@ def sync_admin_draft(
         panel_rows,
         month_profile_rows,
         sun_profile_rows,
+        None if economics_cost_rows is None else economics_cost_items_rows_from_editor(economics_cost_rows),
+        None if economics_price_rows is None else economics_price_items_rows_from_editor(economics_price_rows),
         price_kwp_rows,
         price_kwp_others_rows,
     )
@@ -991,6 +1017,86 @@ def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
 
 
 @callback(
+    Output("economics-cost-items-editor", "data", allow_duplicate=True),
+    Input("add-economics-cost-row-btn", "n_clicks", allow_optional=True),
+    State("economics-cost-items-editor", "data", allow_optional=True),
+    State("economics-cost-items-editor", "columns", allow_optional=True),
+    prevent_initial_call=True,
+)
+def add_economics_cost_row(n_clicks, table_rows, table_columns):
+    if not n_clicks:
+        raise PreventUpdate
+    blank_row = _blank_table_row(table_columns, table_rows)
+    if not blank_row:
+        raise PreventUpdate
+    rows = list(table_rows or [])
+    rows.append(blank_row)
+    return rows
+
+
+@callback(
+    Output("economics-price-items-editor", "data", allow_duplicate=True),
+    Input("add-economics-price-row-btn", "n_clicks", allow_optional=True),
+    State("economics-price-items-editor", "data", allow_optional=True),
+    State("economics-price-items-editor", "columns", allow_optional=True),
+    prevent_initial_call=True,
+)
+def add_economics_price_row(n_clicks, table_rows, table_columns):
+    if not n_clicks:
+        raise PreventUpdate
+    blank_row = _blank_table_row(table_columns, table_rows)
+    if not blank_row:
+        raise PreventUpdate
+    rows = list(table_rows or [])
+    rows.append(blank_row)
+    return rows
+
+
+@callback(
+    Output("economics-cost-items-editor", "data", allow_duplicate=True),
+    Input("sync-economics-hardware-costs-btn", "n_clicks", allow_optional=True),
+    State("scenario-session-store", "data"),
+    State({"type": "admin-assumption-input", "field": ALL}, "id"),
+    State({"type": "admin-assumption-input", "field": ALL}, "value"),
+    State("inverter-table-editor", "data", allow_optional=True),
+    State("battery-table-editor", "data", allow_optional=True),
+    State("panel-table-editor", "data", allow_optional=True),
+    State("economics-cost-items-editor", "data", allow_optional=True),
+    prevent_initial_call=True,
+)
+def sync_economics_hardware_costs(
+    n_clicks,
+    session_payload,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    panel_rows,
+    economics_cost_rows,
+):
+    if not n_clicks or not _admin_page_access(session_payload).allowed:
+        raise PreventUpdate
+    _client_state, state, unlocked = _admin_session(session_payload, None)
+    if not unlocked:
+        raise PreventUpdate
+    active = state.get_scenario()
+    if active is None:
+        raise PreventUpdate
+    config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
+    inverter_catalog, _ = normalize_inverter_catalog_rows(inverter_rows)
+    battery_catalog, _ = normalize_battery_catalog_rows(battery_rows)
+    panel_catalog, _ = normalize_panel_catalog_rows(panel_rows)
+    seeded = seed_hardware_cost_rows_from_catalogs(
+        economics_cost_items_rows_from_editor(economics_cost_rows),
+        config=config,
+        inverter_catalog=inverter_catalog,
+        battery_catalog=battery_catalog,
+        panel_catalog=panel_catalog,
+    )
+    return economics_cost_items_rows_to_editor(seeded)
+
+
+@callback(
     Output("scenario-session-store", "data", allow_duplicate=True),
     Output("workbench-status", "children", allow_duplicate=True),
     Input("apply-admin-btn", "n_clicks", allow_optional=True),
@@ -1005,6 +1111,8 @@ def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
     State("sun-profile-editor", "data", allow_optional=True),
     State("price-kwp-editor", "data", allow_optional=True),
     State("price-kwp-others-editor", "data", allow_optional=True),
+    State("economics-cost-items-editor", "data", allow_optional=True),
+    State("economics-price-items-editor", "data", allow_optional=True),
     State("language-selector", "value"),
     prevent_initial_call=True,
 )
@@ -1021,6 +1129,8 @@ def apply_admin_edits(
     sun_profile_rows,
     price_kwp_rows,
     price_kwp_others_rows,
+    economics_cost_rows,
+    economics_price_rows,
     language_value,
 ):
     lang = _lang(language_value)
@@ -1039,6 +1149,8 @@ def apply_admin_edits(
             panel_rows,
             month_profile_rows,
             sun_profile_rows,
+            None if economics_cost_rows is None else economics_cost_items_rows_from_editor(economics_cost_rows),
+            None if economics_price_rows is None else economics_price_items_rows_from_editor(economics_price_rows),
             price_kwp_rows,
             price_kwp_others_rows,
         )

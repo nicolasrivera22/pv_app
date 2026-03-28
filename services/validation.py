@@ -33,7 +33,8 @@ BATTERY_REQUIRED_COLUMNS = ["name", "nom_kWh", "max_kW", "max_ch_kW", "max_dis_k
 PANEL_REQUIRED_COLUMNS = list(PANEL_CATALOG_COLUMNS)
 INVERTER_NUMERIC_COLUMNS = ["AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max", "Imax_mppt", "n_mppt", "price_COP"]
 BATTERY_NUMERIC_COLUMNS = ["nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"]
-PANEL_NUMERIC_COLUMNS = ["P_mod_W", "Voc25", "Vmp25", "Isc", "length_m", "width_m"]
+PANEL_NUMERIC_COLUMNS = ["P_mod_W", "Voc25", "Vmp25", "Isc", "length_m", "width_m", "price_COP"]
+PANEL_OPTIONAL_COLUMNS = {"price_COP"}
 PRICE_TABLE_REQUIRED_COLUMNS = ["MIN", "MAX", "PRECIO_POR_KWP"]
 PRICE_TABLE_NUMERIC_COLUMNS = ["MIN", "MAX", "PRECIO_POR_KWP"]
 
@@ -357,7 +358,7 @@ def normalize_panel_catalog_rows(rows: list[dict] | None) -> tuple[pd.DataFrame,
 
     for column in PANEL_REQUIRED_COLUMNS:
         if column not in frame.columns:
-            frame[column] = np.nan
+            frame[column] = 0.0 if column in PANEL_OPTIONAL_COLUMNS else np.nan
 
     frame = frame[PANEL_REQUIRED_COLUMNS].copy()
     frame["_source_row"] = range(1, len(frame) + 1)
@@ -368,6 +369,9 @@ def normalize_panel_catalog_rows(rows: list[dict] | None) -> tuple[pd.DataFrame,
         return frame[PANEL_REQUIRED_COLUMNS], issues
 
     for column in PANEL_REQUIRED_COLUMNS:
+        if column in PANEL_OPTIONAL_COLUMNS:
+            frame[column] = frame[column].fillna(0.0)
+            continue
         missing = frame[column].isna()
         for index in frame.index[missing]:
             issues.append(
@@ -418,7 +422,7 @@ def normalize_panel_catalog_rows(rows: list[dict] | None) -> tuple[pd.DataFrame,
                     f"Fila {int(frame.at[index, '_source_row'])}: '{column}' debe ser numérico.",
                 )
             )
-        frame[column] = series
+        frame[column] = series.fillna(0.0) if column in PANEL_OPTIONAL_COLUMNS else series
 
     for index, value in frame["panel_technology_mode"].items():
         if pd.isna(value):

@@ -29,6 +29,8 @@ TABLE_BUNDLE_ATTRS = {
     "panel_catalog": "panel_catalog",
     "month_profile": "month_profile_table",
     "sun_profile": "sun_profile_table",
+    "economics_cost_items": "economics_cost_items_table",
+    "economics_price_items": "economics_price_items_table",
     "cop_kwp_table": "cop_kwp_table",
     "cop_kwp_table_others": "cop_kwp_table_others",
     "demand_profile": "demand_profile_table",
@@ -159,6 +161,8 @@ def resolve_workspace_bundle_for_display(
         demand_profile_general=draft_bundle.demand_profile_general_table,
         month_profile=draft_bundle.month_profile_table,
         sun_profile=draft_bundle.sun_profile_table,
+        economics_cost_items=draft_bundle.economics_cost_items_table,
+        economics_price_items=draft_bundle.economics_price_items_table,
         cop_kwp_table=draft_bundle.cop_kwp_table,
         cop_kwp_table_others=draft_bundle.cop_kwp_table_others,
     )
@@ -198,6 +202,8 @@ def apply_workspace_draft_to_state(
     inverter_rows = _draft_table_rows_or_base(base_bundle, draft, "inverter_catalog")
     battery_rows = _draft_table_rows_or_base(base_bundle, draft, "battery_catalog")
     panel_rows = _draft_table_rows_or_base(base_bundle, draft, "panel_catalog")
+    economics_cost_rows = _draft_table_rows_or_base(base_bundle, draft, "economics_cost_items")
+    economics_price_rows = _draft_table_rows_or_base(base_bundle, draft, "economics_price_items")
     price_rows = _draft_table_rows_or_base(base_bundle, draft, "cop_kwp_table")
     price_other_rows = _draft_table_rows_or_base(base_bundle, draft, "cop_kwp_table_others")
     inverter_catalog, inverter_issues = normalize_inverter_catalog_rows(inverter_rows)
@@ -234,6 +240,14 @@ def apply_workspace_draft_to_state(
         sun_profile=frame_from_rows(
             _draft_table_rows_or_base(base_bundle, draft, "sun_profile"),
             list(base_bundle.sun_profile_table.columns),
+        ),
+        economics_cost_items=frame_from_rows(
+            economics_cost_rows,
+            list(base_bundle.economics_cost_items_table.columns),
+        ),
+        economics_price_items=frame_from_rows(
+            economics_price_rows,
+            list(base_bundle.economics_price_items_table.columns),
         ),
         cop_kwp_table=frame_from_rows(price_kwp_table.to_dict("records"), list(base_bundle.cop_kwp_table.columns)),
         cop_kwp_table_others=frame_from_rows(

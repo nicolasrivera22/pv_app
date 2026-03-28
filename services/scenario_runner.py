@@ -60,6 +60,8 @@ def _build_scan_result(config_bundle: LoadedConfigBundle, *, allow_parallel: boo
         demand_profile_weights_table=config_bundle.demand_profile_weights_table,
         month_profile_table=config_bundle.month_profile_table,
         sun_profile_table=config_bundle.sun_profile_table,
+        economics_cost_items_table=config_bundle.economics_cost_items_table,
+        economics_price_items_table=config_bundle.economics_price_items_table,
         source_name=config_bundle.source_name,
         issues=config_bundle.issues,
     )

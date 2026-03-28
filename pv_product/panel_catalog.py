@@ -28,6 +28,7 @@ PANEL_CATALOG_COLUMNS: tuple[str, ...] = (
     "length_m",
     "width_m",
     "panel_technology_mode",
+    "price_COP",
 )
 
 PANEL_DERIVED_CONFIG_FIELDS: tuple[str, ...] = (
@@ -91,6 +92,7 @@ def default_panel_catalog_rows() -> list[dict[str, Any]]:
             "length_m": 2.278,
             "width_m": 1.134,
             "panel_technology_mode": panel_technology_catalog_label(DEFAULT_CONFIG["panel_technology_mode"], "es"),
+            "price_COP": 620_000.0,
         },
         {
             "name": "PREM-620 Premium",
@@ -101,6 +103,7 @@ def default_panel_catalog_rows() -> list[dict[str, Any]]:
             "length_m": 2.384,
             "width_m": 1.303,
             "panel_technology_mode": panel_technology_catalog_label("premium", "es"),
+            "price_COP": 710_000.0,
         },
         {
             "name": "TRACK-600 Simplified",
@@ -111,6 +114,7 @@ def default_panel_catalog_rows() -> list[dict[str, Any]]:
             "length_m": 2.278,
             "width_m": 1.134,
             "panel_technology_mode": panel_technology_catalog_label("tracker_simplified", "es"),
+            "price_COP": 660_000.0,
         },
     ]
 

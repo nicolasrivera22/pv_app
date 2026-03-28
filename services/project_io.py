@@ -73,6 +73,8 @@ def _write_table_inputs(root: Path, scenario: ScenarioRecord) -> None:
         "Inversor_Catalog": bundle.inverter_catalog,
         "Battery_Catalog": bundle.battery_catalog,
         "Panel_Catalog": bundle.panel_catalog,
+        "Economics_Cost_Items": bundle.economics_cost_items_table,
+        "Economics_Price_Items": bundle.economics_price_items_table,
     }
     for table_name, frame in tables.items():
         frame.to_csv(root / TABLE_FILE_MAP[table_name], index=False)

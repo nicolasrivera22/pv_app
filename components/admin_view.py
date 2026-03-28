@@ -5,7 +5,8 @@ from dash import dcc, html
 from services.i18n import tr
 
 from .catalog_editor import catalog_editor_section
-from .profile_editor import profile_editor_section
+from .economics_editor import economics_editor_section
+from .profile_editor import resource_profile_editor_section, runtime_pricing_editor_section
 
 
 def _admin_navigation_controls(*, lang: str) -> html.Div:
@@ -93,8 +94,10 @@ def admin_secure_content(*, lang: str = "es") -> html.Div:
                 ],
             ),
             html.Div(className="panel assumption-editor-panel", children=[html.Div(id="admin-assumption-sections")]),
-            profile_editor_section(),
-            catalog_editor_section(),
+            resource_profile_editor_section(lang=lang),
+            economics_editor_section(lang=lang),
+            runtime_pricing_editor_section(lang=lang),
+            catalog_editor_section(lang=lang),
         ],
     )
 
