@@ -76,6 +76,33 @@ def test_update_bundle_marks_scenario_dirty_and_clears_scan() -> None:
     assert active.selected_candidate_key is None
 
 
+def test_update_bundle_preserves_scan_for_economics_only_changes() -> None:
+    state = _run_named_scenario("Economics only")
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+
+    changed_costs = active.config_bundle.economics_cost_items_table.copy()
+    changed_prices = active.config_bundle.economics_price_items_table.copy()
+    changed_costs.at[0, "amount_COP"] = 123_456.0
+    changed_prices.at[0, "value"] = 0.15
+    updated_bundle = replace(
+        active.config_bundle,
+        economics_cost_items_table=changed_costs,
+        economics_price_items_table=changed_prices,
+    )
+
+    state = update_scenario_bundle(state, active.scenario_id, updated_bundle)
+    updated = state.get_scenario()
+
+    assert updated is not None
+    assert updated.dirty is False
+    assert updated.scan_result is active.scan_result
+    assert updated.scan_fingerprint == active.scan_fingerprint
+    assert updated.selected_candidate_key == active.selected_candidate_key
+    assert state.project_dirty is True
+
+
 def test_selected_candidate_resets_after_scenario_change_and_rerun() -> None:
     state = _run_named_scenario("Selection test")
     active = state.get_scenario()

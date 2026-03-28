@@ -926,6 +926,7 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
         "stage_or_layer": TableColumnUiSchema("Etapa / capa", "Stage / layer", "Etapa de costo o capa de precio usada en la línea.", "Cost stage or price layer used in the line."),
         "name": TableColumnUiSchema("Partida", "Item", "Nombre visible de la línea calculada.", "Visible name of the calculated line."),
         "rule": TableColumnUiSchema("Regla", "Rule", "Basis o method aplicado en la línea.", "Basis or method applied in the line."),
+        "calculation": TableColumnUiSchema("Cálculo", "Calculation", "Explicación breve de cómo se calculó la línea con sus cantidades y base.", "Short explanation of how the line was calculated with its quantities and base."),
         "multiplier": TableColumnUiSchema("Multiplicador", "Multiplier", "Cantidad usada para multiplicar la tarifa o monto.", "Quantity used to multiply the rate or amount.", "number", 3, "numeric"),
         "unit_rate_COP": TableColumnUiSchema("Tarifa / monto", "Rate / amount", "Monto unitario normalizado usado en la línea. Para markup_pct guarda la tasa decimal.", "Normalized unit amount used in the line. For markup_pct it stores the decimal rate.", "number", 3, "numeric"),
         "base_amount_COP": TableColumnUiSchema("Base [COP]", "Base [COP]", "Base monetaria usada por markup_pct. Queda vacía cuando no aplica.", "Monetary base used by markup_pct. Empty when not applicable.", "currency_cop", 0, "numeric"),

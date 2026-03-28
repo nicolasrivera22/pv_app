@@ -25,6 +25,7 @@ from .economics_tables import (
     economics_price_items_rows_to_editor,
 )
 from .economics_engine import (
+    PREVIEW_STATE_NO_SCAN,
     PREVIEW_STATE_READY,
     EconomicsPreviewResult,
     resolve_economics_preview,
@@ -276,6 +277,22 @@ def _format_cop_per_kwp(value: float | None, lang: str) -> str:
     return f"{_format_cop(value, lang)} / kWp"
 
 
+def _format_number(value: float | int | None, *, decimals: int = 3) -> str:
+    if value is None:
+        return "-"
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.{decimals}f}".rstrip("0").rstrip(".")
+
+
+def _format_percent(value: float | None) -> str:
+    if value is None:
+        return "-"
+    formatted = f"{float(value) * 100:.1f}".rstrip("0").rstrip(".")
+    return f"{formatted}%"
+
+
 def _economics_summary_card(label: str, value: str) -> html.Div:
     return html.Div(
         className="scan-summary-card",
@@ -286,16 +303,72 @@ def _economics_summary_card(label: str, value: str) -> html.Div:
     )
 
 
-def _economics_breakdown_table(rows: list[dict[str, object]], *, lang: str):
+def _economics_breakdown_formula(row: dict[str, object], *, lang: str) -> str:
+    rule = str(row.get("rule") or "")
+    multiplier = float(row.get("multiplier", 0.0) or 0.0)
+    unit_rate = float(row.get("unit_rate_COP", 0.0) or 0.0)
+    base_amount = row.get("base_amount_COP")
+    quantity_labels = {
+        "en": {
+            "per_kwp": "kWp",
+            "per_panel": "panels",
+            "per_inverter": "inverter(s)",
+            "per_battery_kwh": "battery kWh",
+        },
+        "es": {
+            "per_kwp": "kWp",
+            "per_panel": "paneles",
+            "per_inverter": "inversor(es)",
+            "per_battery_kwh": "kWh batería",
+        },
+    }
+    if rule == "markup_pct":
+        return f"{_format_percent(unit_rate)} x {_format_cop(None if base_amount is None else float(base_amount), lang)}"
+    if rule == "fixed_project":
+        return f"1 x {_format_cop(unit_rate, lang)}"
+    unit = quantity_labels.get(lang, quantity_labels["es"]).get(rule, "")
+    quantity = _format_number(multiplier, decimals=3)
+    unit_suffix = f" {unit}" if unit else ""
+    return f"{quantity}{unit_suffix} x {_format_cop(unit_rate, lang)}"
+
+
+def _economics_breakdown_rows(rows, *, lang: str) -> list[dict[str, object]]:
+    return [
+        {
+            "source_table": row.source_table,
+            "source_row": row.source_row,
+            "stage_or_layer": row.stage_or_layer,
+            "name": row.name,
+            "rule": row.rule,
+            "calculation": _economics_breakdown_formula(
+                {
+                    "rule": row.rule,
+                    "multiplier": row.multiplier,
+                    "unit_rate_COP": row.unit_rate_COP,
+                    "base_amount_COP": row.base_amount_COP,
+                },
+                lang=lang,
+            ),
+            "multiplier": row.multiplier,
+            "unit_rate_COP": row.unit_rate_COP,
+            "base_amount_COP": row.base_amount_COP,
+            "line_amount_COP": row.line_amount_COP,
+            "notes": row.notes,
+        }
+        for row in rows
+    ]
+
+
+def _economics_breakdown_table(table_id: str, rows: list[dict[str, object]], *, lang: str):
     columns, tooltip_header = build_table_display_columns(
         "economics_breakdown",
         [
             "source_table",
             "source_row",
-            "group",
             "stage_or_layer",
             "name",
             "rule",
+            "calculation",
             "multiplier",
             "unit_rate_COP",
             "base_amount_COP",
@@ -305,13 +378,13 @@ def _economics_breakdown_table(rows: list[dict[str, object]], *, lang: str):
         lang,
     )
     return dash_table.DataTable(
-        id="economics-breakdown-table",
+        id=table_id,
         data=rows,
         columns=columns,
         tooltip_header=tooltip_header,
         editable=False,
         row_deletable=False,
-        sort_action="native",
+        sort_action="none",
         page_size=12,
         style_table={"overflowX": "auto"},
         style_cell={
@@ -330,34 +403,200 @@ def _economics_breakdown_table(rows: list[dict[str, object]], *, lang: str):
     )
 
 
-def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
-    status_key = preview.message_key or "workspace.admin.economics.preview.state.no_scan"
-    status_line = html.Div(
-        tr(status_key, lang),
-        id="economics-preview-status",
-        className="status-line economics-preview-status",
+def _economics_preview_state_block(preview: EconomicsPreviewResult, *, lang: str) -> html.Div:
+    state_key = preview.state or PREVIEW_STATE_NO_SCAN
+    title = tr(f"workspace.admin.economics.preview.state.{state_key}.title", lang)
+    detail = tr(f"workspace.admin.economics.preview.state.{state_key}.detail", lang)
+    body = tr(preview.message_key or "workspace.admin.economics.preview.state.no_scan", lang)
+    return html.Div(
+        id="economics-preview-state-shell",
+        className="subpanel economics-preview-state-shell",
+        children=[
+            html.H5(title, id="economics-preview-state-title"),
+            html.Div(body, id="economics-preview-status", className="status-line economics-preview-status"),
+            html.P(detail, id="economics-preview-state-detail", className="section-copy"),
+        ],
     )
+
+
+def _economics_quantity_card(label: str, value: str) -> html.Div:
+    return html.Div(
+        className="field-card economics-preview-quantity-card",
+        children=[
+            html.Span(label, className="scan-summary-label"),
+            html.Strong(value, className="scan-summary-value"),
+        ],
+    )
+
+
+def _economics_preview_quantities(result, *, lang: str) -> html.Div:
+    quantities = result.quantities
+    return html.Div(
+        id="economics-preview-quantities-shell",
+        className="subpanel economics-preview-quantities-shell",
+        children=[
+            html.Div(
+                className="section-head",
+                children=[html.H5(tr("workspace.admin.economics.preview.quantities.title", lang), id="economics-preview-quantities-title")],
+            ),
+            html.Div(
+                tr(
+                    "workspace.admin.economics.preview.meta",
+                    lang,
+                    candidate_key=quantities.candidate_key,
+                    kWp=quantities.kWp,
+                    panel_count=quantities.panel_count,
+                    inverter_count=quantities.inverter_count,
+                    battery_kwh=quantities.battery_kwh,
+                ),
+                id="economics-preview-meta",
+                className="status-line economics-preview-meta",
+            ),
+            html.Div(
+                id="economics-preview-quantities-grid",
+                className="economics-preview-quantities-grid",
+                children=[
+                    _economics_quantity_card(tr("workspace.admin.economics.preview.quantity.candidate", lang), quantities.candidate_key),
+                    _economics_quantity_card(
+                        tr("workspace.admin.economics.preview.quantity.kwp", lang),
+                        f"{_format_number(quantities.kWp, decimals=3)} kWp",
+                    ),
+                    _economics_quantity_card(
+                        tr("workspace.admin.economics.preview.quantity.panel_count", lang),
+                        _format_number(quantities.panel_count, decimals=0),
+                    ),
+                    _economics_quantity_card(
+                        tr("workspace.admin.economics.preview.quantity.inverter_count", lang),
+                        _format_number(quantities.inverter_count, decimals=0),
+                    ),
+                    _economics_quantity_card(
+                        tr("workspace.admin.economics.preview.quantity.battery_kwh", lang),
+                        f"{_format_number(quantities.battery_kwh, decimals=1)} kWh",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def _economics_flow_card(*, component_id: str, title: str, formula: str, value: str) -> html.Div:
+    return html.Div(
+        id=component_id,
+        className="field-card economics-preview-flow-card",
+        children=[
+            html.Span(title, className="scan-summary-label"),
+            html.Strong(value, className="scan-summary-value"),
+            html.Span(formula, className="section-copy"),
+        ],
+    )
+
+
+def _economics_preview_flow(result, *, lang: str) -> html.Div:
+    steps = [
+        (
+            "economics-preview-flow-technical",
+            tr("workspace.admin.economics.preview.summary.technical", lang),
+            tr("workspace.admin.economics.preview.flow.formula.technical", lang),
+            _format_cop(result.technical_subtotal_COP, lang),
+        ),
+        (
+            "economics-preview-flow-installed",
+            tr("workspace.admin.economics.preview.summary.installed", lang),
+            tr("workspace.admin.economics.preview.flow.formula.installed", lang),
+            _format_cop(result.installed_subtotal_COP, lang),
+        ),
+        (
+            "economics-preview-flow-cost-total",
+            tr("workspace.admin.economics.preview.summary.cost_total", lang),
+            tr("workspace.admin.economics.preview.flow.formula.cost_total", lang),
+            _format_cop(result.cost_total_COP, lang),
+        ),
+        (
+            "economics-preview-flow-commercial-adjustment",
+            tr("workspace.admin.economics.preview.summary.commercial_adjustment", lang),
+            tr("workspace.admin.economics.preview.flow.formula.commercial_adjustment", lang),
+            _format_cop(result.commercial_adjustment_COP, lang),
+        ),
+        (
+            "economics-preview-flow-commercial-offer",
+            tr("workspace.admin.economics.preview.summary.commercial_offer", lang),
+            tr("workspace.admin.economics.preview.flow.formula.commercial_offer", lang),
+            _format_cop(result.commercial_offer_COP, lang),
+        ),
+        (
+            "economics-preview-flow-sale-adjustment",
+            tr("workspace.admin.economics.preview.summary.sale_adjustment", lang),
+            tr("workspace.admin.economics.preview.flow.formula.sale_adjustment", lang),
+            _format_cop(result.sale_adjustment_COP, lang),
+        ),
+        (
+            "economics-preview-flow-final-price",
+            tr("workspace.admin.economics.preview.summary.final_price", lang),
+            tr("workspace.admin.economics.preview.flow.formula.final_price", lang),
+            _format_cop(result.final_price_COP, lang),
+        ),
+        (
+            "economics-preview-flow-final-price-per-kwp",
+            tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
+            tr("workspace.admin.economics.preview.flow.formula.final_price_per_kwp", lang),
+            _format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
+        ),
+    ]
+    return html.Div(
+        id="economics-preview-flow-shell",
+        className="subpanel economics-preview-flow-shell",
+        children=[
+            html.Div(
+                className="section-head",
+                children=[html.H5(tr("workspace.admin.economics.preview.flow_live.title", lang), id="economics-preview-flow-title")],
+            ),
+            html.P(tr("workspace.admin.economics.preview.flow_live.copy", lang), className="section-copy"),
+            html.Div(
+                id="economics-preview-flow-grid",
+                className="economics-preview-flow-grid",
+                children=[
+                    _economics_flow_card(component_id=component_id, title=title, formula=formula, value=value)
+                    for component_id, title, formula, value in steps
+                ],
+            ),
+            html.Div(tr("workspace.admin.economics.preview.flow.note_markup", lang), className="status-line economics-preview-note"),
+            html.Div(tr("workspace.admin.economics.preview.flow.note_derived", lang), className="status-line economics-preview-note"),
+        ],
+    )
+
+
+def _economics_breakdown_group(
+    *,
+    group_id: str,
+    title: str,
+    subtotal_label: str,
+    subtotal_value: float | None,
+    rows,
+    lang: str,
+) -> html.Div:
+    table_rows = _economics_breakdown_rows(rows, lang=lang)
+    children = [
+        html.Div(
+            className="section-head",
+            children=[
+                html.H5(title, id=f"{group_id}-title"),
+                html.Div(f"{subtotal_label}: {_format_cop(subtotal_value, lang)}", id=f"{group_id}-total", className="status-line"),
+            ],
+        )
+    ]
+    if table_rows:
+        children.append(_economics_breakdown_table(f"{group_id}-table", table_rows, lang=lang))
+    else:
+        children.append(html.Div(tr("workspace.admin.economics.preview.breakdown.empty", lang), className="status-line"))
+    return html.Div(id=f"{group_id}-shell", className="profile-table-subsection economics-breakdown-group-shell", children=children)
+
+
+def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
+    state_block = _economics_preview_state_block(preview, lang=lang)
     if preview.state != PREVIEW_STATE_READY or preview.result is None:
-        return [status_line]
+        return [state_block]
 
     result = preview.result
-    quantities = result.quantities
-    breakdown_rows = [
-        {
-            "source_table": row.source_table,
-            "source_row": row.source_row,
-            "group": row.group,
-            "stage_or_layer": row.stage_or_layer,
-            "name": row.name,
-            "rule": row.rule,
-            "multiplier": row.multiplier,
-            "unit_rate_COP": row.unit_rate_COP,
-            "base_amount_COP": row.base_amount_COP,
-            "line_amount_COP": row.line_amount_COP,
-            "notes": row.notes,
-        }
-        for row in [*result.cost_rows, *result.price_rows]
-    ]
     summary_cards = html.Div(
         id="economics-summary-cards",
         className="kpi-grid",
@@ -375,8 +614,16 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
                 _format_cop(result.cost_total_COP, lang),
             ),
             _economics_summary_card(
+                tr("workspace.admin.economics.preview.summary.commercial_adjustment", lang),
+                _format_cop(result.commercial_adjustment_COP, lang),
+            ),
+            _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.commercial_offer", lang),
                 _format_cop(result.commercial_offer_COP, lang),
+            ),
+            _economics_summary_card(
+                tr("workspace.admin.economics.preview.summary.sale_adjustment", lang),
+                _format_cop(result.sale_adjustment_COP, lang),
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.final_price", lang),
@@ -388,27 +635,52 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
             ),
         ],
     )
-    meta_line = html.Div(
-        tr(
-            "workspace.admin.economics.preview.meta",
-            lang,
-            candidate_key=quantities.candidate_key,
-            kWp=quantities.kWp,
-            panel_count=quantities.panel_count,
-            inverter_count=quantities.inverter_count,
-            battery_kwh=quantities.battery_kwh,
-        ),
-        id="economics-preview-meta",
-        className="status-line economics-preview-meta",
-    )
     breakdown_shell = html.Div(
-        className="profile-table-subsection",
+        id="economics-breakdown-shell",
+        className="subpanel economics-breakdown-shell",
         children=[
             html.H5(tr("workspace.admin.economics.preview.breakdown.title", lang), id="economics-breakdown-title"),
-            _economics_breakdown_table(breakdown_rows, lang=lang),
+            _economics_breakdown_group(
+                group_id="economics-breakdown-technical",
+                title=tr("workspace.admin.economics.preview.breakdown.group.technical", lang),
+                subtotal_label=tr("workspace.admin.economics.preview.summary.technical", lang),
+                subtotal_value=result.technical_subtotal_COP,
+                rows=[row for row in result.cost_rows if row.stage_or_layer == "technical"],
+                lang=lang,
+            ),
+            _economics_breakdown_group(
+                group_id="economics-breakdown-installed",
+                title=tr("workspace.admin.economics.preview.breakdown.group.installed", lang),
+                subtotal_label=tr("workspace.admin.economics.preview.summary.installed", lang),
+                subtotal_value=result.installed_subtotal_COP,
+                rows=[row for row in result.cost_rows if row.stage_or_layer == "installed"],
+                lang=lang,
+            ),
+            _economics_breakdown_group(
+                group_id="economics-breakdown-commercial",
+                title=tr("workspace.admin.economics.preview.breakdown.group.commercial", lang),
+                subtotal_label=tr("workspace.admin.economics.preview.summary.commercial_adjustment", lang),
+                subtotal_value=result.commercial_adjustment_COP,
+                rows=[row for row in result.price_rows if row.stage_or_layer == "commercial"],
+                lang=lang,
+            ),
+            _economics_breakdown_group(
+                group_id="economics-breakdown-sale",
+                title=tr("workspace.admin.economics.preview.breakdown.group.sale", lang),
+                subtotal_label=tr("workspace.admin.economics.preview.summary.sale_adjustment", lang),
+                subtotal_value=result.sale_adjustment_COP,
+                rows=[row for row in result.price_rows if row.stage_or_layer == "sale"],
+                lang=lang,
+            ),
         ],
     )
-    return [status_line, meta_line, summary_cards, breakdown_shell]
+    return [
+        state_block,
+        _economics_preview_quantities(result, lang=lang),
+        _economics_preview_flow(result, lang=lang),
+        summary_cards,
+        breakdown_shell,
+    ]
 
 
 ADMIN_EXCLUDED_FIELDS = {"use_excel_profile", "alpha_mix", "E_month_kWh"}
@@ -1325,7 +1597,7 @@ def apply_admin_edits(
             owned_tables=owned_tables,
             project_slug=state.project_slug,
         )
-        state, _ = apply_workspace_draft_to_state(
+        state, updated = apply_workspace_draft_to_state(
             state,
             session_id=client_state.session_id,
             scenario_id=active.scenario_id,
@@ -1338,7 +1610,7 @@ def apply_admin_edits(
         status = _join_status_parts(
             tr("workbench.run_flow.applied", lang),
             tr("workbench.run_flow.saved", lang) if saved else "",
-            tr("workbench.run_flow.needs_rerun", lang),
+            tr("workbench.run_flow.needs_rerun", lang) if updated.dirty else "",
         )
         return client_state.to_payload(), status
     except PreventUpdate:

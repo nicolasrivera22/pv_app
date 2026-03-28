@@ -159,16 +159,37 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
     if scenario is None:
         raise KeyError(f"No existe el escenario '{scenario_id}'.")
     refreshed_bundle = refresh_bundle_issues(bundle)
-    updated = replace(
-        scenario,
-        config_bundle=refreshed_bundle,
-        source_name=refreshed_bundle.source_name,
-        scan_result=None,
-        scan_fingerprint=None,
-        selected_candidate_key=None,
-        dirty=True,
-        last_run_at=None,
-    )
+    preserve_scan = False
+    next_fingerprint: str | None = None
+    if scenario.scan_result is not None and not scenario.dirty:
+        next_fingerprint = fingerprint_deterministic_input(refreshed_bundle)
+        current_fingerprint = scenario.scan_fingerprint or fingerprint_deterministic_input(scenario.config_bundle)
+        preserve_scan = next_fingerprint == current_fingerprint
+    if preserve_scan and scenario.scan_result is not None:
+        if scenario.selected_candidate_key in scenario.scan_result.candidate_details:
+            selected_candidate_key = scenario.selected_candidate_key
+        else:
+            selected_candidate_key = scenario.scan_result.best_candidate_key
+        updated = replace(
+            scenario,
+            config_bundle=refreshed_bundle,
+            source_name=refreshed_bundle.source_name,
+            scan_result=scenario.scan_result,
+            scan_fingerprint=next_fingerprint or scenario.scan_fingerprint,
+            selected_candidate_key=selected_candidate_key,
+            dirty=False,
+        )
+    else:
+        updated = replace(
+            scenario,
+            config_bundle=refreshed_bundle,
+            source_name=refreshed_bundle.source_name,
+            scan_result=None,
+            scan_fingerprint=None,
+            selected_candidate_key=None,
+            dirty=True,
+            last_run_at=None,
+        )
     return _mark_project_dirty(_replace_scenario(state, updated))
 
 

@@ -549,27 +549,49 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     price_rows = active.config_bundle.economics_price_items_table.to_dict("records")
     cost_rows[0] = {**cost_rows[0], "amount_COP": 100_000.0}
     price_rows[0] = {**price_rows[0], "value": 10}
+    price_rows[2] = {**price_rows[2], "enabled": True, "value": 500_000.0}
 
     children = render_economics_preview(payload, cost_rows, price_rows, "es")
 
     status = _find_component(children, "economics-preview-status")
+    quantities_shell = _find_component(children, "economics-preview-quantities-shell")
+    flow_shell = _find_component(children, "economics-preview-flow-shell")
     summary_cards = _find_component(children, "economics-summary-cards")
     breakdown_title = _find_component(children, "economics-breakdown-title")
-    breakdown_table = _find_component(children, "economics-breakdown-table")
+    technical_shell = _find_component(children, "economics-breakdown-technical-shell")
+    installed_shell = _find_component(children, "economics-breakdown-installed-shell")
+    commercial_shell = _find_component(children, "economics-breakdown-commercial-shell")
+    sale_shell = _find_component(children, "economics-breakdown-sale-shell")
+    technical_table = _find_component(children, "economics-breakdown-technical-table")
+    commercial_table = _find_component(children, "economics-breakdown-commercial-table")
+    sale_table = _find_component(children, "economics-breakdown-sale-table")
 
     assert status is not None
     assert "diseño determinístico actual" in str(status.children)
+    assert quantities_shell is not None
+    assert flow_shell is not None
     assert summary_cards is not None
-    assert len(summary_cards.children) == 6
+    assert len(summary_cards.children) == 8
     assert breakdown_title is not None
     assert str(breakdown_title.children) == "Desglose económico"
-    assert breakdown_table is not None
-    assert len(breakdown_table.data) >= 2
+    assert technical_shell is not None
+    assert installed_shell is not None
+    assert commercial_shell is not None
+    assert sale_shell is not None
+    assert technical_table is not None
+    assert commercial_table is not None
+    assert sale_table is not None
+    assert len(technical_table.data) >= 1
+    assert len(commercial_table.data) >= 1
+    assert len(sale_table.data) >= 1
+    assert "calculation" in technical_table.data[0]
+    assert "x" in str(technical_table.data[0]["calculation"])
 
 
-def test_render_economics_preview_reports_rerun_required_when_scenario_is_dirty(monkeypatch, tmp_path) -> None:
+def test_render_economics_preview_reports_no_scan_after_scan_invalidating_change(monkeypatch, tmp_path) -> None:
     client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
-    state = update_scenario_bundle(state, active.scenario_id, active.config_bundle)
+    dirty_bundle = replace(active.config_bundle, config={**active.config_bundle.config, "PR": 0.85})
+    state = update_scenario_bundle(state, active.scenario_id, dirty_bundle)
     payload = commit_client_session(client_state, state).to_payload()
     active = state.get_scenario()
     assert active is not None
@@ -579,12 +601,25 @@ def test_render_economics_preview_reports_rerun_required_when_scenario_is_dirty(
 
     status = _find_component(children, "economics-preview-status")
     summary_cards = _find_component(children, "economics-summary-cards")
-    breakdown_table = _find_component(children, "economics-breakdown-table")
+    breakdown_table = _find_component(children, "economics-breakdown-technical-table")
 
     assert status is not None
-    assert "Vuelve a correr el escaneo determinístico" in str(status.children)
+    assert "Ejecuta el escaneo determinístico" in str(status.children)
     assert summary_cards is None
     assert breakdown_table is None
+
+
+def test_render_economics_preview_reports_no_scan_when_scenario_has_no_scan(monkeypatch, tmp_path) -> None:
+    _client_state, _state, _active, payload = _admin_payload(monkeypatch, tmp_path)
+
+    children = render_economics_preview(payload, None, None, "es")
+
+    status = _find_component(children, "economics-preview-status")
+    summary_cards = _find_component(children, "economics-summary-cards")
+
+    assert status is not None
+    assert "Ejecuta el escaneo determinístico" in str(status.children)
+    assert summary_cards is None
 
 
 def test_render_economics_preview_reports_candidate_missing(monkeypatch, tmp_path) -> None:
@@ -604,3 +639,53 @@ def test_render_economics_preview_reports_candidate_missing(monkeypatch, tmp_pat
     status = _find_component(children, "economics-preview-status")
     assert status is not None
     assert "No hay un diseño determinístico disponible" in str(status.children)
+
+
+def test_apply_admin_edits_preserves_scan_for_economics_only_changes_and_preview_stays_ready(monkeypatch, tmp_path) -> None:
+    client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    state = save_project(state, project_name="Proyecto Economics Preview", language="es")
+    payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+
+    economics_cost_rows = active.config_bundle.economics_cost_items_table.to_dict("records")
+    economics_price_rows = active.config_bundle.economics_price_items_table.to_dict("records")
+    economics_cost_rows[0] = {**economics_cost_rows[0], "amount_COP": 456_000.0}
+    economics_price_rows[0] = {**economics_price_rows[0], "value": 14}
+
+    next_payload, status = apply_admin_edits(
+        1,
+        payload,
+        "Proyecto Economics Preview",
+        [],
+        [],
+        active.config_bundle.inverter_catalog.to_dict("records"),
+        active.config_bundle.battery_catalog.to_dict("records"),
+        active.config_bundle.panel_catalog.to_dict("records"),
+        active.config_bundle.month_profile_table.to_dict("records"),
+        active.config_bundle.sun_profile_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table_others.to_dict("records"),
+        economics_cost_rows,
+        economics_price_rows,
+        "es",
+    )
+
+    _, updated_state = resolve_client_session(next_payload, language="es")
+    updated_active = updated_state.get_scenario()
+
+    assert updated_active is not None
+    assert updated_active.scan_result is not None
+    assert updated_active.scan_fingerprint == active.scan_fingerprint
+    assert updated_active.selected_candidate_key == active.selected_candidate_key
+    assert updated_active.dirty is False
+    assert "pendientes hasta volver a ejecutar" not in status
+
+    preview_children = render_economics_preview(next_payload, None, None, "es")
+    preview_status = _find_component(preview_children, "economics-preview-status")
+    preview_summary = _find_component(preview_children, "economics-summary-cards")
+
+    assert preview_status is not None
+    assert "diseño determinístico actual" in str(preview_status.children)
+    assert preview_summary is not None

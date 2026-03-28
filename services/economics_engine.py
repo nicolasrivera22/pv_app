@@ -281,15 +281,15 @@ def resolve_economics_preview(
     economics_cost_items: pd.DataFrame | list[dict[str, Any]] | None,
     economics_price_items: pd.DataFrame | list[dict[str, Any]] | None,
 ) -> EconomicsPreviewResult:
-    if scenario.dirty:
-        return EconomicsPreviewResult(
-            state=PREVIEW_STATE_RERUN_REQUIRED,
-            message_key="workspace.admin.economics.preview.state.rerun_required",
-        )
     if scenario.scan_result is None:
         return EconomicsPreviewResult(
             state=PREVIEW_STATE_NO_SCAN,
             message_key="workspace.admin.economics.preview.state.no_scan",
+        )
+    if scenario.dirty:
+        return EconomicsPreviewResult(
+            state=PREVIEW_STATE_RERUN_REQUIRED,
+            message_key="workspace.admin.economics.preview.state.rerun_required",
         )
 
     candidate_key: str | None = None
