@@ -10,7 +10,9 @@ from dash.exceptions import PreventUpdate
 import pandas as pd
 import pytest
 
-from app import create_app
+from app import _nav_link_class_name, create_app
+import services.workspace_shared_callbacks as shared_callbacks
+import services.workspace_results_callbacks as results_callbacks
 from components.risk_controls import risk_controls_section
 from components.risk_charts import risk_charts_section
 from components.risk_tables import risk_tables_section
@@ -21,6 +23,7 @@ from components.candidate_explorer import candidate_explorer_section
 from components.selected_candidate_deep_dive import selected_candidate_deep_dive_section
 from components.profile_editor import profile_editor_section
 from components.catalog_editor import catalog_editor_section
+from pages import risk as risk_page
 from pages import workbench as workbench_page
 help_page = importlib.import_module("pages.help")
 from services import (
@@ -42,11 +45,13 @@ from services import (
     load_example_config,
     normalize_price_table_rows,
     rebuild_bundle_from_ui,
+    resolve_client_session,
     run_monte_carlo,
     run_scan,
     run_scenario_scan,
     save_project,
     tr,
+    update_selected_candidate,
 )
 from services.result_views import (
     build_annual_coverage_figure,
@@ -60,6 +65,7 @@ from services.result_views import (
 from services.result_views import build_cash_flow, build_cash_flow_figure
 from services.ui_schema import field_help, field_label, metric_label
 from services.workbench_ui import demand_profile_visibility, frame_from_rows
+from services.workspace_shared_callbacks import populate_workspace_shell
 
 
 def _fast_bundle():
@@ -145,6 +151,14 @@ def test_app_defaults_to_spanish() -> None:
     assert help_nav.children == "Ayuda"
 
 
+def test_nav_link_class_name_uses_exact_root_and_prefix_matches() -> None:
+    assert _nav_link_class_name("/", "/") == "nav-link nav-link-active"
+    assert _nav_link_class_name("/assumptions", "/") == "nav-link"
+    assert _nav_link_class_name("/assumptions", "/assumptions") == "nav-link nav-link-active"
+    assert _nav_link_class_name("/assumptions/demand", "/assumptions") == "nav-link nav-link-active"
+    assert _nav_link_class_name("/help/", "/help") == "nav-link nav-link-active"
+
+
 def test_help_page_renders_real_product_help_content() -> None:
     layout = help_page.layout() if callable(help_page.layout) else help_page.layout
     title = _find_component(layout, "help-page-title")
@@ -158,17 +172,53 @@ def test_first_render_placeholders_are_spanish_first() -> None:
     sidebar = scenario_sidebar()
     rename_input = _find_component(sidebar, "rename-scenario-input")
     rename_note = _find_component(sidebar, "rename-scenario-note")
+    project_delete_btn = _find_component(sidebar, "delete-project-btn")
     risk_controls = risk_controls_section()
     risk_scenario_dropdown = _find_component(risk_controls, "risk-scenario-dropdown")
     risk_candidate_dropdown = _find_component(risk_controls, "risk-candidate-dropdown")
 
-    assert _find_component(sidebar, "load-example-btn") is None
+    assert _find_component(sidebar, "scenario-start-title").children == tr("workbench.sidebar.start.title", "es")
+    assert _find_component(sidebar, "scenario-upload-title").children == tr("workbench.import_excel.title", "es")
+    assert _find_component(sidebar, "new-scenario-btn").children == tr("workbench.load_example", "es")
+    assert project_delete_btn is not None
     assert _find_component(sidebar, "scenario-dropdown") is None
     assert _find_component(sidebar, "set-active-scenario-btn") is None
     assert rename_input.placeholder == "Nombre del escenario"
     assert rename_note.children == tr("workbench.rename_active_note", "es")
     assert risk_scenario_dropdown.placeholder == "Selecciona un escenario completado"
     assert risk_candidate_dropdown.placeholder == "Selecciona un diseño factible"
+
+
+def test_project_toolbar_uses_two_row_grid_and_includes_delete_project() -> None:
+    sidebar = scenario_sidebar()
+    action_grid = _find_component_with_class(sidebar, "project-action-grid")
+
+    assert action_grid is not None
+    assert [child.id for child in action_grid.children] == [
+        "save-project-btn",
+        "open-project-btn",
+        "save-project-as-btn",
+        "delete-project-btn",
+    ]
+    assert all("project-action-btn" in str(getattr(child, "className", "")) for child in action_grid.children)
+
+
+def test_workspace_shell_empty_state_surfaces_start_ctas_and_disables_irrelevant_actions(monkeypatch) -> None:
+    monkeypatch.setattr("services.workspace_shared_callbacks.list_projects", lambda: [])
+    payload = _session_payload(ScenarioSessionState.empty())
+
+    outputs = populate_workspace_shell(payload, "es")
+
+    assert outputs[4] == tr("workbench.project.empty_note", "es")
+    assert outputs[5] == {"display": "block"}
+    assert outputs[7] is True
+    assert outputs[8] is True
+    assert outputs[9] is True
+    assert outputs[10] == {"display": "none"}
+    assert outputs[12] == tr("workbench.sidebar.start.copy", "es")
+    assert outputs[13] == {"display": "grid"}
+    assert outputs[14] == tr("workbench.no_active_scenario", "es")
+    assert outputs[15] == {"display": "block"}
 
 
 def test_risk_chart_section_stacks_full_width_cards_with_descriptions() -> None:
@@ -336,7 +386,7 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
     assert price_columns[1]["type"] == "numeric"
     assert battery_columns[0]["name"] == "Energía nominal [kWh]"
     assert battery_columns[1]["name"] == "Potencia máx [kW]"
-    assert weight_columns[0]["name"] == "Peso res [%]"
+    assert weight_columns[0]["name"] == "Peso residencial"
     assert month_columns[0]["name"] == "Factor demanda"
     assert month_columns[1]["name"] == "Factor HSP"
     assert sun_columns[0]["name"] == "Participación solar [%]"
@@ -357,12 +407,28 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
     assert catalog_table.tooltip_duration is None
 
 
+def test_catalog_editor_stacks_inverter_then_battery_tables() -> None:
+    section = catalog_editor_section()
+    stack = section.children[1]
+    first_panel, second_panel = stack.children
+
+    assert "catalog-stack" in str(getattr(stack, "className", "")).split()
+    assert len(stack.children) == 2
+    assert _find_component(first_panel, "inverter-editor-title") is not None
+    assert _find_component(first_panel, "inverter-table-editor") is not None
+    assert _find_component(first_panel, "battery-table-editor") is None
+    assert _find_component(second_panel, "battery-editor-title") is not None
+    assert _find_component(second_panel, "battery-table-editor") is not None
+    assert _find_component(second_panel, "inverter-table-editor") is None
+
+
 def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_controls() -> None:
     section = profile_editor_section()
     main_grid = _find_component(section, "profile-main-grid")
     main_chart = _find_component(section, "profile-main-chart-panel")
     secondary_grid = _find_component(section, "profile-secondary-grid")
     secondary_chart = _find_component(section, "profile-secondary-chart-panel")
+    relocation_card = _find_component(section, "profile-demand-relocated-card")
     activators = _find_components(
         section,
         lambda node: isinstance(getattr(node, "id", None), dict) and node.id.get("type") == "profile-table-activate",
@@ -372,50 +438,51 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
     assert main_chart is not None
     assert secondary_grid is not None
     assert secondary_chart is not None
+    assert relocation_card is not None
+    assert _find_component(section, "profile-demand-legacy-shell") is None
     assert _find_component(workbench_page.layout, "active-profile-table-state") is not None
-    assert len(main_grid.children) == 3
-    assert len(secondary_grid.children) == 4
-    assert [getattr(child, "id", None) for child in section.children[2:6]] == [
+    assert len(main_grid.children) == 2
+    assert len(secondary_grid.children) == 2
+    assert [getattr(child, "id", None) for child in section.children[2:7]] == [
         "profile-main-grid",
         "profile-main-chart-panel",
         "profile-secondary-grid",
+        "profile-demand-relocated-card",
         "profile-secondary-chart-panel",
     ]
-    assert len(activators) == 7
+    assert len(activators) == 4
     assert {component.id["table"] for component in activators} == {
         "month-profile-editor",
         "sun-profile-editor",
-        "demand-profile-weights-editor",
         "price-kwp-editor",
         "price-kwp-others-editor",
-        "demand-profile-editor",
-        "demand-profile-general-editor",
     }
     assert _find_component(section, "month-profile-card") is not None
     assert _find_component(section, "sun-profile-card") is not None
-    assert _find_component(section, "demand-profile-weights-card") is not None
     assert _find_component(section, "price-kwp-card") is not None
     assert _find_component(section, "price-kwp-others-card") is not None
-    assert _find_component(section, "demand-profile-card") is not None
-    assert _find_component(section, "demand-profile-general-card") is not None
+    assert _find_component(main_grid, "demand-profile-weights-card") is None
+    assert _find_component(secondary_grid, "demand-profile-card") is None
+    assert _find_component(secondary_grid, "demand-profile-general-card") is None
     assert _find_component(main_grid.children[0], "month-profile-title").children == tr("workbench.profiles.month", "es")
     assert _find_component(main_grid.children[1], "sun-profile-title").children == tr("workbench.profiles.sun", "es")
-    assert _find_component(main_grid.children[2], "demand-profile-weights-title").children == tr("workbench.profiles.demand_weights", "es")
-    assert "profile-main-panel-wide" in str(_find_component(main_grid.children[2], "demand-profile-weights-panel").className)
+    assert _find_component(relocation_card, "profile-demand-relocated-title").children == tr("workspace.assumptions.demand.title", "es")
     assert _find_component(section, "month-profile-editor").page_size == 12
     assert _find_component(section, "sun-profile-editor").page_size == 12
-    assert _find_component(section, "demand-profile-weights-editor").page_size == 12
     assert _find_component(section, "price-kwp-editor").page_size == 8
     assert _find_component(section, "price-kwp-others-editor").page_size == 8
+    assert _find_component(section, "price-kwp-editor").row_deletable is True
+    assert _find_component(section, "price-kwp-others-editor").row_deletable is True
+    assert _find_component(section, "month-profile-editor").row_deletable is False
     assert _find_component(section, "month-profile-tooltip").children == tr("workbench.profiles.tooltip.month", "es")
     assert _find_component(section, "sun-profile-tooltip").children == tr("workbench.profiles.tooltip.sun", "es")
     assert _find_component(section, "price-kwp-tooltip").children == tr("workbench.profiles.tooltip.price", "es")
     assert _find_component(section, "price-kwp-others-tooltip").children == tr("workbench.profiles.tooltip.price_others", "es")
-    assert _find_component(section, "demand-profile-tooltip").children == tr("workbench.profiles.tooltip.demand_weekday", "es")
-    assert _find_component(section, "demand-profile-general-tooltip").children == tr("workbench.profiles.tooltip.demand_general", "es")
-    assert _find_component(section, "demand-profile-weights-tooltip").children == tr("workbench.profiles.tooltip.demand_weights", "es")
+    assert _find_component(relocation_card, "profile-demand-relocated-copy").children == tr("workspace.admin.demand_moved.copy", "es")
     assert _find_component(section, "add-price-kwp-row-btn").children == tr("workbench.profiles.add_row", "es")
     assert _find_component(section, "add-price-kwp-others-row-btn").children == tr("workbench.profiles.add_row", "es")
+    assert "profile-secondary-pricing-panel" in str(_find_component(section, "price-kwp-panel").className)
+    assert "profile-secondary-pricing-panel" in str(_find_component(section, "price-kwp-others-panel").className)
     assert _find_component(workbench_page.layout, "run-scan-choice-dialog") is not None
     assert _find_component(workbench_page.layout, "run-scan-save-and-run-btn") is not None
     assert _find_component(workbench_page.layout, "run-scan-run-unsaved-btn") is not None
@@ -425,7 +492,11 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
 def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
     section = candidate_explorer_section()
     assert section.id == "candidate-selection-section"
+    assert _find_component(section, "scan-summary-strip") is not None
+    assert _find_component(section, "scan-discard-explainer") is not None
     assert _find_component(section, "active-kpi-cards") is not None
+    assert _find_component(section, "candidate-horizon-toolbar") is not None
+    assert _find_component(section, "candidate-horizon-slider") is not None
     assert _find_component(section, "active-npv-graph") is not None
     assert _find_component(section, "candidate-selection-helper") is not None
     assert _find_component(section, "selected-candidate-banner") is not None
@@ -454,11 +525,49 @@ def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
 def test_candidate_selection_affordances_and_styles_use_stable_candidate_keys() -> None:
     section = candidate_explorer_section()
     assert _find_component(section, "selected-candidate-kpi-title").children == tr("workbench.selected_design.summary", "es")
+    assert _find_component(section, "candidate-horizon-label").children == tr("workbench.horizon.label", "es")
     assert _find_component(section, "candidate-selection-helper").children == tr("workbench.candidate_selection.helper", "es")
 
     styles = workbench_page._candidate_table_styles("18.000::BAT-10", "12.000::None")
     assert styles[-1]["if"]["filter_query"] == '{candidate_key} = "18.000::BAT-10"'
     assert styles[-1]["backgroundColor"] == "#fee2e2"
+
+
+def test_candidate_horizon_slider_defaults_to_scan_horizon_and_preserves_current_value() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    payload = _session_payload(state)
+
+    minimum, maximum, marks, value, disabled, style, value_label, context = workbench_page.sync_candidate_horizon_slider(payload, "es", None, {})
+
+    assert minimum == 1
+    assert maximum == 5
+    assert marks[1] == "1"
+    assert value == 5
+    assert disabled is False
+    assert style == {}
+    assert value_label == "5 años"
+    assert context["scenario_id"] == state.active_scenario_id
+
+    preserved = workbench_page.sync_candidate_horizon_slider(payload, "es", 3, context)
+    assert preserved[3] == 3
+    assert preserved[6] == "3 años"
+
+
+def test_candidate_horizon_slider_hides_cleanly_without_results() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = _session_payload(state)
+
+    minimum, maximum, marks, value, disabled, style, value_label, context = workbench_page.sync_candidate_horizon_slider(payload, "es", None, {})
+
+    assert minimum == 1
+    assert maximum == 1
+    assert marks == {1: "1"}
+    assert value == 1
+    assert disabled is True
+    assert style == {"display": "none"}
+    assert value_label == ""
+    assert context == {}
 
 
 def test_selected_candidate_banner_tolerates_partial_detail_payload() -> None:
@@ -704,13 +813,48 @@ def test_workbench_assumption_context_callback_highlights_fixed_battery_selectio
     assert note_styles == [{"display": "block"}]
 
 
-def test_populate_assumptions_keeps_monte_carlo_group_visible_in_workbench() -> None:
+def test_populate_assumptions_includes_monte_carlo_group_in_general_assumptions() -> None:
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     payload = _session_payload(state, lang="es")
 
     rendered = workbench_page.populate_assumptions(payload, [], "es")
 
     assert any("Monte Carlo" in str(section.to_plotly_json()) for section in rendered)
+
+
+def test_risk_monte_carlo_context_callback_enables_manual_kwp_only_when_requested() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None
+
+    payload = _session_payload(state, lang="en")
+    field_values = {
+        "mc_PR_std": 5.0,
+        "mc_buy_std": 4.0,
+        "mc_sell_std": 3.0,
+        "mc_demand_std": 2.0,
+        "mc_use_manual_kWp": True,
+        "mc_manual_kWp": 16.5,
+        "mc_battery_name": "BAT-10",
+    }
+    input_ids = [{"type": "risk-mc-input", "field": field} for field in field_values]
+    card_ids = [{"type": "risk-mc-field-card", "field": field} for field in field_values]
+
+    disabled_values, card_classes = risk_page.sync_risk_monte_carlo_context(
+        payload,
+        scenario.scenario_id,
+        input_ids,
+        list(field_values.values()),
+        "en",
+        card_ids,
+    )
+
+    disabled_by_field = dict(zip(field_values.keys(), disabled_values))
+    class_by_field = dict(zip(field_values.keys(), card_classes))
+
+    assert disabled_by_field["mc_manual_kWp"] is False
+    assert "field-card-disabled" not in class_by_field["mc_manual_kWp"]
 
 
 def test_active_summary_uses_copy_and_meta_classes_for_hierarchy() -> None:
@@ -811,21 +955,81 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert asset_css.exists()
     assert "app.index_string" not in app_source
     assert ".assumption-input-shell" in css_source
+    assert ".assumption-editor-panel" in css_source
+    assert "--assumption-control-height" in css_source
+    assert ".assumption-editor-panel .Select-control" in css_source
     assert ".candidate-selection-helper" in css_source
+    assert ".candidate-horizon-toolbar" in css_source
+    assert ":root {" in css_source
+    assert "--color-primary" in css_source
+    assert "--color-primary-soft" in css_source
     assert "body {" in css_source
     assert ".active-summary-copy" in css_source
     assert "grid-template-columns: minmax(0, 1fr) auto;" in css_source
     assert ".active-summary-top" in css_source
     assert ".active-summary-actions" in css_source
+    assert ".nav-link-active" in css_source
+    assert ".sidebar-start-card" in css_source
+    assert ".upload-box-action" in css_source
+    assert ".project-action-grid" in css_source
+    assert ".stacked-button-label" in css_source
     assert ".profile-main-grid" in css_source
     assert "minmax(0, 1.35fr)" in css_source
     assert ".profile-secondary-grid" in css_source
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css_source
+    assert ".profile-secondary-pricing-panel" in css_source
     assert ".profile-inline-btn" in css_source
     assert ".profile-table-activator" in css_source
     assert ".profile-chart-panel" in css_source
     assert ".profile-table-card-active" in css_source
+    assert ".demand-profile-mode-panel" in css_source
+    assert ".demand-profile-control-grid" in css_source
+    assert ".demand-profile-mode-option-label" in css_source
+    assert ".demand-profile-secondary-grid" in css_source
+    assert ".demand-profile-module .profile-table-card-shell" in css_source
+    assert "height: 380px !important;" in css_source
+    assert "min-height: 380px;" in css_source
+    assert ".profile-table-subsection" in css_source
+    assert ".assumptions-subtabs" in css_source
+    assert ".assumptions-subtab-selected" in css_source
+    assert ".demand-relocated-card" in css_source
     assert ".workbench-state-strip" in css_source
     assert ".workbench-state-chip" in css_source
+
+
+def test_delete_project_button_removes_selected_project_and_unbinds_current_session(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("services.runtime_paths.REPO_ROOT", tmp_path)
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = save_project(state, project_name="Demo", language="es")
+    payload = _session_payload(state)
+
+    monkeypatch.setattr(shared_callbacks, "ctx", SimpleNamespace(triggered_id="delete-project-btn"))
+
+    next_payload, status = shared_callbacks.mutate_workspace_session(
+        upload_contents=None,
+        _new_scenario_clicks=0,
+        _duplicate_clicks=0,
+        _rename_clicks=0,
+        _delete_clicks=0,
+        _scenario_pill_clicks=[],
+        _save_project_clicks=0,
+        _save_project_as_clicks=0,
+        _open_project_clicks=0,
+        _delete_project_clicks=1,
+        upload_filename=None,
+        rename_value=None,
+        project_name_value="Demo",
+        project_dropdown_value=state.project_slug,
+        session_payload=payload,
+        language_value="es",
+    )
+    _, next_state = shared_callbacks._session(next_payload, "es")
+
+    assert not Path(tmp_path / "proyectos" / "demo").exists()
+    assert status == tr("workbench.project.deleted", "es", name="Demo")
+    assert next_state.project_slug is None
+    assert next_state.project_name is None
+    assert next_state.project_dirty is True
 
 
 def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
@@ -833,6 +1037,11 @@ def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
     visibility = demand_profile_visibility("perfil horario relativo")
     assert visibility["demand-profile-weights-panel"]["display"] == "block"
     assert visibility["demand-profile-panel"]["display"] == "none"
+    assert visibility["demand-profile-general-preview-panel"]["display"] == "none"
+
+    weekday_visibility = demand_profile_visibility("perfil hora dia de semana")
+    assert weekday_visibility["demand-profile-panel"]["display"] == "block"
+    assert weekday_visibility["demand-profile-general-preview-panel"]["display"] == "block"
 
     edited_month = bundle.month_profile_table.copy()
     edited_month.loc[0, "Demand_month"] = 1.15
@@ -882,8 +1091,8 @@ def test_run_scan_choice_dialog_disables_save_until_project_name_exists() -> Non
 
 
 def test_profile_table_activator_translation_uses_current_language() -> None:
-    assert workbench_page.translate_profile_table_activators("en") == ["Preview chart"] * 7
-    assert workbench_page.translate_profile_table_activators("es") == ["Ver gráfica"] * 7
+    assert workbench_page.translate_profile_table_activators("en") == ["Preview chart"] * 4
+    assert workbench_page.translate_profile_table_activators("es") == ["Ver gráfica"] * 4
 
 
 def test_profile_table_header_click_toggles_the_active_chart(monkeypatch) -> None:
@@ -893,11 +1102,23 @@ def test_profile_table_header_click_toggles_the_active_chart(monkeypatch) -> Non
         SimpleNamespace(triggered_id={"type": "profile-table-activate", "table": "sun-profile-editor"}),
     )
 
-    activated = workbench_page.sync_active_profile_table([], None, None, None, None, None, None, None, {"table_id": None})
-    cleared = workbench_page.sync_active_profile_table([], None, None, None, None, None, None, None, {"table_id": "sun-profile-editor"})
+    clicks = [0, 1, 0, 0]
+    activated = workbench_page.sync_active_profile_table(clicks, None, None, None, None, {"table_id": None})
+    cleared = workbench_page.sync_active_profile_table(clicks, None, None, None, None, {"table_id": "sun-profile-editor"})
 
     assert activated == {"table_id": "sun-profile-editor"}
     assert cleared == {"table_id": None}
+
+
+def test_profile_table_header_mount_with_zero_clicks_does_not_auto_activate(monkeypatch) -> None:
+    monkeypatch.setattr(
+        workbench_page,
+        "ctx",
+        SimpleNamespace(triggered_id={"type": "profile-table-activate", "table": "month-profile-editor"}),
+    )
+
+    with pytest.raises(PreventUpdate):
+        workbench_page.sync_active_profile_table([0, 0, 0, 0], None, None, None, None, {"table_id": None})
 
 
 def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -> None:
@@ -907,9 +1128,6 @@ def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -
         [],
         None,
         {"row": 2, "column": 1},
-        None,
-        None,
-        None,
         None,
         None,
         {"table_id": None},
@@ -924,21 +1142,15 @@ def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -
             {"row": 2, "column": 1},
             None,
             None,
-            None,
-            None,
-            None,
             {"table_id": "sun-profile-editor"},
         )
 
 
 def test_hidden_profile_table_sanitization_clears_active_chart() -> None:
     cleared = workbench_page.sanitize_active_profile_table(
-        {"table_id": "demand-profile-editor"},
-        {"display": "block"},
+        {"table_id": "price-kwp-others-editor"},
         {"display": "block"},
         {"display": "none"},
-        {"display": "block"},
-        {"display": "block"},
     )
 
     assert cleared == {"table_id": None}
@@ -948,11 +1160,8 @@ def test_profile_chart_render_routes_main_and_secondary_tables_and_marks_one_act
     bundle = load_example_config()
     month_columns, _ = build_table_display_columns("month_profile", list(bundle.month_profile_table.columns), "en")
     sun_columns, _ = build_table_display_columns("sun_profile", list(bundle.sun_profile_table.columns), "en")
-    demand_weights_columns, _ = build_table_display_columns("demand_profile_weights", list(bundle.demand_profile_weights_table.columns), "en")
     price_columns, _ = build_table_display_columns("cop_kwp", list(bundle.cop_kwp_table.columns), "en")
     price_others_columns, _ = build_table_display_columns("cop_kwp_others", list(bundle.cop_kwp_table_others.columns), "en")
-    demand_columns, _ = build_table_display_columns("demand_profile", list(bundle.demand_profile_table.columns), "en")
-    demand_general_columns, _ = build_table_display_columns("demand_profile_general", list(bundle.demand_profile_general_table.columns), "en")
 
     main = workbench_page.render_active_profile_chart(
         {"table_id": "sun-profile-editor"},
@@ -960,20 +1169,11 @@ def test_profile_chart_render_routes_main_and_secondary_tables_and_marks_one_act
         month_columns,
         bundle.sun_profile_table.to_dict("records"),
         sun_columns,
-        bundle.demand_profile_weights_table.to_dict("records"),
-        demand_weights_columns,
         bundle.cop_kwp_table.to_dict("records"),
         price_columns,
         bundle.cop_kwp_table_others.to_dict("records"),
         price_others_columns,
-        bundle.demand_profile_table.to_dict("records"),
-        demand_columns,
-        bundle.demand_profile_general_table.to_dict("records"),
-        demand_general_columns,
         "en",
-        {"display": "block"},
-        {"display": "block"},
-        {"display": "block"},
         {"display": "block"},
         {"display": "block"},
     )
@@ -983,20 +1183,11 @@ def test_profile_chart_render_routes_main_and_secondary_tables_and_marks_one_act
         month_columns,
         bundle.sun_profile_table.to_dict("records"),
         sun_columns,
-        bundle.demand_profile_weights_table.to_dict("records"),
-        demand_weights_columns,
         bundle.cop_kwp_table.to_dict("records"),
         price_columns,
         bundle.cop_kwp_table_others.to_dict("records"),
         price_others_columns,
-        bundle.demand_profile_table.to_dict("records"),
-        demand_columns,
-        bundle.demand_profile_general_table.to_dict("records"),
-        demand_general_columns,
         "en",
-        {"display": "block"},
-        {"display": "block"},
-        {"display": "block"},
         {"display": "block"},
         {"display": "block"},
     )
@@ -1016,33 +1207,21 @@ def test_hidden_active_profile_table_hides_chart_shells_and_active_classes() -> 
     bundle = load_example_config()
     month_columns, _ = build_table_display_columns("month_profile", list(bundle.month_profile_table.columns), "es")
     sun_columns, _ = build_table_display_columns("sun_profile", list(bundle.sun_profile_table.columns), "es")
-    demand_weights_columns, _ = build_table_display_columns("demand_profile_weights", list(bundle.demand_profile_weights_table.columns), "es")
     price_columns, _ = build_table_display_columns("cop_kwp", list(bundle.cop_kwp_table.columns), "es")
     price_others_columns, _ = build_table_display_columns("cop_kwp_others", list(bundle.cop_kwp_table_others.columns), "es")
-    demand_columns, _ = build_table_display_columns("demand_profile", list(bundle.demand_profile_table.columns), "es")
-    demand_general_columns, _ = build_table_display_columns("demand_profile_general", list(bundle.demand_profile_general_table.columns), "es")
 
     rendered = workbench_page.render_active_profile_chart(
-        {"table_id": "demand-profile-editor"},
+        {"table_id": "price-kwp-editor"},
         bundle.month_profile_table.to_dict("records"),
         month_columns,
         bundle.sun_profile_table.to_dict("records"),
         sun_columns,
-        bundle.demand_profile_weights_table.to_dict("records"),
-        demand_weights_columns,
         bundle.cop_kwp_table.to_dict("records"),
         price_columns,
         bundle.cop_kwp_table_others.to_dict("records"),
         price_others_columns,
-        bundle.demand_profile_table.to_dict("records"),
-        demand_columns,
-        bundle.demand_profile_general_table.to_dict("records"),
-        demand_general_columns,
         "es",
-        {"display": "block"},
-        {"display": "block"},
         {"display": "none"},
-        {"display": "block"},
         {"display": "block"},
     )
 
@@ -1338,9 +1517,12 @@ def test_npv_chart_adds_top_axis_for_panel_count() -> None:
 
     assert figure.layout.xaxis.title.text == "kWp instalado"
     assert figure.layout.xaxis2.title.text == "Número de paneles"
+    assert figure.layout.yaxis.title.text == "VPN [COP]"
+    assert figure.layout.yaxis2.title.text == "Payback [años]"
     assert list(figure.layout.xaxis2.ticktext) == ["20", "30"]
     assert list(figure.layout.xaxis2.tickvals) == pytest.approx([12.0, 18.0])
     assert list(figure.data[0].customdata[0][:2]) == ["12.000::None", 20]
+    assert any(trace.name == "Payback [años]" for trace in figure.data)
     assert any(trace.name == "Diseño seleccionado" for trace in figure.data)
 
 
@@ -1373,6 +1555,173 @@ def test_npv_chart_omits_top_axis_without_valid_module_power() -> None:
     figure = build_npv_figure(table, lang="es", module_power_w=0.0)
 
     assert "xaxis2" not in figure.layout
+
+
+def test_npv_chart_renders_discard_strip_without_fabricating_npv() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery": "None",
+                "NPV_COP": 10_000_000,
+                "payback_years": 5.5,
+                "self_consumption_ratio": 0.45,
+                "peak_ratio": 1.1,
+                "scan_order": 0,
+            },
+            {
+                "candidate_key": "18.000::BAT-10",
+                "kWp": 18.0,
+                "battery": "BAT-10",
+                "NPV_COP": 16_000_000,
+                "payback_years": 6.2,
+                "self_consumption_ratio": 0.52,
+                "peak_ratio": 1.25,
+                "scan_order": 1,
+            },
+        ]
+    )
+
+    figure = build_npv_figure(
+        table,
+        selected_key="18.000::BAT-10",
+        lang="es",
+        module_power_w=600.0,
+        discarded_points=(
+            {"scan_order": 2, "kWp": 24.0, "reason": "peak_ratio", "peak_ratio": 1.8, "limit_peak_ratio": 1.5},
+            {"scan_order": 3, "kWp": 30.0, "reason": "inverter_string"},
+        ),
+    )
+
+    assert figure.layout.xaxis3.title.text == "Número de paneles"
+    assert figure.layout.yaxis.title.text == "VPN [COP]"
+    assert figure.layout.yaxis2.title.text == "Payback [años]"
+    assert figure.layout.yaxis3.showticklabels is False
+    assert any(trace.name == "Diseño seleccionado" for trace in figure.data)
+    assert any(trace.name == "Payback [años]" for trace in figure.data)
+    discard_traces = [trace for trace in figure.data if trace.name in {"excede el límite de peak ratio", "no se encontró una combinación válida de inversor/string"}]
+    assert len(discard_traces) == 2
+    assert all(all(value == 0.5 for value in trace.y) for trace in discard_traces)
+    assert any("Descartado" in trace.hovertemplate[0] for trace in discard_traces if isinstance(trace.hovertemplate, (list, tuple)))
+
+
+def test_workbench_results_explain_all_discarded_scan() -> None:
+    bundle = replace(
+        _fast_bundle(),
+        config={**_fast_bundle().config, "limit_peak_ratio_enable": True, "limit_peak_ratio": 0.01},
+    )
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", bundle))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    payload = _session_payload(state)
+
+    (
+        summary_strip,
+        explainer,
+        explainer_style,
+        kpis,
+        npv_figure,
+        _banner,
+        monthly_figure,
+        _cash_flow,
+        _annual,
+        _battery,
+        _typical_day,
+        table_rows,
+        _columns,
+        selected_rows,
+        _styles,
+        _tooltips,
+    ) = workbench_page.populate_results(payload, "es", 1)
+
+    assert len(summary_strip) == 4
+    assert "restricción dominante actual" in explainer
+    assert explainer_style["display"] == "block"
+    assert kpis == []
+    assert table_rows == []
+    assert selected_rows == []
+    assert monthly_figure.layout.annotations[0].text == tr("workbench.scan_discard.no_viable_detail", "es")
+    assert npv_figure.data
+
+
+def test_populate_results_uses_horizon_adjusted_summary_without_losing_selection() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    non_best_key = next(key for key in scenario.scan_result.candidate_details if key != scenario.scan_result.best_candidate_key)
+    state = update_selected_candidate(state, scenario.scenario_id, non_best_key)
+    payload = _session_payload(state)
+
+    short_horizon = workbench_page.populate_results(payload, "es", 1)
+    full_horizon = workbench_page.populate_results(payload, "es", 5)
+
+    short_table_rows = short_horizon[11]
+    short_selected_rows = short_horizon[13]
+    full_table_rows = full_horizon[11]
+    full_selected_rows = full_horizon[13]
+
+    assert short_selected_rows
+    assert full_selected_rows
+    assert short_table_rows[short_selected_rows[0]]["candidate_key"] == non_best_key
+    assert full_table_rows[full_selected_rows[0]]["candidate_key"] == non_best_key
+    assert short_horizon[4].layout.title.text.endswith("Horizonte financiero: 1 año</sup>")
+    assert full_horizon[4].layout.title.text.endswith("Horizonte financiero: 5 años</sup>")
+
+    short_row = next(row for row in short_table_rows if row["candidate_key"] == non_best_key)
+    full_row = next(row for row in full_table_rows if row["candidate_key"] == non_best_key)
+    assert short_row["NPV_COP"] != full_row["NPV_COP"]
+
+
+def test_graph_click_selection_updates_store_table_and_selected_marker() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+
+    initial_outputs = workbench_page.populate_results(_session_payload(state), "es", 5)
+    horizon_table = pd.DataFrame(initial_outputs[11])
+    same_kwp_rows = next(
+        group
+        for _, group in horizon_table.groupby("kWp", sort=True)
+        if len(group.index) >= 2
+    )
+    ordered_rows = same_kwp_rows.sort_values(["NPV_COP", "scan_order"], ascending=[False, True], kind="mergesort").reset_index(drop=True)
+    curve_key = str(ordered_rows.iloc[0]["candidate_key"])
+    selected_overlay_key = str(ordered_rows.iloc[1]["candidate_key"])
+    assert curve_key != selected_overlay_key
+
+    state = update_selected_candidate(state, scenario.scenario_id, selected_overlay_key)
+    payload = _session_payload(state)
+    table_rows = workbench_page.populate_results(payload, "es", 5)[11]
+
+    next_payload = results_callbacks.persist_selected_candidate(
+        [],
+        {
+            "points": [
+                {"customdata": [selected_overlay_key, None, "selected_overlay"]},
+                {"customdata": [curve_key, None, "npv_curve"]},
+            ]
+        },
+        table_rows,
+        payload,
+    )
+
+    _, next_state = resolve_client_session(next_payload, language="es")
+    active = next_state.get_scenario()
+    assert active is not None
+    assert active.selected_candidate_key == curve_key
+
+    outputs = workbench_page.populate_results(next_payload, "es", 5)
+    table_rows = outputs[11]
+    selected_rows = outputs[13]
+    npv_figure = outputs[4]
+
+    assert selected_rows
+    assert table_rows[selected_rows[0]]["candidate_key"] == curve_key
+    selected_trace = next(trace for trace in npv_figure.data if trace.name == "Diseño seleccionado")
+    assert list(selected_trace.customdata[0])[0] == curve_key
+    assert selected_trace.marker.color == "#dc2626"
 
 
 def test_deep_dive_figure_builders_return_non_empty_plotly_figures() -> None:

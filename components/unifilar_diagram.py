@@ -1,7 +1,20 @@
 from __future__ import annotations
 
-import dash_cytoscape as cyto
+from types import SimpleNamespace
+
 from dash import dcc, html
+
+try:
+    import dash_cytoscape as cyto
+except ModuleNotFoundError:  # pragma: no cover - local test fallback when cytoscape is unavailable
+    class _FallbackCytoscape:
+        def __init__(self, *args, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+            self.children = kwargs.get("children")
+            self.id = kwargs.get("id")
+
+    cyto = SimpleNamespace(Cytoscape=_FallbackCytoscape)
 
 from services.i18n import tr
 from services.schematic import (

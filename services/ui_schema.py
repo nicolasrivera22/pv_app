@@ -84,9 +84,9 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         "Define cómo se reparte la demanda horaria y qué tabla de perfiles debes editar abajo.",
         "Defines how hourly demand is distributed and which profile table you should edit below.",
         options=(
-            ("Perfil hora-día-semana", "perfil hora dia de semana"),
-            ("Perfil horario relativo", "perfil horario relativo"),
-            ("Perfil general", "perfil general"),
+            ("Perfil Hora Dia de Semana", "perfil hora dia de semana"),
+            ("Perfil Hora Relativo", "perfil horario relativo"),
+            ("Perfil Hora Total", "perfil general"),
         ),
     ),
     "PR": FieldUiSchema(
@@ -890,26 +890,28 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
         "PRECIO_POR_KWP": TableColumnUiSchema("Otros variables [COP/kWp]", "Other variable costs [COP/kWp]", "Otros costos variables aplicados por banda.", "Other variable costs applied by band.", "currency_cop", 0, "numeric"),
     },
     "demand_profile": {
-        "DOW": TableColumnUiSchema("Día semana", "Day of week", "Día de la semana en la tabla 7x24.", "Day of week in the 7x24 table.", "integer", 0, "numeric"),
-        "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del día.", "Hour of the day.", "integer", 0, "numeric"),
-        "RES": TableColumnUiSchema("Residencial [kWh]", "Residential [kWh]", "Demanda residencial de esa hora.", "Residential demand for that hour.", "kwh", 2, "numeric"),
-        "IND": TableColumnUiSchema("Industrial [kWh]", "Industrial [kWh]", "Demanda industrial de esa hora.", "Industrial demand for that hour.", "kwh", 2, "numeric"),
-        "TOTAL_kWh": TableColumnUiSchema("Total [kWh]", "Total [kWh]", "Demanda total de la hora.", "Total demand for that hour.", "kwh", 2, "numeric"),
+        "Dia": TableColumnUiSchema("Día", "Day", "Nombre opcional del dia asociado a la fila.", "Optional day name for the row."),
+        "DOW": TableColumnUiSchema("Dia semana", "DOW", "Dia de la semana en la tabla 7x24.", "Day of week in the 7x24 table.", "integer", 0, "numeric"),
+        "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del dia.", "Hour of the day.", "integer", 0, "numeric"),
+        "RES": TableColumnUiSchema("Demanda Residencial [kWh]", "Residential Demand [kWh]", "Demanda residencial de esa hora.", "Residential demand for that hour.", "kwh", 2, "numeric"),
+        
+        "IND": TableColumnUiSchema("Demanda Industrial [kWh]", "Industrial Demand [kWh]", "Demanda industrial de esa hora.", "Industrial demand for that hour.", "kwh", 2, "numeric"),
+        "TOTAL_kWh": TableColumnUiSchema("Demanda total [kWh]", "Total demand [kWh]", "Demanda total derivada de la hora.", "Total hourly demand derived from RES + IND.", "kwh", 2, "numeric"),
     },
     "demand_profile_general": {
-        "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del día.", "Hour of the day.", "integer", 0, "numeric"),
-        "RES": TableColumnUiSchema("Residencial [kWh]", "Residential [kWh]", "Demanda residencial de esa hora.", "Residential demand for that hour.", "kwh", 2, "numeric"),
-        "IND": TableColumnUiSchema("Industrial [kWh]", "Industrial [kWh]", "Demanda industrial de esa hora.", "Industrial demand for that hour.", "kwh", 2, "numeric"),
-        "TOTAL_kWh": TableColumnUiSchema("Total [kWh]", "Total [kWh]", "Demanda total de la hora.", "Total demand for that hour.", "kwh", 2, "numeric"),
+        "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del dia.", "Hour of the day.", "integer", 0, "numeric"),
+        "RES": TableColumnUiSchema("Demanda Residencial [kWh]", "Residential Demand [kWh]", "Demanda residencial de esa hora.", "Residential demand for that hour.", "kwh", 2, "numeric"),
+        "IND": TableColumnUiSchema("Demanda Industrial [kWh]", "Industrial Demand [kWh]]", "Demanda industrial de esa hora.", "Industrial demand for that hour.", "kwh", 2, "numeric"),
+        "TOTAL_kWh": TableColumnUiSchema("Demanda total [kWh]", "Total demand [kWh]", "Demanda total derivada de la hora.", "Total hourly demand derived from RES + IND.", "kwh", 2, "numeric"),
     },
     "demand_profile_weights": {
-        "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del día.", "Hour of the day.", "integer", 0, "numeric"),
-        "W_RES": TableColumnUiSchema("Peso res [%]", "Res weight [%]", "Peso relativo residencial.", "Relative residential weight.", "percent", 1, "numeric"),
-        "W_IND": TableColumnUiSchema("Peso ind [%]", "Ind weight [%]", "Peso relativo industrial.", "Relative industrial weight.", "percent", 1, "numeric"),
-        "W_RES_BASE": TableColumnUiSchema("Base res [%]", "Res base [%]", "Base residencial usada para normalizar.", "Residential base used for normalization.", "percent", 1, "numeric"),
-        "W_IND_BASE": TableColumnUiSchema("Base ind [%]", "Ind base [%]", "Base industrial usada para normalizar.", "Industrial base used for normalization.", "percent", 1, "numeric"),
-        "W_TOTAL": TableColumnUiSchema("Peso total [%]", "Total weight [%]", "Peso total combinado.", "Combined total weight.", "percent", 1, "numeric"),
-        "TOTAL_kWh": TableColumnUiSchema("Total [kWh]", "Total [kWh]", "Demanda total resultante.", "Resulting total demand.", "kwh", 2, "numeric"),
+        "HOUR": TableColumnUiSchema("Hora", "Hour", "Hora del dia.", "Hour of the day.", "integer", 0, "numeric"),
+        "W_RES": TableColumnUiSchema("Peso residencial", "Residential weight", "Peso relativo residencial editable.", "Editable residential weight.", "percent", 3, "numeric"),
+        "W_IND": TableColumnUiSchema("Peso industrial", "Industrial weight", "Peso relativo industrial editable.", "Editable industrial weight.", "percent", 3, "numeric"),
+        "W_RES_BASE": TableColumnUiSchema("Base residencial", "Residential base", "Base residencial usada para normalizar.", "Residential base used for normalization.", "percent", 3, "numeric"),
+        "W_IND_BASE": TableColumnUiSchema("Base industrial", "Industrial base", "Base industrial usada para normalizar.", "Industrial base used for normalization.", "percent", 3, "numeric"),
+        "W_TOTAL": TableColumnUiSchema("Peso total", "Total weight", "Peso total combinado.", "Combined total weight.", "percent", 3, "numeric"),
+        "TOTAL_kWh": TableColumnUiSchema("Demanda total [kWh]", "Total demand [kWh]", "Demanda total resultante.", "Resulting total demand.", "kwh", 2, "numeric"),
     },
 }
 
@@ -1188,13 +1190,17 @@ def build_assumption_sections(
     show_all: bool = False,
     *,
     exclude_groups: set[str] | None = None,
+    exclude_fields: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     excluded = {str(group).strip() for group in (exclude_groups or set()) if str(group).strip()}
+    hidden_fields = {str(field).strip() for field in (exclude_fields or set()) if str(field).strip()}
     sections_by_group: dict[str, dict[str, Any]] = {}
     raw_key_for_group: dict[str, str] = {}
     context = assumption_context_map(bundle.config, lang=lang)
     for meta in extract_config_metadata(bundle.config_table, bundle.config):
         if meta.group in excluded:
+            continue
+        if meta.config_key in hidden_fields:
             continue
         schema = field_schema_for(meta)
         if schema.visibility == "hidden":

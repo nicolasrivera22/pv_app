@@ -15,11 +15,13 @@ from components import (
     render_metadata_table,
     render_risk_monte_carlo_fields,
     render_risk_summary_cards,
+    render_ui_mode_gate,
     risk_charts_section,
     risk_controls_section,
     risk_tables_section,
 )
 from services import (
+    assumption_context_map,
     clear_missing_risk_result_payload,
     commit_client_session,
     export_risk_artifacts,
@@ -48,6 +50,14 @@ from services.risk_ui import (
     validate_risk_run_inputs,
 )
 from services.ui_schema import coerce_config_value, parse_assumption_input_value
+from services.ui_mode import (
+    PAGE_RISK,
+    UI_MODE_SIMPLE,
+    gate_visibility_style,
+    page_body_style,
+    resolve_page_access,
+    resolve_ui_mode_from_payload,
+)
 
 register_page(__name__, path="/risk", name="Risk")
 
@@ -56,10 +66,17 @@ RISK_MONTE_CARLO_FIELDS = (
     "mc_buy_std",
     "mc_sell_std",
     "mc_demand_std",
+    "mc_use_manual_kWp",
+    "mc_manual_kWp",
+    "mc_battery_name",
 )
 
 def _lang(value: str | None) -> str:
     return value if value in {"en", "es"} else "es"
+
+
+def _risk_page_access(session_payload) -> object:
+    return resolve_page_access(PAGE_RISK, resolve_ui_mode_from_payload(session_payload))
 
 
 def _retain_samples(values: list[str] | None) -> bool:
@@ -77,29 +94,62 @@ def _safe_int(value: Any) -> int | None:
         return None
 
 
+def _risk_field_card_class(*, disabled: bool = False, emphasize: bool = False) -> str:
+    classes = ["field-card"]
+    if disabled:
+        classes.append("field-card-disabled")
+    if emphasize and not disabled:
+        classes.append("field-card-highlight")
+    return " ".join(dict.fromkeys(classes))
+
+
 layout = html.Div(
     className="page",
     children=[
         dcc.Store(id="risk-latest-export-folder", storage_type="memory", data=""),
         dcc.Store(id="risk-result-store", storage_type="memory"),
         html.Div(
-            className="main-stack",
+            id="risk-mode-gate-shell",
+            children=render_ui_mode_gate(resolve_page_access(PAGE_RISK, UI_MODE_SIMPLE), lang="es", component_id="risk-mode-gate"),
+        ),
+        html.Div(
+            id="risk-page-content",
+            style={"display": "none"},
             children=[
-                risk_controls_section(),
-                dcc.Loading(
-                    type="default",
-                    children=html.Div(
-                        className="main-stack",
-                        children=[
-                            risk_charts_section(),
-                            risk_tables_section(),
-                        ],
-                    ),
+                html.Div(
+                    className="main-stack",
+                    children=[
+                        risk_controls_section(),
+                        dcc.Loading(
+                            type="default",
+                            children=html.Div(
+                                className="main-stack",
+                                children=[
+                                    risk_charts_section(),
+                                    risk_tables_section(),
+                                ],
+                            ),
+                        ),
+                    ],
                 ),
             ],
         ),
     ],
 )
+
+
+@callback(
+    Output("risk-mode-gate-shell", "children"),
+    Output("risk-mode-gate-shell", "style"),
+    Output("risk-page-content", "style"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+)
+def sync_risk_page_access(session_payload, language_value):
+    lang = _lang(language_value)
+    access = _risk_page_access(session_payload)
+    gate_children = render_ui_mode_gate(access, lang=lang, component_id="risk-mode-gate") if access.is_gated else []
+    return gate_children, gate_visibility_style(access), page_body_style(access)
 
 
 @callback(
@@ -170,6 +220,8 @@ def translate_risk_page(language_value):
     State("risk-scenario-dropdown", "value"),
 )
 def populate_risk_scenarios(session_payload, current_value):
+    if not _risk_page_access(session_payload).allowed:
+        return [], None
     _, state = resolve_client_session(session_payload, language="es")
     scenarios = ready_risk_scenarios(state)
     options = [{"label": scenario.name, "value": scenario.scenario_id} for scenario in scenarios]
@@ -198,6 +250,9 @@ def sync_risk_export_folder_button(folder_path):
 )
 def populate_risk_candidates(session_payload, scenario_id, language_value, current_candidate_key, current_n_simulations):
     lang = _lang(language_value)
+    access = _risk_page_access(session_payload)
+    if access.is_gated:
+        return [], None, current_n_simulations, render_risk_monte_carlo_fields([], empty_message=tr(access.body_key or "ui_mode.gate.risk.body", lang))
     _, state = resolve_scenario_session(session_payload, scenario_id=scenario_id, ensure_scan=True, language=lang)
     scenario = state.get_scenario(scenario_id)
     if scenario is None or scenario.scan_result is None or scenario.dirty:
@@ -206,7 +261,7 @@ def populate_risk_candidates(session_payload, scenario_id, language_value, curre
     options = build_risk_candidate_options(scenario, lang)
     option_values = {option["value"] for option in options}
     candidate_key = current_candidate_key if current_candidate_key in option_values else resolve_default_risk_candidate(scenario)
-    mc_fields = build_config_fields(scenario.config_bundle, RISK_MONTE_CARLO_FIELDS, lang=lang)
+    mc_fields = _risk_mc_fields_with_context(scenario.config_bundle, lang=lang)
 
     default_n = int(scenario.config_bundle.config.get("mc_n_simulations", 1000) or 1000)
     n_simulations = current_n_simulations
@@ -216,14 +271,8 @@ def populate_risk_candidates(session_payload, scenario_id, language_value, curre
     return options, candidate_key, n_simulations, render_risk_monte_carlo_fields(mc_fields, empty_message=tr("risk.monte_carlo_settings.empty", lang))
 
 
-def _collect_risk_mc_settings(base_config, n_simulations, field_ids, field_values) -> dict[str, Any]:
-    updates = {
-        "mc_n_simulations": coerce_config_value(
-            "mc_n_simulations",
-            parse_assumption_input_value("mc_n_simulations", n_simulations),
-            base_config,
-        )
-    }
+def _collect_risk_mc_field_settings(base_config, field_ids, field_values) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
     for component_id, value in zip(field_ids or [], field_values or []):
         field_key = str(component_id.get("field", "")).strip()
         if not field_key:
@@ -234,6 +283,79 @@ def _collect_risk_mc_settings(base_config, n_simulations, field_ids, field_value
             base_config,
         )
     return updates
+
+
+def _collect_risk_mc_settings(base_config, n_simulations, field_ids, field_values) -> dict[str, Any]:
+    updates = {
+        "mc_n_simulations": coerce_config_value(
+            "mc_n_simulations",
+            parse_assumption_input_value("mc_n_simulations", n_simulations),
+            base_config,
+        )
+    }
+    updates.update(_collect_risk_mc_field_settings(base_config, field_ids, field_values))
+    return updates
+
+
+def _risk_mc_fields_with_context(config_bundle, *, lang: str = "es") -> list[dict[str, Any]]:
+    fields = build_config_fields(config_bundle, RISK_MONTE_CARLO_FIELDS, lang=lang)
+    context = assumption_context_map(config_bundle.config, lang=lang)
+    disabled_map = dict(context.get("field_disabled") or {})
+    emphasis_map = dict(context.get("field_emphasis") or {})
+    for field in fields:
+        field_key = str(field.get("field", ""))
+        field["disabled"] = bool(disabled_map.get(field_key, False))
+        field["emphasize"] = bool(emphasis_map.get(field_key, False))
+    return fields
+
+
+@callback(
+    Output({"type": "risk-mc-input", "field": ALL}, "disabled"),
+    Output({"type": "risk-mc-field-card", "field": ALL}, "className"),
+    Input("scenario-session-store", "data"),
+    Input("risk-scenario-dropdown", "value"),
+    Input({"type": "risk-mc-input", "field": ALL}, "id"),
+    Input({"type": "risk-mc-input", "field": ALL}, "value"),
+    Input("language-selector", "value"),
+    State({"type": "risk-mc-field-card", "field": ALL}, "id"),
+)
+def sync_risk_monte_carlo_context(
+    session_payload,
+    scenario_id,
+    mc_field_ids,
+    mc_field_values,
+    language_value,
+    mc_card_ids,
+):
+    lang = _lang(language_value)
+    _, state = resolve_client_session(session_payload, language=lang)
+    scenario = state.get_scenario(scenario_id)
+    if scenario is None:
+        return [], []
+
+    current_config = dict(scenario.config_bundle.config)
+    current_config.update(
+        _collect_risk_mc_field_settings(
+            current_config,
+            mc_field_ids,
+            mc_field_values,
+        )
+    )
+    context = assumption_context_map(current_config, lang=lang)
+    disabled_map = dict(context.get("field_disabled") or {})
+    emphasis_map = dict(context.get("field_emphasis") or {})
+    disabled_values = [
+        bool(disabled_map.get((component_id or {}).get("field", ""), False))
+        for component_id in (mc_field_ids or [])
+    ]
+    card_classes = [
+        _risk_field_card_class(
+            disabled=bool(disabled_map.get((component_id or {}).get("field", ""), False)),
+            emphasize=bool(emphasis_map.get((component_id or {}).get("field", ""), False)),
+        )
+        for component_id in (mc_card_ids or [])
+    ]
+    return disabled_values, card_classes
 
 
 def _bundle_with_mc_settings(config_bundle, mc_settings):
@@ -264,6 +386,8 @@ def persist_risk_settings(
     session_payload,
     language_value,
 ):
+    if not _risk_page_access(session_payload).allowed:
+        raise PreventUpdate
     if scenario_id in (None, ""):
         raise PreventUpdate
     lang = _lang(language_value)
@@ -331,6 +455,8 @@ def run_risk_analysis(
 ):
     if not n_clicks:
         raise PreventUpdate
+    if not _risk_page_access(session_payload).allowed:
+        raise PreventUpdate
 
     lang = _lang(language_value)
     _, state = resolve_scenario_session(session_payload, scenario_id=scenario_id, ensure_scan=True, language=lang)
@@ -342,7 +468,14 @@ def run_risk_analysis(
         mc_field_ids,
         mc_field_values,
     )
-    errors = validate_risk_run_inputs(scenario, candidate_key, n_simulations, seed, lang=lang)
+    errors = validate_risk_run_inputs(
+        scenario,
+        candidate_key,
+        n_simulations,
+        seed,
+        mc_settings=mc_settings,
+        lang=lang,
+    )
     if errors:
         return build_risk_result_store_payload(
             result_id=None,
@@ -467,6 +600,24 @@ def invalidate_risk_result(
 )
 def render_risk_results(session_payload, result_payload, scenario_id, language_value):
     lang = _lang(language_value)
+    access = _risk_page_access(session_payload)
+    if access.is_gated:
+        message = tr(access.body_key or "ui_mode.gate.risk.body", lang)
+        empty = empty_risk_figure(tr("risk.chart.npv_hist", lang), message)
+        return (
+            render_message_list([message]),
+            message,
+            [],
+            empty_risk_figure(tr("risk.chart.payback_hist", lang), message),
+            empty,
+            empty_risk_figure(tr("risk.chart.payback_ecdf", lang), message),
+            empty_risk_figure(tr("risk.chart.npv_ecdf", lang), message),
+            [],
+            [],
+            render_message_list([], empty_message=message),
+            html.Div(),
+            True,
+        )
     _, state = resolve_scenario_session(session_payload, scenario_id=scenario_id, ensure_scan=True, language=lang)
     ready = ready_risk_scenarios(state)
     if not ready:
@@ -620,6 +771,8 @@ def render_risk_results(session_payload, result_payload, scenario_id, language_v
 )
 def export_risk_result_artifacts(n_clicks, result_payload, session_payload, language_value):
     if not n_clicks:
+        raise PreventUpdate
+    if not _risk_page_access(session_payload).allowed:
         raise PreventUpdate
     lang = _lang(language_value)
     payload = result_payload or {}

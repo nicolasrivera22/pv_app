@@ -1,6 +1,7 @@
 from __future__ import annotations
-
+from components.profile_editor import _debug_bundle_rows
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -40,11 +41,17 @@ def _legacy_manifest_path(slug: str) -> Path | None:
 
 def _resolve_manifest_path_for_open(slug: str) -> Path:
     current = _current_manifest_path(slug)
-    if current.exists():
-        return current
     legacy = _legacy_manifest_path(slug)
+    print("RESOLVE OPEN slug:", slug)
+    print("  current manifest:", current, "exists:", current.exists())
+    print("  legacy manifest:", legacy, "exists:", legacy.exists() if legacy is not None else None)
+    if current.exists():
+        print("  USING CURRENT")
+        return current
     if legacy is not None and legacy.exists():
+        print("  USING LEGACY")
         return legacy
+    print("  USING CURRENT (missing fallback)")
     return current
 
 
@@ -120,6 +127,7 @@ def save_project(
     project_root(resolved_slug)
     project_exports_root(resolved_slug)
     for scenario in state.scenarios:
+        _debug_bundle_rows(f"BEFORE save_project write {scenario.scenario_id}", scenario.config_bundle)
         _write_table_inputs(_scenario_input_root(resolved_slug, scenario.scenario_id), scenario)
     manifest = _build_manifest(state, project_name=resolved_name, slug=resolved_slug, language=language)
     _write_manifest(manifest)
@@ -135,11 +143,25 @@ def save_project_as(
     return save_project(state, project_name=project_name, slug=_slugify(project_name), language=language)
 
 
+def delete_project(slug: str) -> str:
+    manifest_path = _resolve_manifest_path_for_open(slug)
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Project '{slug}' not found.")
+    manifest = _read_manifest(manifest_path)
+    shutil.rmtree(manifest_path.parent)
+    return manifest.name
+
+
 def read_project_manifest(slug: str) -> ProjectManifest:
     return _read_manifest(_manifest_path(slug))
 
 
 def open_project(slug: str) -> ScenarioSessionState:
+    manifest_path = _resolve_manifest_path_for_open(slug)
+    print("OPEN_PROJECT slug:", slug)
+    print("OPEN_PROJECT manifest_path:", manifest_path)
+    print("OPEN_PROJECT project_base:", manifest_path.parent)
+    manifest = _read_manifest(manifest_path)
     manifest_path = _resolve_manifest_path_for_open(slug)
     manifest = _read_manifest(manifest_path)
     scenarios: list[ScenarioRecord] = []
@@ -147,6 +169,7 @@ def open_project(slug: str) -> ScenarioSessionState:
     for item in manifest.scenarios:
         table_root = project_base / "inputs" / item.scenario_id
         bundle = load_project_bundle_from_tables(table_root, source_name=item.source_name)
+        _debug_bundle_rows(f"AFTER open_project load {item.scenario_id}", bundle)
         record = create_scenario_record(item.name, bundle, source_name=item.source_name)
         scenarios.append(
             replace(

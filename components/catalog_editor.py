@@ -14,8 +14,17 @@ def _catalog_table(table_id: str) -> dash_table.DataTable:
         sort_action="native",
         page_size=8,
         style_table={"overflowX": "auto"},
-        style_cell={"padding": "0.4rem", "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif", "fontSize": 12},
-        style_header={"backgroundColor": "#dbeafe", "fontWeight": "bold"},
+        style_cell={
+            "padding": "0.4rem",
+            "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+            "fontSize": 12,
+            "color": "var(--color-text-primary)",
+        },
+        style_header={
+            "backgroundColor": "var(--color-primary-soft)",
+            "color": "var(--color-text-primary)",
+            "fontWeight": "bold",
+        },
         tooltip_delay=0,
         tooltip_duration=None,
         tooltip_header={},
@@ -28,7 +37,7 @@ def catalog_editor_section() -> html.Div:
         children=[
             html.Div(className="section-head", children=[html.H3(tr("workbench.catalogs", "es"), id="catalog-editor-title")]),
             html.Div(
-                className="catalog-grid",
+                className="catalog-stack",
                 children=[
                     html.Div(
                         className="subpanel",

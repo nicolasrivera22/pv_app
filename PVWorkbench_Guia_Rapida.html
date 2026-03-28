@@ -6,178 +6,297 @@
   <title>PVWorkbench — Guía rápida</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --card: #ffffff;
+      --bg-top: #eff6ff;
+      --bg-bottom: #dbeafe;
+      --surface: rgba(255, 255, 255, 0.96);
+      --surface-soft: #f8fafc;
       --text: #0f172a;
       --muted: #475569;
       --accent: #2563eb;
-      --accent-2: #0ea5e9;
-      --soft: #e2e8f0;
-      --ok: #16a34a;
-      --warn: #f59e0b;
+      --accent-hover: #1d4ed8;
+      --accent-soft: #dbeafe;
+      --border: #93c5fd;
+      --ok-bg: #ecfdf5;
+      --ok-text: #047857;
+      --warn-bg: #fff7ed;
+      --warn-text: #9a3412;
+      --shadow: 0 18px 40px rgba(15, 23, 42, 0.10);
     }
+
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
-      font-family: Arial, Helvetica, sans-serif;
-      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
       color: var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(37, 99, 235, 0.18), transparent 28%),
+        linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
     }
+
     .wrap {
-      max-width: 980px;
+      max-width: 1100px;
       margin: 0 auto;
-      padding: 40px 20px 60px;
+      padding: 36px 20px 64px;
     }
+
     .hero {
-      color: white;
+      display: grid;
+      gap: 14px;
       margin-bottom: 24px;
     }
-    .hero h1 {
-      margin: 0 0 8px;
-      font-size: 2.2rem;
+
+    .badge {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      border: 1px solid var(--border);
+      color: var(--accent-hover);
+      font-size: 0.86rem;
+      font-weight: 700;
     }
+
+    .hero-card {
+      background: var(--surface);
+      border-radius: 26px;
+      padding: 28px;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(147, 197, 253, 0.55);
+    }
+
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      color: var(--text);
+    }
+
     .hero p {
       margin: 0;
-      color: #cbd5e1;
-      line-height: 1.6;
-      max-width: 760px;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 18px;
-      margin-top: 24px;
-    }
-    .card {
-      background: var(--card);
-      border-radius: 18px;
-      padding: 22px;
-      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
-    }
-    .card h2 {
-      margin-top: 0;
-      font-size: 1.15rem;
-      color: var(--accent);
-    }
-    .card p, .card li {
       color: var(--muted);
-      line-height: 1.6;
+      line-height: 1.7;
+      max-width: 860px;
+      font-size: 1rem;
     }
-    ol, ul { padding-left: 20px; }
-    .badge {
-      display: inline-block;
-      background: #dbeafe;
-      color: #1d4ed8;
-      border-radius: 999px;
-      padding: 6px 12px;
-      font-size: 0.88rem;
-      font-weight: bold;
-      margin-bottom: 12px;
+
+    .quick-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 18px;
+      margin-bottom: 24px;
     }
+
+    .card {
+      background: var(--surface);
+      border-radius: 20px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(203, 213, 225, 0.82);
+    }
+
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 1.08rem;
+      color: var(--accent-hover);
+    }
+
+    .card p,
+    .card li {
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .card ul,
+    .card ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+
     .steps {
-      background: white;
-      border-radius: 22px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .steps-card {
+      background: var(--surface);
+      border-radius: 24px;
       padding: 26px;
-      margin-top: 24px;
-      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(203, 213, 225, 0.82);
     }
-    .steps h2 { margin-top: 0; color: var(--accent); }
+
+    .steps-card h2 {
+      margin: 0 0 12px;
+      color: var(--accent-hover);
+      font-size: 1.2rem;
+    }
+
+    .steps-card ol {
+      margin: 0;
+      padding-left: 22px;
+    }
+
+    .steps-card li {
+      margin-bottom: 10px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--surface-soft);
+      border: 1px solid rgba(203, 213, 225, 0.92);
+      color: var(--text);
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+
     .callout {
-      border-left: 5px solid var(--warn);
-      background: #fff7ed;
+      margin-top: 18px;
       padding: 14px 16px;
-      border-radius: 10px;
-      color: #7c2d12;
-      margin-top: 16px;
+      border-radius: 14px;
+      line-height: 1.65;
+      border: 1px solid transparent;
     }
-    .good {
-      border-left-color: var(--ok);
-      background: #f0fdf4;
-      color: #166534;
+
+    .callout.good {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+      border-color: rgba(16, 185, 129, 0.24);
     }
-    footer {
-      color: #cbd5e1;
-      font-size: 0.95rem;
-      margin-top: 28px;
-      text-align: center;
+
+    .callout.warn {
+      background: var(--warn-bg);
+      color: var(--warn-text);
+      border-color: rgba(245, 158, 11, 0.24);
     }
+
     code {
       background: #e2e8f0;
+      color: var(--text);
       padding: 2px 6px;
       border-radius: 6px;
-      color: #0f172a;
+      font-size: 0.92em;
+    }
+
+    footer {
+      margin-top: 28px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.95rem;
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="hero">
-      <div class="badge">Prueba de fuego en Windows</div>
-      <h1>PVWorkbench — Guía rápida</h1>
-      <p>
-        Esta aplicación sirve para explorar diseños fotovoltaicos, revisar resultados
-        económicos y energéticos, guardar proyectos y correr una página de riesgo con
-        Monte Carlo. En esta etapa nos interesa validar claridad, estabilidad y facilidad de uso.
-      </p>
-    </div>
+    <section class="hero">
+      <span class="badge">Guía rápida para uso local</span>
+      <div class="hero-card">
+        <h1>PVWorkbench — Guía rápida</h1>
+        <p>
+          PVWorkbench sirve para crear escenarios FV, revisar resultados determinísticos,
+          comparar diseños y correr riesgo con Monte Carlo. La app ahora separa claramente
+          <strong>Resultados</strong>, <strong>Supuestos</strong> y <strong>Admin</strong>,
+          así que la forma más fácil de arrancar es empezar en <strong>Supuestos</strong>.
+        </p>
+      </div>
+    </section>
 
-    <div class="grid">
-      <section class="card">
+    <section class="quick-grid">
+      <article class="card">
         <h2>Cómo abrir la app</h2>
         <ol>
-          <li>Abre la carpeta entregada <code>PVWorkbench</code>.</li>
+          <li>Abre la carpeta <code>PVWorkbench</code>.</li>
           <li>Haz doble clic en <code>PVWorkbench.exe</code>.</li>
           <li>Espera unos segundos mientras arranca el servidor local.</li>
           <li>La app debería abrirse sola en tu navegador.</li>
         </ol>
-      </section>
+      </article>
 
-      <section class="card">
-        <h2>Qué probar primero</h2>
+      <article class="card">
+        <h2>Por dónde empezar</h2>
         <ul>
-          <li>Cargar el ejemplo incluido.</li>
-          <li>Correr un barrido determinístico.</li>
-          <li>Explorar candidatos y el análisis detallado.</li>
-          <li>Guardar y reabrir un proyecto.</li>
-          <li>Exportar resultados.</li>
-          <li>Probar la página de riesgo.</li>
+          <li>Ve a <strong>Supuestos</strong>.</li>
+          <li>Usa <strong>Cargar ejemplo</strong> o <strong>Importar Excel</strong>.</li>
+          <li>Revisa <strong>Generales</strong> y <strong>Demanda</strong>.</li>
+          <li>Corre el escaneo y luego mira <strong>Resultados</strong>.</li>
         </ul>
-      </section>
+      </article>
 
-      <section class="card">
-        <h2>Qué feedback nos ayuda mucho</h2>
-        <ul>
-          <li>Pantallas o botones confusos.</li>
-          <li>Pasos poco evidentes.</li>
-          <li>Lentitud o bloqueos.</li>
-          <li>Errores extraños.</li>
-          <li>Resultados inesperados.</li>
-        </ul>
-      </section>
-    </div>
+      <article class="card">
+        <h2>Mapa rápido</h2>
+        <div class="pill-row">
+          <span class="pill">Resultados</span>
+          <span class="pill">Supuestos</span>
+          <span class="pill">Comparar</span>
+          <span class="pill">Riesgo</span>
+          <span class="pill">Ayuda</span>
+        </div>
+      </article>
+    </section>
 
     <section class="steps">
-      <h2>Flujo recomendado de prueba</h2>
-      <ol>
-        <li><strong>Cargar ejemplo:</strong> confirma que la app abre y navega bien.</li>
-        <li><strong>Correr determinístico:</strong> revisa curva VPN vs kWp, tabla de candidatos, KPIs y análisis detallado.</li>
-        <li><strong>Editar parámetros:</strong> cambia algunos valores simples y vuelve a correr.</li>
-        <li><strong>Guardar proyecto:</strong> guarda, cierra y reabre para verificar persistencia.</li>
-        <li><strong>Exportar:</strong> verifica que aparezcan archivos en <code>Resultados</code> o dentro del proyecto.</li>
-        <li><strong>Riesgo:</strong> corre una simulación Monte Carlo pequeña desde la página de riesgo.</li>
-      </ol>
+      <article class="steps-card">
+        <h2>Flujo recomendado de prueba</h2>
+        <ol>
+          <li><strong>Arranque:</strong> entra a <strong>Supuestos</strong> y crea un escenario con <strong>Cargar ejemplo</strong> o <strong>Importar Excel</strong>.</li>
+          <li><strong>Ajustes:</strong> revisa la subtab <strong>Generales</strong> y, si hace falta, la subtab <strong>Demanda</strong>.</li>
+          <li><strong>Admin:</strong> usa <strong>Acceso interno</strong> solo si necesitas tocar precios, catálogos o tablas internas. La demanda detallada ya no se edita allí.</li>
+          <li><strong>Determinístico:</strong> ejecuta el escaneo y revisa en <strong>Resultados</strong> la curva VPN vs kWp, la tabla de candidatos, los KPIs y el análisis detallado.</li>
+          <li><strong>Comparar:</strong> arma una shortlist de diseños en <strong>Comparar</strong>.</li>
+          <li><strong>Riesgo:</strong> corre una simulación Monte Carlo pequeña en <strong>Riesgo</strong>.</li>
+          <li><strong>Guardar:</strong> guarda el proyecto, ciérralo y vuelve a abrirlo para validar persistencia.</li>
+          <li><strong>Exportar:</strong> verifica que aparezcan archivos en <code>Resultados</code> o dentro del proyecto.</li>
+        </ol>
 
-      <div class="callout good">
-        No solo buscamos bugs. También nos importa muchísimo saber en qué partes la app se siente confusa o poco natural.
-      </div>
+        <div class="callout good">
+          No solo buscamos bugs. También importa mucho saber si la navegación, los nombres de las páginas o los pasos de trabajo se sienten poco claros.
+        </div>
 
-      <div class="callout">
-        Si la app no abre sola en el navegador, vuelve a ejecutar <code>PVWorkbench.exe</code> y revisa si Windows o el antivirus mostró alguna advertencia.
-      </div>
+        <div class="callout warn">
+          El PIN de <strong>Admin</strong> es una barrera local de uso interno. No es autenticación real.
+        </div>
+      </article>
+
+      <article class="steps-card">
+        <h2>Qué feedback ayuda más</h2>
+        <ul>
+          <li>Botones o acciones poco evidentes.</li>
+          <li>Partes donde no queda claro si debes ir a Resultados, Supuestos o Admin.</li>
+          <li>Pantallas lentas, bloqueos o errores raros.</li>
+          <li>Resultados que te sorprenden o parecen inconsistentes.</li>
+          <li>Exportaciones que no aparecen donde esperabas.</li>
+        </ul>
+      </article>
+
+      <article class="steps-card">
+        <h2>Problemas comunes</h2>
+        <ul>
+          <li><strong>No se abre la app:</strong> vuelve a ejecutar <code>PVWorkbench.exe</code> y revisa si Windows o el antivirus mostraron una advertencia.</li>
+          <li><strong>No sabes por dónde empezar:</strong> ve a <strong>Supuestos</strong> y usa <strong>Cargar ejemplo</strong> o <strong>Importar Excel</strong>.</li>
+          <li><strong>No encuentras Demanda:</strong> está en <strong>Supuestos &gt; Demanda</strong>.</li>
+          <li><strong>No encuentras Admin:</strong> está detrás de la tarjeta <strong>Acceso interno</strong> dentro de <strong>Supuestos</strong>.</li>
+        </ul>
+      </article>
     </section>
 
     <footer>
-      PVWorkbench · Guía rápida de uso local · Windows trial build
+      PVWorkbench · Guía rápida de uso local · Resultados / Supuestos / Admin alineados
     </footer>
   </div>
 </body>

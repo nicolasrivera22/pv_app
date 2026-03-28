@@ -14,7 +14,7 @@ import pandas as pd
 
 from .types import LoadedConfigBundle, ScanRunResult
 
-DETERMINISTIC_CACHE_SCHEMA_VERSION = 1
+DETERMINISTIC_CACHE_SCHEMA_VERSION = 2
 MAX_DETERMINISTIC_CACHE_ENTRIES = 16
 _MONTE_CARLO_CONFIG_DEFAULTS = {
     "mc_PR_std": 0.0,

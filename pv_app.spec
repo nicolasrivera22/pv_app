@@ -20,10 +20,11 @@ datas = [
 ] + collect_data_files("dash_cytoscape")
 
 hiddenimports = [
-    "pages.workbench",
-    "pages.compare",
-    "pages.risk",
-    "pages.help",
+    *collect_submodules("pages"),
+    "services.workspace_shared_callbacks",
+    "services.workspace_admin_callbacks",
+    "services.workspace_assumptions_callbacks",
+    "services.workspace_results_callbacks",
 ]
 
 

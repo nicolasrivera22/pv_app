@@ -18,12 +18,12 @@ def _fast_bundle():
     return replace(bundle, config=config)
 
 
-def test_risk_monte_carlo_fields_use_localized_uncertainty_labels() -> None:
+def test_risk_monte_carlo_fields_use_localized_labels_for_full_risk_section() -> None:
     bundle = _fast_bundle()
 
     fields = build_config_fields(
         bundle,
-        ("mc_PR_std", "mc_buy_std", "mc_sell_std", "mc_demand_std"),
+        ("mc_PR_std", "mc_buy_std", "mc_sell_std", "mc_demand_std", "mc_use_manual_kWp", "mc_manual_kWp", "mc_battery_name"),
         lang="en",
     )
     labels = [field["label"] for field in fields]
@@ -33,6 +33,9 @@ def test_risk_monte_carlo_fields_use_localized_uncertainty_labels() -> None:
         "Import tariff variation",
         "Export tariff variation",
         "Demand variation in Risk",
+        "Use a fixed kWp in Risk",
+        "Fixed kWp in Risk",
+        "Fixed battery for Risk",
     ]
 
 

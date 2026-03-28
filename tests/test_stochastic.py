@@ -122,6 +122,40 @@ def test_result_shape_and_raw_sample_toggle() -> None:
     assert result.summary.npv.p5 <= result.summary.npv.p50 <= result.summary.npv.p95
 
 
+def test_manual_risk_overrides_change_simulated_design_metadata() -> None:
+    bundle = _fast_bundle()
+    baseline = run_scan(bundle)
+    selected_detail = baseline.candidate_details[baseline.best_candidate_key]
+    manual_k_wp = float(selected_detail["kWp"]) + 1.234
+    available_batteries = [str(value) for value in bundle.battery_catalog["name"].astype(str).tolist()]
+    battery_name = next((name for name in available_batteries if name != str(selected_detail["battery_name"])), available_batteries[0])
+    overridden_bundle = replace(
+        bundle,
+        config={
+            **bundle.config,
+            "mc_use_manual_kWp": True,
+            "mc_manual_kWp": manual_k_wp,
+            "mc_battery_name": battery_name,
+        },
+    )
+
+    result = run_monte_carlo(
+        overridden_bundle,
+        selected_candidate_key=baseline.best_candidate_key,
+        seed=9,
+        n_simulations=6,
+        return_samples=True,
+        baseline_scan=baseline,
+    )
+
+    assert result.selected_candidate_key == baseline.best_candidate_key
+    assert result.selected_kWp != float(selected_detail["kWp"])
+    assert result.selected_battery == battery_name
+    assert result.samples is not None
+    assert set(result.samples["kWp"]) == {result.selected_kWp}
+    assert set(result.samples["battery"]) == {battery_name}
+
+
 def test_payback_semantics_use_nan_for_missing_cases() -> None:
     bundle = _payback_sparse_bundle()
     baseline = run_scan(bundle)

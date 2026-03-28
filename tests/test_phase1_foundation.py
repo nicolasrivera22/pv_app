@@ -96,6 +96,22 @@ def test_client_session_payload_omits_heavy_deterministic_blobs() -> None:
     assert "monthly" not in raw
     assert payload["active_scenario_id"] == state.active_scenario_id
     assert payload["selected_candidate_keys"]
+    assert payload["ui_mode"] == "simple"
+
+
+def test_client_session_ui_mode_round_trips_and_falls_back_to_simple() -> None:
+    client_state = bootstrap_client_session("es")
+
+    assert client_state.ui_mode == "simple"
+    assert type(client_state).from_payload(client_state.to_payload()).ui_mode == "simple"
+
+    pro_state = replace(client_state, ui_mode="pro")
+    admin_state = replace(client_state, ui_mode="admin")
+    invalid_payload = {**client_state.to_payload(), "ui_mode": "internal"}
+
+    assert type(client_state).from_payload(pro_state.to_payload()).ui_mode == "pro"
+    assert type(client_state).from_payload(admin_state.to_payload()).ui_mode == "admin"
+    assert type(client_state).from_payload(invalid_payload).ui_mode == "simple"
 
 
 def test_session_lifecycle_reuses_refresh_id_and_reopens_project_when_registry_missing(tmp_path, monkeypatch) -> None:
@@ -249,6 +265,17 @@ def test_project_round_trip_uses_canonical_csv_tables_and_restores_workspace(tmp
     hydrated_base = hydrated.get_scenario(base.scenario_id)
     assert hydrated_base is not None and hydrated_base.scan_result is not None
     assert hydrated_base.selected_candidate_key == alt_key
+
+
+def test_ui_mode_does_not_persist_into_project_manifest(tmp_path, monkeypatch) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    saved = save_project(state, project_name="Proyecto Demo", language="es")
+    manifest_payload = read_project_manifest(saved.project_slug).to_payload()
+    raw = json.dumps(manifest_payload, ensure_ascii=False)
+
+    assert "ui_mode" not in raw
 
 
 def test_apply_no_battery_edit_persists_through_project_save_and_reopen(tmp_path, monkeypatch) -> None:

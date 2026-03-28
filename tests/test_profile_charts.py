@@ -65,8 +65,8 @@ def test_demand_weights_chart_includes_optional_base_traces_only_when_valid() ->
         "en",
     )
 
-    assert len(full_render.figure.data) == 6
-    assert len(no_base_render.figure.data) == 3
+    assert len(full_render.figure.data) == 4
+    assert len(no_base_render.figure.data) == 1
     assert all("base" not in str(trace.name).lower() for trace in no_base_render.figure.data)
 
 

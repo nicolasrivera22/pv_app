@@ -17,7 +17,16 @@ from pv_product.simulator import calculate_capex_client
 from pv_product.utils import build_7x24_from_excel
 from services import collect_config_updates, ensure_template, load_config_from_excel, load_example_config, run_scan, run_scenario
 from services.io_excel import WorkbookContractError, _normalize_config_value
-from services.result_views import build_kpis, resolve_selected_candidate_key, resolve_selected_candidate_key_for_scenario
+from services.result_views import (
+    build_npv_figure,
+    build_kpis,
+    build_visible_horizon_candidate_summary,
+    resolve_payback_display_state,
+    resolve_selected_candidate_key,
+    resolve_selected_candidate_key_for_scenario,
+    summarize_candidate_for_horizon,
+    summarize_candidates_for_horizon,
+)
 from services.ui_schema import coerce_config_value, display_assumption_value, parse_assumption_input_value
 from services.validation import validate_config
 
@@ -262,14 +271,280 @@ def test_run_scenario_shapes_outputs() -> None:
     assert isinstance(scenario.npv_curve, pd.DataFrame)
 
 
+def test_resolve_payback_display_state_marks_payback_within_visible_horizon() -> None:
+    state = resolve_payback_display_state(1.5, 2, payback_month=18)
+
+    assert state["project_payback_years"] == pytest.approx(1.5)
+    assert state["project_payback_month"] == 18
+    assert state["reaches_payback"] is True
+    assert state["within_visible_horizon"] is True
+    assert state["message_key"] is None
+    assert state["trace_payback_years"] == pytest.approx(1.5)
+
+
+def test_resolve_payback_display_state_marks_payback_outside_visible_horizon() -> None:
+    state = resolve_payback_display_state(1.5, 1, payback_month=18)
+
+    assert state["project_payback_years"] == pytest.approx(1.5)
+    assert state["reaches_payback"] is True
+    assert state["within_visible_horizon"] is False
+    assert state["message_key"] == "workbench.payback.note.visible_horizon"
+    assert state["trace_payback_years"] == pytest.approx(1.5)
+
+
+def test_resolve_payback_display_state_handles_missing_payback_cleanly() -> None:
+    state = resolve_payback_display_state(None, 5, payback_month=None)
+
+    assert state["project_payback_years"] is None
+    assert state["reaches_payback"] is False
+    assert state["within_visible_horizon"] is False
+    assert state["message_key"] == "workbench.payback.note.project_horizon"
+    assert state["trace_payback_years"] is None
+
+
+def test_resolve_payback_display_state_uses_years_when_payback_month_is_missing() -> None:
+    state = resolve_payback_display_state(1.5, 1, payback_month=None)
+
+    assert state["project_payback_years"] == pytest.approx(1.5)
+    assert state["project_payback_month"] is None
+    assert state["within_visible_horizon"] is False
+    assert state["message_key"] == "workbench.payback.note.visible_horizon"
+
+
+def test_summarize_candidate_for_horizon_truncates_npv_only() -> None:
+    monthly = pd.DataFrame(
+        {
+            "Año_mes": list(range(1, 25)),
+            "NPV_COP": [-120.0] * 12 + [-20.0, -10.0, -5.0, -1.0, -0.5, 5.0, 10.0, 15.0, 30.0, 40.0, 50.0, 60.0],
+            "Ahorro_COP": [10.0] * 24,
+            "Demanda_kWh": [100.0] * 24,
+            "Importacion_Red_kWh": [30.0] * 24,
+            "Exportacion_kWh": [5.0] * 24,
+            "PV_a_Carga_kWh": [55.0] * 24,
+            "Bateria_a_Carga_kWh": [15.0] * 24,
+        }
+    )
+    detail = {
+        "scan_order": 0,
+        "candidate_key": "12.000::None",
+        "kWp": 12.0,
+        "battery_name": "None",
+        "peak_ratio": 1.1,
+        "summary": {"cum_disc_final": 60.0, "payback_years": 1.5, "payback_month": 18, "capex_client": 1_000.0},
+        "monthly": monthly,
+    }
+
+    first_year = summarize_candidate_for_horizon(detail, 1)
+    full_horizon = summarize_candidate_for_horizon(detail, 2)
+
+    assert first_year["horizon_years"] == 1
+    assert first_year["horizon_months"] == 12
+    assert first_year["NPV_COP"] == -120.0
+    assert full_horizon["NPV_COP"] == 60.0
+
+
+def test_build_visible_horizon_candidate_summary_preserves_project_payback() -> None:
+    monthly = pd.DataFrame(
+        {
+            "Año_mes": list(range(1, 25)),
+            "NPV_COP": [-120.0] * 12 + [-20.0, -10.0, -5.0, -1.0, -0.5, 5.0, 10.0, 15.0, 30.0, 40.0, 50.0, 60.0],
+            "Ahorro_COP": [10.0] * 24,
+            "Demanda_kWh": [100.0] * 24,
+            "Importacion_Red_kWh": [30.0] * 24,
+            "Exportacion_kWh": [5.0] * 24,
+            "PV_a_Carga_kWh": [55.0] * 24,
+            "Bateria_a_Carga_kWh": [15.0] * 24,
+        }
+    )
+    detail = {
+        "scan_order": 0,
+        "candidate_key": "12.000::None",
+        "kWp": 12.0,
+        "battery_name": "None",
+        "peak_ratio": 1.1,
+        "summary": {"cum_disc_final": 60.0, "payback_years": 1.5, "payback_month": 18, "capex_client": 1_000.0},
+        "monthly": monthly,
+    }
+
+    presentation = build_visible_horizon_candidate_summary(detail, 1)
+    kpis = build_kpis(presentation)
+
+    assert presentation["project_summary"]["payback_years"] == pytest.approx(1.5)
+    assert presentation["project_summary"]["payback_month"] == 18
+    assert presentation["visible_horizon_summary"]["NPV_COP"] == -120.0
+    assert presentation["payback_display_state"]["message_key"] == "workbench.payback.note.visible_horizon"
+    assert kpis["NPV"] == -120.0
+    assert kpis["payback_years"] == pytest.approx(1.5)
+
+
+def test_summarize_candidates_for_horizon_rebuilds_display_order_and_best_flag() -> None:
+    monthly_base = pd.DataFrame(
+        {
+            "Año_mes": list(range(1, 25)),
+            "Ahorro_COP": [10.0] * 24,
+            "Demanda_kWh": [100.0] * 24,
+            "Importacion_Red_kWh": [25.0] * 24,
+            "Exportacion_kWh": [5.0] * 24,
+            "PV_a_Carga_kWh": [60.0] * 24,
+            "Bateria_a_Carga_kWh": [15.0] * 24,
+        }
+    )
+    detail_map = {
+        "12.000::None": {
+            "scan_order": 0,
+            "candidate_key": "12.000::None",
+            "kWp": 12.0,
+            "battery_name": "None",
+            "peak_ratio": 1.05,
+            "summary": {"cum_disc_final": 80.0, "payback_years": 1.5, "payback_month": 18, "capex_client": 1_000.0},
+            "monthly": monthly_base.assign(NPV_COP=[50.0] * 12 + [80.0] * 12),
+        },
+        "12.000::BAT-10": {
+            "scan_order": 1,
+            "candidate_key": "12.000::BAT-10",
+            "kWp": 12.0,
+            "battery_name": "BAT-10",
+            "peak_ratio": 1.05,
+            "summary": {"cum_disc_final": 120.0, "payback_years": 1.0, "payback_month": 12, "capex_client": 1_200.0},
+            "monthly": monthly_base.assign(NPV_COP=[30.0] * 12 + [120.0] * 12),
+        },
+        "18.000::None": {
+            "scan_order": 2,
+            "candidate_key": "18.000::None",
+            "kWp": 18.0,
+            "battery_name": "None",
+            "peak_ratio": 1.2,
+            "summary": {"cum_disc_final": 140.0, "payback_years": 1.0, "payback_month": 12, "capex_client": 1_500.0},
+            "monthly": monthly_base.assign(NPV_COP=[90.0] * 12 + [140.0] * 12),
+        },
+    }
+
+    horizon_table = summarize_candidates_for_horizon(detail_map, 1)
+    full_table = summarize_candidates_for_horizon(detail_map, 2)
+
+    assert list(horizon_table["candidate_key"]) == ["12.000::None", "12.000::BAT-10", "18.000::None"]
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::None", "NPV_COP"].iloc[0] == 50.0
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::BAT-10", "NPV_COP"].iloc[0] == 30.0
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::None", "payback_years"].iloc[0] == pytest.approx(1.5)
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::BAT-10", "payback_years"].iloc[0] == pytest.approx(1.0)
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::None", "best_battery_for_kwp"].iloc[0]
+    assert not horizon_table.loc[horizon_table["candidate_key"] == "12.000::BAT-10", "best_battery_for_kwp"].iloc[0]
+    assert not full_table.loc[full_table["candidate_key"] == "12.000::None", "best_battery_for_kwp"].iloc[0]
+    assert full_table.loc[full_table["candidate_key"] == "12.000::BAT-10", "best_battery_for_kwp"].iloc[0]
+
+
+def test_build_npv_figure_keeps_missing_payback_as_gap() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery": "None",
+                "NPV_COP": 10_000_000,
+                "payback_years": None,
+                "self_consumption_ratio": 0.45,
+                "peak_ratio": 1.1,
+                "scan_order": 0,
+            },
+            {
+                "candidate_key": "18.000::BAT-10",
+                "kWp": 18.0,
+                "battery": "BAT-10",
+                "NPV_COP": 16_000_000,
+                "payback_years": 6.2,
+                "self_consumption_ratio": 0.52,
+                "peak_ratio": 1.25,
+                "scan_order": 1,
+            },
+        ]
+    )
+
+    figure = build_npv_figure(table, lang="es", payback_label="Payback del proyecto [años]")
+    payback_trace = next(trace for trace in figure.data if trace.name == "Payback del proyecto [años]")
+
+    assert figure.layout.yaxis2.title.text == "Payback del proyecto [años]"
+    assert np.isnan(payback_trace.y[0])
+    assert payback_trace.hovertext[0].endswith(" -")
+
+
+def test_build_npv_figure_renders_selected_overlay_for_non_curve_candidate() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery": "None",
+                "NPV_COP": 10_000_000,
+                "payback_years": 5.5,
+                "self_consumption_ratio": 0.45,
+                "peak_ratio": 1.1,
+                "scan_order": 0,
+            },
+            {
+                "candidate_key": "12.000::BAT-10",
+                "kWp": 12.0,
+                "battery": "BAT-10",
+                "NPV_COP": 9_000_000,
+                "payback_years": 5.9,
+                "self_consumption_ratio": 0.49,
+                "peak_ratio": 1.18,
+                "scan_order": 1,
+            },
+            {
+                "candidate_key": "18.000::None",
+                "kWp": 18.0,
+                "battery": "None",
+                "NPV_COP": 12_000_000,
+                "payback_years": 6.1,
+                "self_consumption_ratio": 0.51,
+                "peak_ratio": 1.22,
+                "scan_order": 2,
+            },
+        ]
+    )
+
+    figure = build_npv_figure(table, selected_key="12.000::BAT-10", lang="es", module_power_w=600.0)
+
+    selected_trace = next(trace for trace in figure.data if trace.name == "Diseño seleccionado")
+    best_trace = next(trace for trace in figure.data if trace.name == "Mejor diseño")
+
+    assert list(selected_trace.x) == pytest.approx([12.0])
+    assert list(selected_trace.y) == pytest.approx([9_000_000.0])
+    assert list(selected_trace.customdata[0]) == ["12.000::BAT-10", 20, "selected_overlay"]
+    assert selected_trace.marker.color == "#dc2626"
+    assert selected_trace.marker.line.color == "#7f1d1d"
+    assert selected_trace.marker.size == 18
+    assert list(best_trace.customdata[0]) == ["18.000::None", 30, "best_overlay"]
+
+
 def test_scan_payload_round_trip_preserves_detail_fields() -> None:
     scan = run_scan(_fast_bundle())
     restored = type(scan).from_payload(scan.to_payload())
 
     assert restored.best_candidate_key == scan.best_candidate_key
+    assert restored.evaluated_kwp_count == scan.evaluated_kwp_count
+    assert restored.viable_kwp_count == scan.viable_kwp_count
+    assert restored.discard_counts == scan.discard_counts
+    assert restored.discarded_points == scan.discarded_points
     detail = restored.candidate_details[restored.best_candidate_key]
     assert "self_consumption_ratio" in detail
     assert "scan_order" in detail
+
+
+def test_scan_payload_backfills_discard_telemetry_for_legacy_payload() -> None:
+    scan = run_scan(_fast_bundle())
+    payload = scan.to_payload()
+    payload.pop("evaluated_kwp_count")
+    payload.pop("viable_kwp_count")
+    payload.pop("discard_counts")
+    payload.pop("discarded_points")
+
+    restored = type(scan).from_payload(payload)
+
+    assert restored.viable_kwp_count == int(scan.candidates["kWp"].nunique())
+    assert restored.evaluated_kwp_count == restored.viable_kwp_count
+    assert restored.discard_counts == {}
+    assert restored.discarded_points == ()
 
 
 def test_candidate_table_has_single_best_battery_per_kwp_and_detail_alignment() -> None:
@@ -329,6 +604,31 @@ def test_selected_candidate_helper_for_scenario_prefers_click_then_row_then_stor
         click_data=None,
     )
     assert stored_key == row_selected_key
+
+
+def test_selected_candidate_helper_for_scenario_prefers_curve_role_over_selected_overlay_role() -> None:
+    scan = run_scan(_fast_bundle())
+    same_kwp_rows = next(
+        group
+        for _, group in scan.candidates.groupby("kWp", sort=True)
+        if len(group.index) >= 2
+    )
+    ordered_rows = same_kwp_rows.sort_values(["NPV_COP", "scan_order"], ascending=[False, True], kind="mergesort").reset_index(drop=True)
+    curve_key = str(ordered_rows.iloc[0]["candidate_key"])
+    selected_overlay_key = str(ordered_rows.iloc[1]["candidate_key"])
+
+    selected_key = resolve_selected_candidate_key_for_scenario(
+        scan,
+        selected_overlay_key,
+        click_data={
+            "points": [
+                {"customdata": [selected_overlay_key, None, "selected_overlay"]},
+                {"customdata": [curve_key, None, "npv_curve"]},
+            ]
+        },
+    )
+
+    assert selected_key == curve_key
 
 
 def test_capex_semantics_variable_mode() -> None:
@@ -503,6 +803,37 @@ def test_peak_ratio_behavior_is_kept_for_legacy_compatibility() -> None:
 
     assert ok_a == ok_b or isinstance(ok_a, bool)
     assert ratio_b != ratio_a
+
+
+def test_all_discarded_peak_ratio_scan_returns_completed_result() -> None:
+    bundle = _fast_bundle()
+    discarded_bundle = replace(
+        bundle,
+        config={**bundle.config, "limit_peak_ratio_enable": True, "limit_peak_ratio": 0.01},
+    )
+
+    scan = run_scan(discarded_bundle)
+
+    assert scan.best_candidate_key is None
+    assert scan.candidates.empty
+    assert scan.viable_kwp_count == 0
+    assert scan.evaluated_kwp_count > 0
+    assert scan.discard_counts["peak_ratio"] == scan.evaluated_kwp_count
+    assert scan.discard_counts["inverter_string"] == 0
+    assert scan.discarded_points
+    assert all(point["reason"] == "peak_ratio" for point in scan.discarded_points)
+
+
+def test_selected_candidate_helper_ignores_discard_marker_clicks() -> None:
+    scan = run_scan(_fast_bundle())
+
+    selected_key = resolve_selected_candidate_key_for_scenario(
+        scan,
+        scan.best_candidate_key,
+        click_data={"points": [{"x": 18.0, "y": 0.5}]},
+    )
+
+    assert selected_key == scan.best_candidate_key
 
 
 def test_regression_against_preserved_legacy_artifacts() -> None:

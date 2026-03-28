@@ -193,6 +193,22 @@ def internal_app_root() -> Path:
     return root.resolve()
 
 
+def private_config_root() -> Path:
+    explicit_root = os.environ.get("PVW_PRIVATE_CONFIG_ROOT")
+    if explicit_root:
+        root = Path(explicit_root).expanduser().resolve()
+    elif os.name == "nt":
+        root = (_local_appdata_root() / APP_STORAGE_DIRNAME).resolve()
+    elif sys.platform == "darwin":
+        root = (Path.home() / "Library" / "Application Support" / APP_STORAGE_DIRNAME).expanduser().resolve()
+    else:
+        xdg_root = os.environ.get("XDG_CONFIG_HOME")
+        base = Path(xdg_root).expanduser() if xdg_root else (Path.home() / ".config").expanduser()
+        root = (base / APP_STORAGE_DIRNAME).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def user_root() -> Path:
     # Compatibility alias retained for older callers. New code should prefer the
     # explicit packaged-mode helpers such as internal_app_root() or

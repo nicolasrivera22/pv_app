@@ -1,14 +1,14 @@
 {
   "format_version": 1,
-  "name": "tmp-no-batt-check",
-  "slug": "tmp_no_batt_check",
-  "active_scenario_id": "scenario-36b566f4",
+  "name": "Mi Demo 1",
+  "slug": "mi_demo_1",
+  "active_scenario_id": "scenario-ae15ce4f",
   "comparison_scenario_ids": [],
   "design_comparison_candidate_keys": {},
   "scenarios": [
     {
-      "scenario_id": "scenario-36b566f4",
-      "name": "Base",
+      "scenario_id": "scenario-ae15ce4f",
+      "name": "Escenario 1",
       "source_name": "PV_inputs.xlsx",
       "selected_candidate_key": null,
       "dirty": true,
