@@ -27,14 +27,17 @@ from services import (
     refresh_bundle_issues,
     resolve_client_session,
     resolve_deterministic_scan,
+    run_scenario_scan,
     save_project,
     set_admin_pin,
+    update_scenario_bundle,
 )
 from services.economics_tables import RICH_MIGRATION_NOTE_PREFIX, normalize_economics_cost_items_with_issues
 from services.project_io import projects_root
 from services.validation import localize_validation_message, validate_economics_tables
 from services.workspace_admin_callbacks import (
     apply_admin_edits,
+    render_economics_preview,
     sync_admin_draft,
 )
 
@@ -97,6 +100,16 @@ def _admin_payload(monkeypatch, tmp_path: Path):
     payload = commit_client_session(client_state, state).to_payload()
     active = state.get_scenario()
     assert active is not None
+    return client_state, state, active, payload
+
+
+def _scanned_admin_payload(monkeypatch, tmp_path: Path):
+    client_state, state, active, _payload = _admin_payload(monkeypatch, tmp_path)
+    state = run_scenario_scan(state, active.scenario_id)
+    payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
     return client_state, state, active, payload
 
 
@@ -499,3 +512,95 @@ def test_economics_changes_do_not_affect_deterministic_fingerprint_or_scan() -> 
     changed_scan = resolve_deterministic_scan(changed_bundle, allow_parallel=False)
     assert changed_scan.best_candidate_key == baseline_scan.best_candidate_key
     pdt.assert_frame_equal(changed_scan.candidates, baseline_scan.candidates)
+
+
+def test_render_economics_preview_uses_normalized_editor_rows(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    cost_rows = active.config_bundle.economics_cost_items_table.to_dict("records")
+    price_rows = active.config_bundle.economics_price_items_table.to_dict("records")
+    price_rows[0] = {**price_rows[0], "value": 12}
+    captured: dict[str, object] = {}
+
+    def _fake_preview(scenario, *, economics_cost_items, economics_price_items):
+        captured["scenario_id"] = scenario.scenario_id
+        captured["cost_items"] = economics_cost_items
+        captured["price_items"] = economics_price_items
+        return admin_callbacks.EconomicsPreviewResult(
+            state="no_scan",
+            message_key="workspace.admin.economics.preview.state.no_scan",
+        )
+
+    monkeypatch.setattr(admin_callbacks, "resolve_economics_preview", _fake_preview)
+
+    children = render_economics_preview(payload, cost_rows, price_rows, "es")
+
+    assert children
+    assert captured["scenario_id"] == active.scenario_id
+    assert captured["cost_items"] == cost_rows
+    normalized_price_rows = captured["price_items"]
+    assert isinstance(normalized_price_rows, list)
+    assert normalized_price_rows[0]["method"] == "markup_pct"
+    assert normalized_price_rows[0]["value"] == pytest.approx(0.12)
+
+
+def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    cost_rows = active.config_bundle.economics_cost_items_table.to_dict("records")
+    price_rows = active.config_bundle.economics_price_items_table.to_dict("records")
+    cost_rows[0] = {**cost_rows[0], "amount_COP": 100_000.0}
+    price_rows[0] = {**price_rows[0], "value": 10}
+
+    children = render_economics_preview(payload, cost_rows, price_rows, "es")
+
+    status = _find_component(children, "economics-preview-status")
+    summary_cards = _find_component(children, "economics-summary-cards")
+    breakdown_title = _find_component(children, "economics-breakdown-title")
+    breakdown_table = _find_component(children, "economics-breakdown-table")
+
+    assert status is not None
+    assert "diseño determinístico actual" in str(status.children)
+    assert summary_cards is not None
+    assert len(summary_cards.children) == 6
+    assert breakdown_title is not None
+    assert str(breakdown_title.children) == "Desglose económico"
+    assert breakdown_table is not None
+    assert len(breakdown_table.data) >= 2
+
+
+def test_render_economics_preview_reports_rerun_required_when_scenario_is_dirty(monkeypatch, tmp_path) -> None:
+    client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    state = update_scenario_bundle(state, active.scenario_id, active.config_bundle)
+    payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+    assert active is not None
+    assert active.dirty is True
+
+    children = render_economics_preview(payload, None, None, "es")
+
+    status = _find_component(children, "economics-preview-status")
+    summary_cards = _find_component(children, "economics-summary-cards")
+    breakdown_table = _find_component(children, "economics-breakdown-table")
+
+    assert status is not None
+    assert "Vuelve a correr el escaneo determinístico" in str(status.children)
+    assert summary_cards is None
+    assert breakdown_table is None
+
+
+def test_render_economics_preview_reports_candidate_missing(monkeypatch, tmp_path) -> None:
+    client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    assert active is not None
+    broken_active = replace(
+        active,
+        scan_result=replace(active.scan_result, best_candidate_key=None),
+        selected_candidate_key=None,
+        dirty=False,
+    )
+    state = replace(state, scenarios=(broken_active,), active_scenario_id=broken_active.scenario_id)
+    payload = commit_client_session(client_state, state).to_payload()
+
+    children = render_economics_preview(payload, None, None, "es")
+
+    status = _find_component(children, "economics-preview-status")
+    assert status is not None
+    assert "No hay un diseño determinístico disponible" in str(status.children)

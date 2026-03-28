@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 
-from dash import ALL, Input, Output, State, callback, ctx
+from dash import ALL, Input, Output, State, callback, ctx, dash_table, html
 from dash.exceptions import PreventUpdate
 import pandas as pd
 import plotly.graph_objects as go
@@ -24,11 +24,16 @@ from .economics_tables import (
     economics_price_items_rows_from_editor,
     economics_price_items_rows_to_editor,
 )
+from .economics_engine import (
+    PREVIEW_STATE_READY,
+    EconomicsPreviewResult,
+    resolve_economics_preview,
+)
 from .i18n import tr
 from .profile_charts import build_profile_chart
 from .project_io import save_project
 from .session_state import commit_client_session, resolve_client_session
-from .ui_schema import assumption_context_map, build_assumption_sections, build_table_display_columns
+from .ui_schema import assumption_context_map, build_assumption_sections, build_table_display_columns, format_metric
 from .validation import (
     BATTERY_REQUIRED_COLUMNS,
     INVERTER_REQUIRED_COLUMNS,
@@ -257,6 +262,153 @@ def _normalize_compare_value(value):
             return stripped
         return int(number) if number.is_integer() else round(number, 10)
     return value
+
+
+def _format_cop(value: float | None, lang: str) -> str:
+    if value is None:
+        return "-"
+    return format_metric("NPV", value, lang)
+
+
+def _format_cop_per_kwp(value: float | None, lang: str) -> str:
+    if value is None:
+        return "-"
+    return f"{_format_cop(value, lang)} / kWp"
+
+
+def _economics_summary_card(label: str, value: str) -> html.Div:
+    return html.Div(
+        className="scan-summary-card",
+        children=[
+            html.Span(label, className="scan-summary-label"),
+            html.Span(value, className="scan-summary-value"),
+        ],
+    )
+
+
+def _economics_breakdown_table(rows: list[dict[str, object]], *, lang: str):
+    columns, tooltip_header = build_table_display_columns(
+        "economics_breakdown",
+        [
+            "source_table",
+            "source_row",
+            "group",
+            "stage_or_layer",
+            "name",
+            "rule",
+            "multiplier",
+            "unit_rate_COP",
+            "base_amount_COP",
+            "line_amount_COP",
+            "notes",
+        ],
+        lang,
+    )
+    return dash_table.DataTable(
+        id="economics-breakdown-table",
+        data=rows,
+        columns=columns,
+        tooltip_header=tooltip_header,
+        editable=False,
+        row_deletable=False,
+        sort_action="native",
+        page_size=12,
+        style_table={"overflowX": "auto"},
+        style_cell={
+            "padding": "0.4rem",
+            "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+            "fontSize": 12,
+            "color": "var(--color-text-primary)",
+        },
+        style_header={
+            "backgroundColor": "var(--color-primary-soft)",
+            "color": "var(--color-text-primary)",
+            "fontWeight": "bold",
+        },
+        tooltip_delay=0,
+        tooltip_duration=None,
+    )
+
+
+def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
+    status_key = preview.message_key or "workspace.admin.economics.preview.state.no_scan"
+    status_line = html.Div(
+        tr(status_key, lang),
+        id="economics-preview-status",
+        className="status-line economics-preview-status",
+    )
+    if preview.state != PREVIEW_STATE_READY or preview.result is None:
+        return [status_line]
+
+    result = preview.result
+    quantities = result.quantities
+    breakdown_rows = [
+        {
+            "source_table": row.source_table,
+            "source_row": row.source_row,
+            "group": row.group,
+            "stage_or_layer": row.stage_or_layer,
+            "name": row.name,
+            "rule": row.rule,
+            "multiplier": row.multiplier,
+            "unit_rate_COP": row.unit_rate_COP,
+            "base_amount_COP": row.base_amount_COP,
+            "line_amount_COP": row.line_amount_COP,
+            "notes": row.notes,
+        }
+        for row in [*result.cost_rows, *result.price_rows]
+    ]
+    summary_cards = html.Div(
+        id="economics-summary-cards",
+        className="kpi-grid",
+        children=[
+            _economics_summary_card(
+                tr("workspace.admin.economics.preview.summary.technical", lang),
+                _format_cop(result.technical_subtotal_COP, lang),
+            ),
+            _economics_summary_card(
+                tr("workspace.admin.economics.preview.summary.installed", lang),
+                _format_cop(result.installed_subtotal_COP, lang),
+            ),
+            _economics_summary_card(
+                tr("workspace.admin.economics.preview.summary.cost_total", lang),
+                _format_cop(result.cost_total_COP, lang),
+            ),
+            _economics_summary_card(
+                tr("workspace.admin.economics.preview.summary.commercial_offer", lang),
+                _format_cop(result.commercial_offer_COP, lang),
+            ),
+            _economics_summary_card(
+                tr("workspace.admin.economics.preview.summary.final_price", lang),
+                _format_cop(result.final_price_COP, lang),
+            ),
+            _economics_summary_card(
+                tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
+                _format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
+            ),
+        ],
+    )
+    meta_line = html.Div(
+        tr(
+            "workspace.admin.economics.preview.meta",
+            lang,
+            candidate_key=quantities.candidate_key,
+            kWp=quantities.kWp,
+            panel_count=quantities.panel_count,
+            inverter_count=quantities.inverter_count,
+            battery_kwh=quantities.battery_kwh,
+        ),
+        id="economics-preview-meta",
+        className="status-line economics-preview-meta",
+    )
+    breakdown_shell = html.Div(
+        className="profile-table-subsection",
+        children=[
+            html.H5(tr("workspace.admin.economics.preview.breakdown.title", lang), id="economics-breakdown-title"),
+            _economics_breakdown_table(breakdown_rows, lang=lang),
+        ],
+    )
+    return [status_line, meta_line, summary_cards, breakdown_shell]
 
 
 ADMIN_EXCLUDED_FIELDS = {"use_excel_profile", "alpha_mix", "E_month_kWh"}
@@ -553,6 +705,41 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
         economics_price_columns,
         economics_price_tooltips,
     )
+
+
+@callback(
+    Output("economics-preview-content", "children"),
+    Input("scenario-session-store", "data"),
+    Input("economics-cost-items-editor", "data", allow_optional=True),
+    Input("economics-price-items-editor", "data", allow_optional=True),
+    Input("language-selector", "value"),
+)
+def render_economics_preview(session_payload, economics_cost_rows, economics_price_rows, language_value):
+    lang = _lang(language_value)
+    if not _admin_page_access(session_payload).allowed:
+        return []
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        return []
+    active = state.get_scenario()
+    if active is None:
+        return []
+    normalized_cost_rows = (
+        active.config_bundle.economics_cost_items_table.to_dict("records")
+        if economics_cost_rows is None
+        else economics_cost_items_rows_from_editor(economics_cost_rows)
+    )
+    normalized_price_rows = (
+        active.config_bundle.economics_price_items_table.to_dict("records")
+        if economics_price_rows is None
+        else economics_price_items_rows_from_editor(economics_price_rows)
+    )
+    preview = resolve_economics_preview(
+        active,
+        economics_cost_items=normalized_cost_rows,
+        economics_price_items=normalized_price_rows,
+    )
+    return _render_economics_preview(preview, lang=lang)
 
 
 @callback(

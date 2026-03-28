@@ -5,11 +5,11 @@ from dash import dash_table, html
 from services.i18n import tr
 
 
-def _economics_table(table_id: str) -> dash_table.DataTable:
+def _economics_table(table_id: str, *, editable: bool = True, row_deletable: bool = True) -> dash_table.DataTable:
     return dash_table.DataTable(
         id=table_id,
-        editable=True,
-        row_deletable=True,
+        editable=editable,
+        row_deletable=row_deletable,
         sort_action="native",
         page_size=8,
         style_table={"overflowX": "auto"},
@@ -128,6 +128,18 @@ def economics_editor_section(*, lang: str = "es") -> html.Div:
             html.Div(
                 className="catalog-stack economics-table-stack",
                 children=[
+                    html.Div(
+                        id="economics-preview-shell",
+                        className="subpanel economics-preview-shell",
+                        children=[
+                            html.Div(
+                                className="section-head",
+                                children=[html.H4(tr("workspace.admin.economics.preview.title", lang), id="economics-preview-title")],
+                            ),
+                            html.P(tr("workspace.admin.economics.preview.copy", lang), id="economics-preview-copy", className="section-copy"),
+                            html.Div(id="economics-preview-content", className="economics-preview-stack"),
+                        ],
+                    ),
                     html.Div(
                         className="subpanel",
                         children=[
