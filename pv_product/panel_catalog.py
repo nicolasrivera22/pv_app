@@ -7,6 +7,7 @@ import pandas as pd
 
 from .panel_technology import (
     DEFAULT_PANEL_TECHNOLOGY_MODE,
+    panel_technology_catalog_label,
     normalize_panel_technology_mode,
 )
 from .utils import DEFAULT_CONFIG
@@ -89,7 +90,7 @@ def default_panel_catalog_rows() -> list[dict[str, Any]]:
             "Isc": float(DEFAULT_CONFIG["Isc"]),
             "length_m": 2.278,
             "width_m": 1.134,
-            "panel_technology_mode": str(DEFAULT_CONFIG["panel_technology_mode"]),
+            "panel_technology_mode": panel_technology_catalog_label(DEFAULT_CONFIG["panel_technology_mode"], "es"),
         },
         {
             "name": "PREM-620 Premium",
@@ -99,7 +100,7 @@ def default_panel_catalog_rows() -> list[dict[str, Any]]:
             "Isc": 14.4,
             "length_m": 2.384,
             "width_m": 1.303,
-            "panel_technology_mode": "premium",
+            "panel_technology_mode": panel_technology_catalog_label("premium", "es"),
         },
         {
             "name": "TRACK-600 Simplified",
@@ -109,7 +110,7 @@ def default_panel_catalog_rows() -> list[dict[str, Any]]:
             "Isc": 14.0,
             "length_m": 2.278,
             "width_m": 1.134,
-            "panel_technology_mode": "tracker_simplified",
+            "panel_technology_mode": panel_technology_catalog_label("tracker_simplified", "es"),
         },
     ]
 
@@ -157,6 +158,8 @@ def _catalog_row_lookup(panel_catalog: pd.DataFrame) -> dict[str, dict[str, Any]
 
 
 def resolve_selected_panel(config: dict[str, Any], panel_catalog: pd.DataFrame) -> PanelSelectionResolution:
+    # Panel rows own module/electrical specs and panel-side technology mode.
+    # System-level PR stays outside the catalog as a separate assumption.
     normalized_panel_name = normalize_panel_name(config.get("panel_name"))
     manual_fields = {
         "P_mod_W": config.get("P_mod_W"),

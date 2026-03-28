@@ -13,7 +13,11 @@ from pv_product.panel_catalog import (
     canonical_panel_name,
     resolve_selected_panel,
 )
-from pv_product.panel_technology import PANEL_TECHNOLOGY_FACTORS, normalize_panel_technology_mode
+from pv_product.panel_technology import (
+    is_supported_panel_technology_mode,
+    panel_technology_catalog_label,
+    normalize_panel_technology_mode,
+)
 
 from .types import LoadedConfigBundle, ValidationIssue
 
@@ -420,7 +424,7 @@ def normalize_panel_catalog_rows(rows: list[dict] | None) -> tuple[pd.DataFrame,
         if pd.isna(value):
             continue
         normalized = normalize_panel_technology_mode(value)
-        if canonical_panel_name(value) not in {mode.casefold() for mode in PANEL_TECHNOLOGY_FACTORS}:
+        if not is_supported_panel_technology_mode(value):
             issues.append(
                 ValidationIssue(
                     "error",
@@ -428,7 +432,7 @@ def normalize_panel_catalog_rows(rows: list[dict] | None) -> tuple[pd.DataFrame,
                     f"Fila {int(frame.at[index, '_source_row'])}: panel_technology_mode debe ser un modo soportado.",
                 )
             )
-        frame.at[index, "panel_technology_mode"] = normalized
+        frame.at[index, "panel_technology_mode"] = panel_technology_catalog_label(normalized, "es")
 
     return frame[PANEL_REQUIRED_COLUMNS], issues
 

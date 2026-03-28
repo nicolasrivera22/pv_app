@@ -3,14 +3,17 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pandas as pd
+import pandas.testing as pdt
 import pytest
 
 from pv_product.panel_catalog import (
     DEFAULT_BASELINE_PANEL_NAME,
     MANUAL_PANEL_TOKEN,
+    PANEL_CATALOG_COLUMNS,
     default_panel_catalog_frame,
     normalize_panel_name,
 )
+from pv_product.panel_technology import panel_technology_catalog_label
 from pv_product.utils import DEFAULT_CONFIG
 from services import build_assumption_sections, fingerprint_deterministic_input, load_config_from_excel, load_example_config
 from services.io_excel import _normalize_config_value, rebuild_config_bundle
@@ -32,7 +35,7 @@ def test_example_bundle_defaults_to_baseline_panel_with_current_module_behavior(
     assert float(baseline["Voc25"]) == pytest.approx(float(DEFAULT_CONFIG["Voc25"]))
     assert float(baseline["Vmp25"]) == pytest.approx(float(DEFAULT_CONFIG["Vmp25"]))
     assert float(baseline["Isc"]) == pytest.approx(float(DEFAULT_CONFIG["Isc"]))
-    assert str(baseline["panel_technology_mode"]).strip() == str(DEFAULT_CONFIG["panel_technology_mode"])
+    assert str(baseline["panel_technology_mode"]).strip() == panel_technology_catalog_label(DEFAULT_CONFIG["panel_technology_mode"], "es")
     assert bundle.config["P_mod_W"] == pytest.approx(float(DEFAULT_CONFIG["P_mod_W"]))
     assert bundle.config["Voc25"] == pytest.approx(float(DEFAULT_CONFIG["Voc25"]))
     assert bundle.config["Vmp25"] == pytest.approx(float(DEFAULT_CONFIG["Vmp25"]))
@@ -111,7 +114,7 @@ def test_invalid_explicit_panel_selection_is_a_validation_error_not_silent_fallb
     assert any(issue.field == "panel_name" and issue.level == "error" for issue in invalid.issues)
 
 
-def test_panel_catalog_validation_rejects_reserved_token_and_case_insensitive_duplicates() -> None:
+def test_panel_catalog_validation_rejects_reserved_manual_token_name() -> None:
     _, issues = normalize_panel_catalog_rows(
         [
             {
@@ -124,6 +127,16 @@ def test_panel_catalog_validation_rejects_reserved_token_and_case_insensitive_du
                 "width_m": 1.1,
                 "panel_technology_mode": "standard",
             },
+        ]
+    )
+
+    messages = [issue.message for issue in issues]
+    assert any("__manual__" in message for message in messages)
+
+
+def test_panel_catalog_validation_rejects_trimmed_case_insensitive_duplicates() -> None:
+    _, issues = normalize_panel_catalog_rows(
+        [
             {
                 "name": "Premium 1",
                 "P_mod_W": 620,
@@ -148,8 +161,51 @@ def test_panel_catalog_validation_rejects_reserved_token_and_case_insensitive_du
     )
 
     messages = [issue.message for issue in issues]
-    assert any("__manual__" in message for message in messages)
     assert any("Duplicados" in message for message in messages)
+
+
+def test_panel_catalog_validation_accepts_spanish_technology_labels() -> None:
+    frame, issues = normalize_panel_catalog_rows(
+        [
+            {
+                "name": "Panel Estándar",
+                "P_mod_W": 600,
+                "Voc25": 50,
+                "Vmp25": 41,
+                "Isc": 14,
+                "length_m": 2.2,
+                "width_m": 1.1,
+                "panel_technology_mode": "estándar",
+            },
+            {
+                "name": "Panel Seguidor",
+                "P_mod_W": 610,
+                "Voc25": 51,
+                "Vmp25": 42,
+                "Isc": 14.2,
+                "length_m": 2.25,
+                "width_m": 1.12,
+                "panel_technology_mode": "seguidor simplificado",
+            },
+        ]
+    )
+
+    assert issues == []
+    assert frame.loc[0, "panel_technology_mode"] == "estándar"
+    assert frame.loc[1, "panel_technology_mode"] == "seguidor simplificado"
+
+
+def test_panel_catalog_schema_does_not_include_system_level_pr() -> None:
+    assert "PR" not in PANEL_CATALOG_COLUMNS
+
+
+def test_loaded_config_bundle_payload_round_trip_preserves_panel_catalog() -> None:
+    bundle = load_example_config()
+
+    restored = type(bundle).from_payload(bundle.to_payload())
+
+    pdt.assert_frame_equal(restored.panel_catalog, bundle.panel_catalog)
+    assert restored.config["panel_name"] == bundle.config["panel_name"]
 
 
 def test_catalog_mode_keeps_derived_fields_visible_but_disabled_with_context_note() -> None:
@@ -183,9 +239,36 @@ def test_unrelated_panel_catalog_rows_do_not_change_deterministic_fingerprint() 
     assert fingerprint_deterministic_input(unchanged) == baseline
 
 
-def test_selected_panel_effective_inputs_do_change_deterministic_fingerprint() -> None:
+def test_selected_panel_area_only_does_not_change_deterministic_fingerprint() -> None:
     bundle = load_example_config()
     baseline = fingerprint_deterministic_input(bundle)
-    premium = rebuild_config_bundle(bundle, config={**bundle.config, "panel_name": "PREM-620 Premium"})
 
-    assert fingerprint_deterministic_input(premium) != baseline
+    modified_catalog = bundle.panel_catalog.copy()
+    selected = modified_catalog["name"] == bundle.config["panel_name"]
+    modified_catalog.loc[selected, "length_m"] = 9.0
+    modified_catalog.loc[selected, "width_m"] = 9.0
+    unchanged = rebuild_config_bundle(bundle, panel_catalog=modified_catalog)
+
+    assert unchanged.config["panel_area_m2"] == pytest.approx(81.0)
+    assert fingerprint_deterministic_input(unchanged) == baseline
+
+
+@pytest.mark.parametrize(
+    ("field_name", "updated_value"),
+    [
+        ("P_mod_W", 645.0),
+        ("Voc25", 53.5),
+        ("Vmp25", 44.5),
+        ("Isc", 14.8),
+        ("panel_technology_mode", "premium"),
+    ],
+)
+def test_selected_panel_effective_inputs_do_change_deterministic_fingerprint(field_name, updated_value) -> None:
+    bundle = load_example_config()
+    baseline = fingerprint_deterministic_input(bundle)
+    modified_catalog = bundle.panel_catalog.copy()
+    selected = modified_catalog["name"] == bundle.config["panel_name"]
+    modified_catalog.loc[selected, field_name] = updated_value
+    changed = rebuild_config_bundle(bundle, panel_catalog=modified_catalog)
+
+    assert fingerprint_deterministic_input(changed) != baseline

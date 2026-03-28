@@ -550,22 +550,11 @@ def load_bundle_from_tables(table_root: str | Path, *, source_name: str = "proje
 
     def _read_csv(table_name: str, *, optional: bool = False) -> pd.DataFrame | None:
         path = root / TABLE_FILE_MAP[table_name]
-        print(f"READING {table_name}: {path}")
-        print("  exists:", path.exists())
-        if path.exists():
-            print("  size:", path.stat().st_size)
-            try:
-                print("  preview:")
-                print(path.read_text(encoding="utf-8")[:300])
-            except Exception as exc:
-                print("  preview failed:", exc)
         if not path.exists():
             if optional:
                 return None
             raise FileNotFoundError(f"Falta la tabla canónica '{path.name}' en '{root}'.")
-        df = pd.read_csv(path)
-        print("  rows:", len(df), "cols:", list(df.columns))
-        return df
+        return pd.read_csv(path)
 
     config_table = _read_csv("Config")
     month_profile = _read_csv("Month_Demand_Profile")

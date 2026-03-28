@@ -18,6 +18,7 @@ def _pretty_field(field: str, *, lang: str = "es") -> str:
     labels = {
         "Inversor_Catalog": {"es": "Catálogo de inversores", "en": "Inverter catalog"},
         "Battery_Catalog": {"es": "Catálogo de baterías", "en": "Battery catalog"},
+        "Panel_Catalog": {"es": "Catálogo de paneles", "en": "Panel catalog"},
         "Demand_Profile": {"es": "Perfil de demanda", "en": "Demand profile"},
         "Month_Demand_Profile": {"es": "Demanda mensual / HSP", "en": "Monthly demand / HSP"},
         "SUN_HSP_PROFILE": {"es": "Perfil solar", "en": "Solar profile"},
@@ -45,6 +46,8 @@ def _section_id(field: str) -> str | None:
         return "catalog_inverters"
     if field == "Battery_Catalog":
         return "catalog_batteries"
+    if field == "Panel_Catalog":
+        return "catalog_panels"
     if field in {"E_month_kWh", "alpha_mix", "use_excel_profile", "profile_type"}:
         return "assumptions_demand"
     if field in {"PR", "P_mod_W", "Voc25", "Vmp25", "Isc", "a_Voc_pct"}:
@@ -81,6 +84,7 @@ def _section_label(field: str, *, lang: str = "es") -> str:
         "profile_price_others": {"es": "Perfiles > Otros precios variables", "en": "Profiles > Other variable prices"},
         "catalog_inverters": {"es": "Catálogos > Inversores", "en": "Catalogs > Inverters"},
         "catalog_batteries": {"es": "Catálogos > Baterías", "en": "Catalogs > Batteries"},
+        "catalog_panels": {"es": "Catálogos > Paneles", "en": "Catalogs > Panels"},
     }
     return labels[section_id]["en" if lang == "en" else "es"]
 
@@ -107,7 +111,7 @@ def render_validation_panel(issues, *, lang: str = "es") -> html.Div:
         prefix_parts = [level]
         if section:
             prefix_parts.append(section)
-        if field and issue.field not in {"Inversor_Catalog", "Battery_Catalog", "Demand_Profile", "Month_Demand_Profile", "SUN_HSP_PROFILE", "Precios_kWp_relativos", "Precios_kWp_relativos_Otros", "scan_range"}:
+        if field and issue.field not in {"Inversor_Catalog", "Battery_Catalog", "Panel_Catalog", "Demand_Profile", "Month_Demand_Profile", "SUN_HSP_PROFILE", "Precios_kWp_relativos", "Precios_kWp_relativos_Otros", "scan_range"}:
             prefix_parts.append(field)
         prefix = " · ".join(prefix_parts)
         items.append(

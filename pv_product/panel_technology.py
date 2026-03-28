@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import unicodedata
 
 DEFAULT_PANEL_TECHNOLOGY_MODE = "standard"
 
@@ -15,7 +16,9 @@ PANEL_TECHNOLOGY_FACTORS: dict[str, float] = {
 PANEL_TECHNOLOGY_LABELS: dict[str, dict[str, str]] = {
     "standard": {"es": "Estándar", "en": "Standard"},
     "premium": {"es": "Premium", "en": "Premium"},
-    "tracker_simplified": {"es": "Tracker simplificado", "en": "Simplified tracker"},
+    # TODO: tracker_simplified is a practical v1 yield assumption and may later
+    # split into a separate tracking or mounting dimension.
+    "tracker_simplified": {"es": "Seguidor simplificado", "en": "Simplified tracker"},
 }
 
 PANEL_TECHNOLOGY_FIELD_LABELS: dict[str, str] = {
@@ -23,12 +26,41 @@ PANEL_TECHNOLOGY_FIELD_LABELS: dict[str, str] = {
     "en": "Panel technology",
 }
 
+PANEL_TECHNOLOGY_CATALOG_LABELS_ES: dict[str, str] = {
+    "standard": "estándar",
+    "premium": "premium",
+    "tracker_simplified": "seguidor simplificado",
+}
+
+
+def _technology_slug(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    return " ".join(normalized.strip().lower().replace("_", " ").split())
+
+
+def _technology_aliases() -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for mode, labels in PANEL_TECHNOLOGY_LABELS.items():
+        aliases[_technology_slug(mode)] = mode
+        aliases[_technology_slug(mode.replace("_", " "))] = mode
+        for label in labels.values():
+            aliases[_technology_slug(label)] = mode
+    return aliases
+
+
+PANEL_TECHNOLOGY_ALIASES = _technology_aliases()
+
+
+def is_supported_panel_technology_mode(value: Any) -> bool:
+    return _technology_slug(value) in PANEL_TECHNOLOGY_ALIASES
+
 
 def normalize_panel_technology_mode(value: Any) -> str:
-    if isinstance(value, str):
-        mode = value.strip().lower()
-        if mode in PANEL_TECHNOLOGY_FACTORS:
-            return mode
+    alias = PANEL_TECHNOLOGY_ALIASES.get(_technology_slug(value))
+    if alias in PANEL_TECHNOLOGY_FACTORS:
+        return alias
     return DEFAULT_PANEL_TECHNOLOGY_MODE
 
 
@@ -49,6 +81,13 @@ def panel_technology_mode_label(mode: Any, lang: str = "es") -> str:
 
 def panel_technology_field_label(lang: str = "es") -> str:
     return PANEL_TECHNOLOGY_FIELD_LABELS.get(lang, PANEL_TECHNOLOGY_FIELD_LABELS["es"])
+
+
+def panel_technology_catalog_label(mode: Any, lang: str = "es") -> str:
+    normalized = normalize_panel_technology_mode(mode)
+    if lang == "es":
+        return PANEL_TECHNOLOGY_CATALOG_LABELS_ES[normalized]
+    return panel_technology_mode_label(normalized, lang)
 
 
 def panel_technology_options(lang: str = "es") -> tuple[tuple[str, str], ...]:
