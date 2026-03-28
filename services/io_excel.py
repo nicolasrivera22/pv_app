@@ -32,8 +32,8 @@ from .demand_profile_logic import (
 from .economics_tables import (
     default_economics_cost_items_table,
     default_economics_price_items_table,
-    normalize_economics_cost_items_frame,
-    normalize_economics_price_items_frame,
+    hydrate_economics_cost_items_table,
+    hydrate_economics_price_items_table,
 )
 from .runtime_paths import bundled_workbook_path
 from .types import LoadedConfigBundle
@@ -59,8 +59,8 @@ TABLE_COLUMNS = {
     # Keep workbook import backward-compatible with older panel catalogs that
     # do not yet include price_COP. Canonical CSV persistence does include it.
     "Panel_Catalog": [column for column in PANEL_CATALOG_COLUMNS if column != "price_COP"],
-    "Economics_Cost_Items": ["stage", "name", "calculation_method", "value", "enabled", "notes"],
-    "Economics_Price_Items": ["stage", "name", "calculation_method", "value", "enabled", "notes"],
+    "Economics_Cost_Items": ["stage", "name", "basis", "amount_COP", "enabled", "notes"],
+    "Economics_Price_Items": ["layer", "name", "method", "value", "enabled", "notes"],
 }
 TABLE_FILE_MAP = {
     "Config": "Config.csv",
@@ -385,16 +385,8 @@ def _bundle_from_frames(
         alpha_mix=cfg.get("alpha_mix", 0.5),
         e_month_kwh=cfg.get("E_month_kWh", 0.0),
     )
-    economics_cost_items = (
-        normalize_economics_cost_items_frame(economics_cost_items)
-        if economics_cost_items is not None
-        else default_economics_cost_items_table()
-    )
-    economics_price_items = (
-        normalize_economics_price_items_frame(economics_price_items)
-        if economics_price_items is not None
-        else default_economics_price_items_table()
-    )
+    economics_cost_items, economics_cost_issues = hydrate_economics_cost_items_table(economics_cost_items)
+    economics_price_items, economics_price_issues = hydrate_economics_price_items_table(economics_price_items)
 
     if sun_profile is not None and {"HOUR", "SOL"}.issubset(sun_profile.columns):
         ordered_sun = sun_profile.sort_values("HOUR")
@@ -454,7 +446,13 @@ def _bundle_from_frames(
         economics_price_items_table=economics_price_items.copy(),
         source_name=source_name,
     )
-    issues = [*normalization_issues, *panel_catalog_issues, *validate_config(bundle)]
+    issues = [
+        *normalization_issues,
+        *panel_catalog_issues,
+        *(ValidationIssue("warning", "economics_cost_items", message) for message in economics_cost_issues),
+        *(ValidationIssue("warning", "economics_price_items", message) for message in economics_price_issues),
+        *validate_config(bundle),
+    ]
     return LoadedConfigBundle(**{**bundle.__dict__, "issues": tuple(issues)})
 
 

@@ -143,6 +143,8 @@ def economics_editor_section(*, lang: str = "es") -> html.Div:
                                                 id="sync-economics-hardware-costs-btn",
                                                 n_clicks=0,
                                                 className="action-btn tertiary profile-inline-btn",
+                                                disabled=True,
+                                                style={"display": "none"},
                                             ),
                                             html.Button(
                                                 tr("workbench.profiles.add_row", lang),

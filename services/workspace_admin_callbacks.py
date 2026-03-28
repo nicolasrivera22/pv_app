@@ -23,7 +23,6 @@ from .economics_tables import (
     economics_cost_items_rows_to_editor,
     economics_price_items_rows_from_editor,
     economics_price_items_rows_to_editor,
-    seed_hardware_cost_rows_from_catalogs,
 )
 from .i18n import tr
 from .profile_charts import build_profile_chart
@@ -34,9 +33,6 @@ from .validation import (
     BATTERY_REQUIRED_COLUMNS,
     INVERTER_REQUIRED_COLUMNS,
     PANEL_REQUIRED_COLUMNS,
-    normalize_battery_catalog_rows,
-    normalize_inverter_catalog_rows,
-    normalize_panel_catalog_rows,
 )
 from .workbench_ui import collect_config_updates, workbench_status_message
 from .workspace_actions import (
@@ -1074,26 +1070,7 @@ def sync_economics_hardware_costs(
     panel_rows,
     economics_cost_rows,
 ):
-    if not n_clicks or not _admin_page_access(session_payload).allowed:
-        raise PreventUpdate
-    _client_state, state, unlocked = _admin_session(session_payload, None)
-    if not unlocked:
-        raise PreventUpdate
-    active = state.get_scenario()
-    if active is None:
-        raise PreventUpdate
-    config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
-    inverter_catalog, _ = normalize_inverter_catalog_rows(inverter_rows)
-    battery_catalog, _ = normalize_battery_catalog_rows(battery_rows)
-    panel_catalog, _ = normalize_panel_catalog_rows(panel_rows)
-    seeded = seed_hardware_cost_rows_from_catalogs(
-        economics_cost_items_rows_from_editor(economics_cost_rows),
-        config=config,
-        inverter_catalog=inverter_catalog,
-        battery_catalog=battery_catalog,
-        panel_catalog=panel_catalog,
-    )
-    return economics_cost_items_rows_to_editor(seeded)
+    raise PreventUpdate
 
 
 @callback(

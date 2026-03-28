@@ -2,37 +2,53 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
-from pv_product.panel_catalog import MANUAL_PANEL_TOKEN, canonical_panel_name
+ECONOMICS_COST_COLUMNS = ["stage", "name", "basis", "amount_COP", "enabled", "notes"]
+ECONOMICS_PRICE_COLUMNS = ["layer", "name", "method", "value", "enabled", "notes"]
 
-ECONOMICS_ITEM_COLUMNS = ["stage", "name", "calculation_method", "value", "enabled", "notes"]
-ECONOMICS_COST_COLUMNS = list(ECONOMICS_ITEM_COLUMNS)
-ECONOMICS_PRICE_COLUMNS = list(ECONOMICS_ITEM_COLUMNS)
+VALID_ECONOMICS_COST_STAGES = {"technical", "installed"}
+VALID_ECONOMICS_COST_BASES = {"fixed_project", "per_kwp", "per_panel", "per_inverter", "per_battery_kwh"}
+VALID_ECONOMICS_PRICE_LAYERS = {"commercial", "sale"}
+VALID_ECONOMICS_PRICE_METHODS = {"markup_pct", "fixed_project", "per_kwp"}
+ECONOMICS_PRICE_PERCENT_METHODS = {"markup_pct"}
 
-ECONOMICS_COST_PERCENT_METHODS = {"pct_of_technical_subtotal", "pct_of_running_subtotal"}
-ECONOMICS_PRICE_PERCENT_METHODS = {"markup_pct", "discount_pct", "tax_pct"}
+_RICH_COST_STAGE_MAP = {"technical_cost": "technical", "installed_cost": "installed"}
+_RICH_PRICE_LAYER_MAP = {"commercial_offer": "commercial", "final_sale_price": "sale"}
+_RICH_COST_BASIS_MAP = {
+    "fixed_project": "fixed_project",
+    "per_kwp": "per_kwp",
+    "per_panel": "per_panel",
+    "per_inverter": "per_inverter",
+    "per_battery_kwh": "per_battery_kwh",
+}
+_RICH_PRICE_METHOD_MAP = {
+    "markup_pct": "markup_pct",
+    "fixed_project": "fixed_project",
+    "per_kwp": "per_kwp",
+}
+_TECHNICAL_COST_NAMES = {"Panel hardware", "Inverter hardware", "Battery hardware"}
+_COMMERCIAL_PRICE_NAMES = {"Contingencia", "Margen comercial"}
 
 
 def default_economics_cost_items_rows() -> list[dict[str, Any]]:
     return [
-        {"stage": "technical_cost", "name": "Panel hardware", "calculation_method": "per_panel", "value": 0.0, "enabled": True, "notes": ""},
-        {"stage": "technical_cost", "name": "Inverter hardware", "calculation_method": "per_inverter", "value": 0.0, "enabled": True, "notes": ""},
-        {"stage": "technical_cost", "name": "Battery hardware", "calculation_method": "per_battery_kwh", "value": 0.0, "enabled": True, "notes": ""},
-        {"stage": "technical_cost", "name": "BOS", "calculation_method": "per_kwp", "value": 0.0, "enabled": True, "notes": ""},
-        {"stage": "installed_cost", "name": "Engineering", "calculation_method": "fixed_project", "value": 0.0, "enabled": True, "notes": ""},
-        {"stage": "installed_cost", "name": "Installation labor", "calculation_method": "per_kwp", "value": 0.0, "enabled": True, "notes": ""},
-        {"stage": "installed_cost", "name": "Logistics", "calculation_method": "fixed_project", "value": 0.0, "enabled": True, "notes": ""},
-        {"stage": "installed_cost", "name": "Contingency", "calculation_method": "pct_of_running_subtotal", "value": 0.0, "enabled": True, "notes": ""},
+        {"stage": "technical", "name": "Panel hardware", "basis": "per_panel", "amount_COP": 0.0, "enabled": True, "notes": ""},
+        {"stage": "technical", "name": "Inverter hardware", "basis": "per_inverter", "amount_COP": 0.0, "enabled": True, "notes": ""},
+        {"stage": "technical", "name": "Battery hardware", "basis": "per_battery_kwh", "amount_COP": 0.0, "enabled": True, "notes": ""},
+        {"stage": "installed", "name": "BOS eléctrico", "basis": "per_kwp", "amount_COP": 0.0, "enabled": True, "notes": ""},
+        {"stage": "installed", "name": "Estructura", "basis": "per_kwp", "amount_COP": 0.0, "enabled": True, "notes": ""},
+        {"stage": "installed", "name": "Mano de obra", "basis": "per_kwp", "amount_COP": 0.0, "enabled": True, "notes": ""},
+        {"stage": "installed", "name": "Ingeniería", "basis": "fixed_project", "amount_COP": 0.0, "enabled": True, "notes": ""},
+        {"stage": "installed", "name": "Logística", "basis": "fixed_project", "amount_COP": 0.0, "enabled": True, "notes": ""},
     ]
 
 
 def default_economics_price_items_rows() -> list[dict[str, Any]]:
     return [
-        {"stage": "commercial_offer", "name": "Commercial margin", "calculation_method": "markup_pct", "value": 0.0, "enabled": True, "notes": ""},
-        {"stage": "final_sale_price", "name": "Customer discount", "calculation_method": "discount_pct", "value": 0.0, "enabled": True, "notes": ""},
-        {"stage": "final_sale_price", "name": "Taxes", "calculation_method": "tax_pct", "value": 0.0, "enabled": True, "notes": ""},
+        {"layer": "commercial", "name": "Contingencia", "method": "markup_pct", "value": 0.0, "enabled": True, "notes": ""},
+        {"layer": "commercial", "name": "Margen comercial", "method": "markup_pct", "value": 0.0, "enabled": True, "notes": ""},
+        {"layer": "sale", "name": "Ajuste final", "method": "fixed_project", "value": 0.0, "enabled": False, "notes": ""},
     ]
 
 
@@ -69,27 +85,29 @@ def _strip_text(value: Any) -> str:
     return str(value).strip()
 
 
-def _coerce_enabled(value: Any, *, default: bool = True) -> bool:
+def _parse_enabled(value: Any, *, default: bool = True) -> tuple[bool, bool]:
     if isinstance(value, bool):
-        return value
+        return value, False
     if _is_missing(value):
-        return default
+        return default, False
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return bool(value)
+        return bool(value), False
     normalized = str(value).strip().lower()
     if normalized in {"true", "1", "yes", "y", "si", "sí", "on"}:
-        return True
+        return True, False
     if normalized in {"false", "0", "no", "n", "off"}:
-        return False
-    return default
+        return False, False
+    return False, True
 
 
-def _coerce_numeric(value: Any) -> float | None:
+def _coerce_numeric(value: Any, *, allow_percent_text: bool = False) -> float | None:
     if _is_missing(value):
         return None
     if isinstance(value, str):
         cleaned = value.strip().replace(",", "")
         if cleaned.endswith("%"):
+            if not allow_percent_text:
+                return None
             cleaned = cleaned[:-1].strip()
         if cleaned == "":
             return None
@@ -100,79 +118,241 @@ def _coerce_numeric(value: Any) -> float | None:
         return None
 
 
-def _normalize_frame(
-    source: pd.DataFrame | list[dict[str, Any]] | None,
-    *,
-    columns: list[str],
-    percent_methods: set[str],
-    editor_values: bool,
-) -> pd.DataFrame:
-    if source is None:
-        return pd.DataFrame(columns=columns)
-    frame = source.copy() if isinstance(source, pd.DataFrame) else pd.DataFrame(source)
-    for column in columns:
-        if column not in frame.columns:
-            frame[column] = np.nan
-    frame = frame[columns].copy()
-    if frame.empty:
-        return pd.DataFrame(columns=columns)
-    frame[columns] = frame[columns].replace(r"^\s*$", np.nan, regex=True)
-    frame = frame.loc[~frame[columns].isna().all(axis=1)].reset_index(drop=True)
-    if frame.empty:
-        return pd.DataFrame(columns=columns)
-    frame = frame.astype(object)
+def _row_is_blank(record: dict[str, Any]) -> bool:
+    return all(_is_missing(value) for value in record.values())
 
-    for index in frame.index:
-        method = _strip_text(frame.at[index, "calculation_method"])
-        value = _coerce_numeric(frame.at[index, "value"])
-        if value is not None and method in percent_methods:
-            if editor_values:
-                value = value / 100.0 if abs(value) > 1.0 else value
-            else:
-                value = value * 100.0
-        frame.at[index, "stage"] = _strip_text(frame.at[index, "stage"])
-        frame.at[index, "name"] = _strip_text(frame.at[index, "name"])
-        frame.at[index, "calculation_method"] = method
-        frame.at[index, "value"] = value
-        frame.at[index, "enabled"] = _coerce_enabled(frame.at[index, "enabled"])
-        frame.at[index, "notes"] = _strip_text(frame.at[index, "notes"])
-    return frame[columns].copy()
+
+def _append_note(existing: str, extra: str) -> str:
+    clean_existing = _strip_text(existing)
+    clean_extra = _strip_text(extra)
+    if not clean_extra:
+        return clean_existing
+    if not clean_existing:
+        return clean_extra
+    return f"{clean_existing} | {clean_extra}"
+
+
+def _fallback_cost_stage(name: str) -> str:
+    return "technical" if _strip_text(name) in _TECHNICAL_COST_NAMES else "installed"
+
+
+def _fallback_price_layer(name: str) -> str:
+    return "commercial" if _strip_text(name) in _COMMERCIAL_PRICE_NAMES else "sale"
+
+
+def _rich_origin_note(*, stage: str, method: str, value: Any) -> str:
+    parts = []
+    if stage:
+        parts.append(f"stage={stage}")
+    if method:
+        parts.append(f"method={method}")
+    if not _is_missing(value):
+        parts.append(f"value={value}")
+    if not parts:
+        return "Migrated from prior economics schema."
+    return f"Migrated from prior economics schema ({', '.join(parts)})."
+
+
+def _normalize_cost_row(record: dict[str, Any], *, row_number: int) -> tuple[dict[str, Any] | None, list[str]]:
+    issues: list[str] = []
+    if _row_is_blank(record):
+        return None, issues
+
+    name = _strip_text(record.get("name"))
+    notes = _strip_text(record.get("notes"))
+    raw_stage = _strip_text(record.get("stage"))
+    raw_basis = _strip_text(record.get("basis"))
+    raw_method = _strip_text(record.get("calculation_method"))
+    raw_amount = record.get("amount_COP") if "amount_COP" in record else record.get("value")
+    enabled, enabled_invalid = _parse_enabled(record.get("enabled"))
+
+    if not name:
+        issues.append(f"Economics_Cost_Items fila {row_number}: falta 'name'; la fila se ignora.")
+        return None, issues
+
+    stage = _RICH_COST_STAGE_MAP.get(raw_stage, raw_stage)
+    basis = raw_basis or _RICH_COST_BASIS_MAP.get(raw_method, raw_method)
+    amount = _coerce_numeric(raw_amount)
+
+    if enabled_invalid:
+        issues.append(f"Economics_Cost_Items fila {row_number}: 'enabled' inválido; la fila se desactiva.")
+        enabled = False
+
+    if stage not in VALID_ECONOMICS_COST_STAGES:
+        issues.append(f"Economics_Cost_Items fila {row_number}: 'stage' inválido; se usa fallback y la fila se desactiva.")
+        notes = _append_note(notes, _rich_origin_note(stage=raw_stage, method=raw_method or raw_basis, value=raw_amount))
+        stage = _fallback_cost_stage(name)
+        enabled = False
+
+    if basis not in VALID_ECONOMICS_COST_BASES:
+        issues.append(f"Economics_Cost_Items fila {row_number}: base o método no soportado; la fila se desactiva.")
+        notes = _append_note(notes, _rich_origin_note(stage=raw_stage, method=raw_method or raw_basis, value=raw_amount))
+        basis = "fixed_project"
+        amount = 0.0
+        enabled = False
+
+    if amount is None:
+        issues.append(f"Economics_Cost_Items fila {row_number}: 'amount_COP' debe ser numérico; la fila se desactiva.")
+        notes = _append_note(notes, _rich_origin_note(stage=raw_stage, method=raw_method or raw_basis, value=raw_amount))
+        amount = 0.0
+        enabled = False
+
+    return {
+        "stage": stage,
+        "name": name,
+        "basis": basis,
+        "amount_COP": float(amount),
+        "enabled": bool(enabled),
+        "notes": notes,
+    }, issues
+
+
+def _normalize_price_row(record: dict[str, Any], *, row_number: int) -> tuple[dict[str, Any] | None, list[str]]:
+    issues: list[str] = []
+    if _row_is_blank(record):
+        return None, issues
+
+    name = _strip_text(record.get("name"))
+    notes = _strip_text(record.get("notes"))
+    raw_layer = _strip_text(record.get("layer"))
+    raw_stage = _strip_text(record.get("stage"))
+    raw_method = _strip_text(record.get("method"))
+    raw_calculation_method = _strip_text(record.get("calculation_method"))
+    raw_value = record.get("value")
+    enabled, enabled_invalid = _parse_enabled(record.get("enabled"))
+
+    if not name:
+        issues.append(f"Economics_Price_Items fila {row_number}: falta 'name'; la fila se ignora.")
+        return None, issues
+
+    layer = raw_layer or _RICH_PRICE_LAYER_MAP.get(raw_stage, raw_stage)
+    method = raw_method or _RICH_PRICE_METHOD_MAP.get(raw_calculation_method, raw_calculation_method)
+    numeric_value = _coerce_numeric(raw_value, allow_percent_text=method in ECONOMICS_PRICE_PERCENT_METHODS)
+    if numeric_value is not None and method in ECONOMICS_PRICE_PERCENT_METHODS and abs(numeric_value) > 1.0:
+        numeric_value = numeric_value / 100.0
+
+    if enabled_invalid:
+        issues.append(f"Economics_Price_Items fila {row_number}: 'enabled' inválido; la fila se desactiva.")
+        enabled = False
+
+    if layer not in VALID_ECONOMICS_PRICE_LAYERS:
+        issues.append(f"Economics_Price_Items fila {row_number}: 'layer' inválido; se usa fallback y la fila se desactiva.")
+        notes = _append_note(notes, _rich_origin_note(stage=raw_stage or raw_layer, method=raw_calculation_method or raw_method, value=raw_value))
+        layer = _fallback_price_layer(name)
+        enabled = False
+
+    if method not in VALID_ECONOMICS_PRICE_METHODS:
+        issues.append(f"Economics_Price_Items fila {row_number}: método no soportado; la fila se desactiva.")
+        notes = _append_note(notes, _rich_origin_note(stage=raw_stage or raw_layer, method=raw_calculation_method or raw_method, value=raw_value))
+        method = "fixed_project"
+        numeric_value = 0.0
+        enabled = False
+
+    if numeric_value is None:
+        issues.append(f"Economics_Price_Items fila {row_number}: 'value' debe ser numérico; la fila se desactiva.")
+        notes = _append_note(notes, _rich_origin_note(stage=raw_stage or raw_layer, method=raw_calculation_method or raw_method, value=raw_value))
+        numeric_value = 0.0
+        enabled = False
+
+    return {
+        "layer": layer,
+        "name": name,
+        "method": method,
+        "value": float(numeric_value),
+        "enabled": bool(enabled),
+        "notes": notes,
+    }, issues
+
+
+def _normalize_cost_like_rows(source: pd.DataFrame | list[dict[str, Any]] | None) -> tuple[pd.DataFrame, list[str]]:
+    if source is None:
+        return empty_economics_cost_items_table(), []
+    frame = source.copy() if isinstance(source, pd.DataFrame) else pd.DataFrame(source)
+    records = frame.to_dict("records")
+    rows: list[dict[str, Any]] = []
+    issues: list[str] = []
+    for row_number, record in enumerate(records, start=1):
+        row, row_issues = _normalize_cost_row(record, row_number=row_number)
+        issues.extend(row_issues)
+        if row is not None:
+            rows.append(row)
+    if not rows:
+        return empty_economics_cost_items_table(), issues
+    return pd.DataFrame(rows, columns=ECONOMICS_COST_COLUMNS), issues
+
+
+def _normalize_price_like_rows(source: pd.DataFrame | list[dict[str, Any]] | None) -> tuple[pd.DataFrame, list[str]]:
+    if source is None:
+        return empty_economics_price_items_table(), []
+    frame = source.copy() if isinstance(source, pd.DataFrame) else pd.DataFrame(source)
+    records = frame.to_dict("records")
+    rows: list[dict[str, Any]] = []
+    issues: list[str] = []
+    for row_number, record in enumerate(records, start=1):
+        row, row_issues = _normalize_price_row(record, row_number=row_number)
+        issues.extend(row_issues)
+        if row is not None:
+            rows.append(row)
+    if not rows:
+        return empty_economics_price_items_table(), issues
+    return pd.DataFrame(rows, columns=ECONOMICS_PRICE_COLUMNS), issues
+
+
+def normalize_economics_cost_items_with_issues(source: pd.DataFrame | list[dict[str, Any]] | None) -> tuple[pd.DataFrame, list[str]]:
+    return _normalize_cost_like_rows(source)
+
+
+def normalize_economics_price_items_with_issues(source: pd.DataFrame | list[dict[str, Any]] | None) -> tuple[pd.DataFrame, list[str]]:
+    return _normalize_price_like_rows(source)
+
+
+def hydrate_economics_cost_items_table(source: pd.DataFrame | list[dict[str, Any]] | None) -> tuple[pd.DataFrame, list[str]]:
+    frame, issues = _normalize_cost_like_rows(source)
+    if not frame.empty:
+        return frame, issues
+    if source is None:
+        return default_economics_cost_items_table(), issues
+    source_frame = source.copy() if isinstance(source, pd.DataFrame) else pd.DataFrame(source)
+    if source_frame.empty:
+        return default_economics_cost_items_table(), issues
+    return default_economics_cost_items_table(), [*issues, "Economics_Cost_Items vacío o incompleto; se restauraron los defaults."]
+
+
+def hydrate_economics_price_items_table(source: pd.DataFrame | list[dict[str, Any]] | None) -> tuple[pd.DataFrame, list[str]]:
+    frame, issues = _normalize_price_like_rows(source)
+    if not frame.empty:
+        return frame, issues
+    if source is None:
+        return default_economics_price_items_table(), issues
+    source_frame = source.copy() if isinstance(source, pd.DataFrame) else pd.DataFrame(source)
+    if source_frame.empty:
+        return default_economics_price_items_table(), issues
+    return default_economics_price_items_table(), [*issues, "Economics_Price_Items vacío o incompleto; se restauraron los defaults."]
 
 
 def normalize_economics_cost_items_frame(frame: pd.DataFrame | list[dict[str, Any]] | None) -> pd.DataFrame:
-    return _normalize_frame(
-        frame,
-        columns=ECONOMICS_COST_COLUMNS,
-        percent_methods=ECONOMICS_COST_PERCENT_METHODS,
-        editor_values=True,
-    )
+    normalized, _issues = _normalize_cost_like_rows(frame)
+    return normalized
 
 
 def normalize_economics_price_items_frame(frame: pd.DataFrame | list[dict[str, Any]] | None) -> pd.DataFrame:
-    return _normalize_frame(
-        frame,
-        columns=ECONOMICS_PRICE_COLUMNS,
-        percent_methods=ECONOMICS_PRICE_PERCENT_METHODS,
-        editor_values=True,
-    )
+    normalized, _issues = _normalize_price_like_rows(frame)
+    return normalized
 
 
 def economics_cost_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    return _normalize_frame(
-        frame,
-        columns=ECONOMICS_COST_COLUMNS,
-        percent_methods=ECONOMICS_COST_PERCENT_METHODS,
-        editor_values=False,
-    ).to_dict("records")
+    normalized = normalize_economics_cost_items_frame(frame)
+    return normalized.to_dict("records")
 
 
 def economics_price_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    return _normalize_frame(
-        frame,
-        columns=ECONOMICS_PRICE_COLUMNS,
-        percent_methods=ECONOMICS_PRICE_PERCENT_METHODS,
-        editor_values=False,
-    ).to_dict("records")
+    normalized = normalize_economics_price_items_frame(frame)
+    if normalized.empty:
+        return []
+    editor_frame = normalized.copy()
+    mask = editor_frame["method"].astype(str).isin(ECONOMICS_PRICE_PERCENT_METHODS)
+    editor_frame.loc[mask, "value"] = editor_frame.loc[mask, "value"].astype(float) * 100.0
+    return editor_frame.to_dict("records")
 
 
 def economics_cost_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -181,83 +361,3 @@ def economics_cost_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> 
 
 def economics_price_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     return normalize_economics_price_items_frame(rows).to_dict("records")
-
-
-def _positive_numeric_series(frame: pd.DataFrame, column: str) -> pd.Series:
-    if frame.empty or column not in frame.columns:
-        return pd.Series(dtype=float)
-    numeric = pd.to_numeric(frame[column], errors="coerce")
-    return numeric.loc[numeric > 0].dropna()
-
-
-def _median_or_zero(series: pd.Series) -> float:
-    if series.empty:
-        return 0.0
-    return float(series.median())
-
-
-def _selected_or_catalog_panel_price(config: dict[str, Any], panel_catalog: pd.DataFrame) -> float:
-    if panel_catalog.empty:
-        return 0.0
-    numeric_prices = _positive_numeric_series(panel_catalog, "price_COP")
-    selected_name = canonical_panel_name(config.get("panel_name"))
-    if selected_name and selected_name != canonical_panel_name(MANUAL_PANEL_TOKEN) and {"name", "price_COP"}.issubset(panel_catalog.columns):
-        for row in panel_catalog.to_dict("records"):
-            if canonical_panel_name(row.get("name")) != selected_name:
-                continue
-            price = _coerce_numeric(row.get("price_COP"))
-            if price is not None and price > 0:
-                return float(price)
-            break
-    return _median_or_zero(numeric_prices)
-
-
-def seed_hardware_cost_rows_from_catalogs(
-    cost_items: pd.DataFrame | list[dict[str, Any]] | None,
-    *,
-    config: dict[str, Any],
-    inverter_catalog: pd.DataFrame,
-    battery_catalog: pd.DataFrame,
-    panel_catalog: pd.DataFrame,
-) -> pd.DataFrame:
-    frame = normalize_economics_cost_items_frame(cost_items)
-    if frame.empty:
-        frame = default_economics_cost_items_table()
-
-    panel_price = _selected_or_catalog_panel_price(config, panel_catalog)
-    inverter_price = _median_or_zero(_positive_numeric_series(inverter_catalog, "price_COP"))
-
-    battery_frame = battery_catalog.copy()
-    if battery_frame.empty or not {"price_COP", "nom_kWh"}.issubset(battery_frame.columns):
-        battery_unit_price = 0.0
-    else:
-        battery_frame["price_COP"] = pd.to_numeric(battery_frame["price_COP"], errors="coerce")
-        battery_frame["nom_kWh"] = pd.to_numeric(battery_frame["nom_kWh"], errors="coerce")
-        battery_frame = battery_frame.loc[(battery_frame["price_COP"] > 0) & (battery_frame["nom_kWh"] > 0)].copy()
-        battery_unit_price = _median_or_zero(battery_frame["price_COP"] / battery_frame["nom_kWh"]) if not battery_frame.empty else 0.0
-
-    updates = {
-        "Panel hardware": ("technical_cost", "per_panel", panel_price),
-        "Inverter hardware": ("technical_cost", "per_inverter", inverter_price),
-        "Battery hardware": ("technical_cost", "per_battery_kwh", battery_unit_price),
-    }
-
-    names = frame["name"].astype(str).str.strip().tolist()
-    for name, (stage, calculation_method, value) in updates.items():
-        if name in names:
-            index = names.index(name)
-            frame.at[index, "stage"] = stage
-            frame.at[index, "calculation_method"] = calculation_method
-            frame.at[index, "value"] = float(value)
-            frame.at[index, "enabled"] = _coerce_enabled(frame.at[index, "enabled"])
-            continue
-        frame.loc[len(frame)] = {
-            "stage": stage,
-            "name": name,
-            "calculation_method": calculation_method,
-            "value": float(value),
-            "enabled": True,
-            "notes": "",
-        }
-        names.append(name)
-    return frame[ECONOMICS_COST_COLUMNS].reset_index(drop=True)
