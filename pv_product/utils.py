@@ -125,6 +125,7 @@ DEFAULT_CONFIG = {
     "alpha_mix": 0.5,
     "HSP": 5.5,
     "PR": 0.80,
+    "panel_technology_mode": "standard",
     "deg_rate": 0.005,
     "Tmin_C": 10.0,
     "P_mod_W": 600.0,

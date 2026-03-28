@@ -13,6 +13,7 @@ from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter, range_boundaries
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
+from pv_product.panel_technology import normalize_panel_technology_mode
 from pv_product.utils import DEFAULT_CONFIG, build_7x24_from_excel, solar_profile_24
 
 from .demand_profile_logic import (
@@ -143,6 +144,8 @@ def _normalize_config_value(key: str, value: Any) -> Any:
     default_value = DEFAULT_CONFIG.get(key)
     if _is_missing_config_value(value):
         value = default_value
+    if key == "panel_technology_mode":
+        return normalize_panel_technology_mode(value), None
     if key == "use_excel_profile":
         if isinstance(value, bool):
             return _normalize_mode(value), None
@@ -579,6 +582,51 @@ def _add_table(ws, data_frame: pd.DataFrame, table_name: str, start_row: int, st
     ws.add_table(table)
 
 
+def _materialize_panel_technology_row_in_workbook(path: Path) -> None:
+    wb = load_workbook(path)
+    ws = wb["Config"]
+    if "Config" not in ws.tables:
+        wb.save(path)
+        return
+    table = ws.tables["Config"]
+    min_col, min_row, max_col, max_row = range_boundaries(table.ref)
+    headers = {
+        str(ws.cell(row=min_row, column=column).value).strip(): column
+        for column in range(min_col, max_col + 1)
+    }
+    item_col = headers.get("Item")
+    if item_col is None:
+        wb.save(path)
+        return
+
+    existing_rows = {
+        str(ws.cell(row=row, column=item_col).value).strip()
+        for row in range(min_row + 1, max_row + 1)
+    }
+    if "panel_technology_mode" in existing_rows:
+        wb.save(path)
+        return
+
+    insert_row = max_row + 1
+    for row in range(min_row + 1, max_row + 1):
+        if str(ws.cell(row=row, column=item_col).value).strip() == "PR":
+            insert_row = row + 1
+            break
+
+    ws.insert_rows(insert_row, amount=1)
+    values = {
+        "Grupo": "Sol y módulos",
+        "Descripción": "Supuesto simple de tecnología del panel; solo ajusta el rendimiento de generación.",
+        "Item": "panel_technology_mode",
+        "Valor": DEFAULT_CONFIG["panel_technology_mode"],
+        "Unidad": "",
+    }
+    for header, column in headers.items():
+        ws.cell(row=insert_row, column=column, value=values.get(header, ""))
+    table.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row + 1}"
+    wb.save(path)
+
+
 def _build_template_workbook(path: Path) -> None:
     wb = Workbook()
     ws_config = wb.active
@@ -617,5 +665,6 @@ def ensure_template(path: str | Path) -> None:
     example_path = bundled_workbook_path()
     if example_path.exists() and example_path.resolve() != destination.resolve():
         shutil.copyfile(example_path, destination)
+        _materialize_panel_technology_row_in_workbook(destination)
         return
     _build_template_workbook(destination)

@@ -5,6 +5,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
+import pandas as pd
 import pandas.testing as pdt
 import pytest
 
@@ -265,6 +266,41 @@ def test_project_round_trip_uses_canonical_csv_tables_and_restores_workspace(tmp
     hydrated_base = hydrated.get_scenario(base.scenario_id)
     assert hydrated_base is not None and hydrated_base.scan_result is not None
     assert hydrated_base.selected_candidate_key == alt_key
+
+
+def test_project_save_materializes_panel_technology_mode_without_persisting_derived_factor(tmp_path, monkeypatch) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+
+    base_bundle = _fast_bundle()
+    config_table = base_bundle.config_table.copy()
+    if not config_table.empty and "Item" in config_table.columns:
+        config_table = config_table.loc[
+            config_table["Item"].astype(str).str.strip() != "panel_technology_mode"
+        ].copy()
+    bundle = replace(
+        base_bundle,
+        config={**base_bundle.config, "panel_technology_mode": "premium"},
+        config_table=config_table,
+    )
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", bundle))
+    saved = save_project(state, project_name="Proyecto Panel", language="es")
+
+    config_csv = projects_root() / saved.project_slug / "inputs" / saved.active_scenario_id / "Config.csv"
+    persisted = pd.read_csv(config_csv)
+    items = persisted["Item"].astype(str).str.strip().tolist()
+    panel_row = persisted.loc[persisted["Item"].astype(str).str.strip() == "panel_technology_mode"].iloc[0]
+
+    assert "panel_technology_mode" in items
+    assert panel_row["Valor"] == "premium"
+    assert "effective_pr" not in items
+    assert "panel_generation_factor" not in items
+
+    reopened = open_project(saved.project_slug)
+    reopened_active = reopened.get_scenario(reopened.active_scenario_id)
+
+    assert reopened_active is not None
+    assert reopened_active.config_bundle.config["panel_technology_mode"] == "premium"
 
 
 def test_ui_mode_does_not_persist_into_project_manifest(tmp_path, monkeypatch) -> None:

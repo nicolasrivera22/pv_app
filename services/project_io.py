@@ -5,6 +5,7 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 
+from .config_metadata import materialize_panel_technology_mode_row
 from .io_excel import TABLE_FILE_MAP, load_bundle_from_tables
 from .runtime_paths import legacy_packaged_root, project_exports_root, project_inputs_root, project_root, projects_root
 from .scenario_session import create_scenario_record
@@ -68,7 +69,7 @@ def load_project_bundle_from_tables(path: str | Path, *, source_name: str = "pro
 def _write_table_inputs(root: Path, scenario: ScenarioRecord) -> None:
     bundle = scenario.config_bundle
     tables = {
-        "Config": bundle.config_table,
+        "Config": materialize_panel_technology_mode_row(bundle.config_table, bundle.config),
         "Demand_Profile": bundle.demand_profile_table,
         "Demand_Profile_General": bundle.demand_profile_general_table,
         "Demand_Profile_Weights": bundle.demand_profile_weights_table,

@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 from dash.dash_table.Format import Format, Group, Scheme
 
+from pv_product.panel_technology import panel_technology_options
 from pv_product.utils import DEFAULT_CONFIG
 
 from .config_metadata import ConfigFieldMeta, extract_config_metadata
@@ -103,6 +104,14 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         ui_scale=100.0,
         min_value=0,
         max_value=100,
+    ),
+    "panel_technology_mode": FieldUiSchema(
+        "dropdown",
+        "basic",
+        "Tecnología de panel",
+        "Panel technology",
+        "Supuesto simple del escenario para el comportamiento de generación del panel. Solo cambia el rendimiento de energía; no cambia módulo, área ni hardware.",
+        "Simple scenario assumption for panel generation behavior. It changes energy yield only; it does not change module, area, or hardware choices.",
     ),
     "Tmin_C": FieldUiSchema(
         "number",
@@ -970,6 +979,11 @@ def field_help(meta: ConfigFieldMeta, lang: str = "es") -> str:
 
 
 def field_options(meta: ConfigFieldMeta, lang: str = "es") -> list[dict[str, Any]]:
+    if meta.config_key == "panel_technology_mode":
+        return [
+            {"label": label, "value": value}
+            for label, value in panel_technology_options(lang)
+        ]
     schema = field_schema_for(meta)
     if not schema.options:
         return []

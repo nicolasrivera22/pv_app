@@ -7,6 +7,8 @@ from dash.exceptions import PreventUpdate
 import pandas as pd
 import plotly.graph_objects as go
 
+from pv_product.panel_technology import panel_technology_field_label, panel_technology_mode_label
+
 from .export_access import open_export_folder, publish_export_artifacts
 from .export_artifacts import export_deterministic_artifacts
 from .export_excel import export_scenario_workbook
@@ -226,24 +228,25 @@ def _join_reason_labels(reason_labels: list[str], lang: str) -> str:
     return ", ".join(reason_labels[:-1]) + f"{conjunction}{reason_labels[-1]}"
 
 
-def _scan_summary_strip(scan_result, *, lang: str = "es") -> list[html.Div]:
+def _scan_summary_strip(scan_result, *, panel_technology_mode: str | None = None, lang: str = "es") -> list[html.Div]:
     if scan_result is None:
         return []
-    counters = [
+    cards = [
         ("workbench.scan_summary.evaluated", int(scan_result.evaluated_kwp_count)),
         ("workbench.scan_summary.viable", int(scan_result.viable_kwp_count)),
         ("workbench.scan_summary.discard_peak_ratio", int((scan_result.discard_counts or {}).get("peak_ratio", 0))),
         ("workbench.scan_summary.discard_inverter_string", int((scan_result.discard_counts or {}).get("inverter_string", 0))),
+        (panel_technology_field_label(lang), panel_technology_mode_label(panel_technology_mode, lang)),
     ]
     return [
         html.Div(
             className="scan-summary-card",
             children=[
-                html.Span(tr(label_key, lang), className="scan-summary-label"),
-                html.Span(f"{value:,}", className="scan-summary-value"),
+                html.Span(tr(label_key, lang) if label_key.startswith("workbench.") else label_key, className="scan-summary-label"),
+                html.Span(f"{value:,}" if isinstance(value, int) else str(value), className="scan-summary-value"),
             ],
         )
-        for label_key, value in counters
+        for label_key, value in cards
     ]
 
 
@@ -433,7 +436,11 @@ def populate_results(session_payload, language_value, horizon_slider_value):
 
     scan = active.scan_result
     horizon_years = _resolved_candidate_horizon(active, horizon_slider_value)
-    summary_strip = _scan_summary_strip(scan, lang=lang)
+    summary_strip = _scan_summary_strip(
+        scan,
+        panel_technology_mode=active.config_bundle.config.get("panel_technology_mode"),
+        lang=lang,
+    )
     discard_explainer, discard_explainer_style = _scan_discard_explainer(scan, lang=lang)
     selected_key = resolve_selected_candidate_key_for_scenario(scan, active.selected_candidate_key)
     table = summarize_candidates_for_horizon(scan.candidate_details, horizon_years)

@@ -94,12 +94,13 @@ def test_partition_assumption_sections_routes_safe_and_internal_groups() -> None
 
     assert {"Demanda y Perfil", "Sol y módulos", "Semilla", "Restricción de Proporción Pico"} <= client_groups
     assert {"Economía", "Inversor", "Precios", "Monte Carlo"} <= admin_groups
-    assert {"include_battery", "optimize_battery", "export_allowed"} <= client_fields
+    assert {"include_battery", "optimize_battery", "export_allowed", "panel_technology_mode"} <= client_fields
     assert {"battery_name", "bat_DoD", "bat_coupling", "bat_eta_rt"} <= admin_fields
     assert "pricing_mode" not in client_fields
     assert "mc_PR_std" not in client_fields
     assert "mc_PR_std" in admin_fields
     assert "price_total_COP" in admin_fields
+    assert "panel_technology_mode" not in admin_fields
 
 
 def test_workspace_drafts_persist_per_scenario_and_clear_independently() -> None:
