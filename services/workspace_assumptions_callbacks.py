@@ -409,7 +409,7 @@ def sync_assumption_context_ui(
         return [], [], [], []
 
     current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
-    context = assumption_context_map(current_config, lang=lang)
+    context = assumption_context_map(current_config, panel_catalog=active.config_bundle.panel_catalog, lang=lang)
     disabled_map = dict(context.get("field_disabled") or {})
     emphasis_map = dict(context.get("field_emphasis") or {})
     notes_map = dict(context.get("notes") or {})

@@ -410,16 +410,19 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
 def test_catalog_editor_stacks_inverter_then_battery_tables() -> None:
     section = catalog_editor_section()
     stack = section.children[1]
-    first_panel, second_panel = stack.children
+    first_panel, second_panel, third_panel = stack.children
 
     assert "catalog-stack" in str(getattr(stack, "className", "")).split()
-    assert len(stack.children) == 2
+    assert len(stack.children) == 3
     assert _find_component(first_panel, "inverter-editor-title") is not None
     assert _find_component(first_panel, "inverter-table-editor") is not None
     assert _find_component(first_panel, "battery-table-editor") is None
     assert _find_component(second_panel, "battery-editor-title") is not None
     assert _find_component(second_panel, "battery-table-editor") is not None
     assert _find_component(second_panel, "inverter-table-editor") is None
+    assert _find_component(third_panel, "panel-editor-title") is not None
+    assert _find_component(third_panel, "panel-table-editor") is not None
+    assert _find_component(third_panel, "battery-table-editor") is None
 
 
 def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_controls() -> None:
@@ -813,13 +816,15 @@ def test_workbench_assumption_context_callback_highlights_fixed_battery_selectio
     assert note_styles == [{"display": "block"}]
 
 
-def test_populate_assumptions_includes_monte_carlo_group_in_general_assumptions() -> None:
+def test_populate_assumptions_keeps_monte_carlo_out_of_client_safe_general_assumptions() -> None:
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     payload = _session_payload(state, lang="es")
 
     rendered = workbench_page.populate_assumptions(payload, [], "es")
 
-    assert any("Monte Carlo" in str(section.to_plotly_json()) for section in rendered)
+    rendered_payload = " ".join(str(section.to_plotly_json()) for section in rendered)
+    assert "Sol y módulos" in rendered_payload
+    assert "Monte Carlo" not in rendered_payload
 
 
 def test_risk_monte_carlo_context_callback_enables_manual_kwp_only_when_requested() -> None:
@@ -1634,7 +1639,7 @@ def test_workbench_results_explain_all_discarded_scan() -> None:
         _tooltips,
     ) = workbench_page.populate_results(payload, "es", 1)
 
-    assert len(summary_strip) == 4
+    assert len(summary_strip) == 6
     assert "restricción dominante actual" in explainer
     assert explainer_style["display"] == "block"
     assert kpis == []

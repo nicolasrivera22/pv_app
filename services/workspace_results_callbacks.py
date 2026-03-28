@@ -7,6 +7,7 @@ from dash.exceptions import PreventUpdate
 import pandas as pd
 import plotly.graph_objects as go
 
+from pv_product.panel_catalog import MANUAL_PANEL_TOKEN, manual_panel_label, normalize_panel_name
 from pv_product.panel_technology import panel_technology_field_label, panel_technology_mode_label
 
 from .export_access import open_export_folder, publish_export_artifacts
@@ -228,7 +229,20 @@ def _join_reason_labels(reason_labels: list[str], lang: str) -> str:
     return ", ".join(reason_labels[:-1]) + f"{conjunction}{reason_labels[-1]}"
 
 
-def _scan_summary_strip(scan_result, *, panel_technology_mode: str | None = None, lang: str = "es") -> list[html.Div]:
+def _panel_model_summary_label(panel_name: str | None, *, lang: str = "es") -> str:
+    normalized = normalize_panel_name(panel_name)
+    if normalized == MANUAL_PANEL_TOKEN:
+        return manual_panel_label(lang)
+    return normalized
+
+
+def _scan_summary_strip(
+    scan_result,
+    *,
+    panel_technology_mode: str | None = None,
+    panel_name: str | None = None,
+    lang: str = "es",
+) -> list[html.Div]:
     if scan_result is None:
         return []
     cards = [
@@ -236,6 +250,7 @@ def _scan_summary_strip(scan_result, *, panel_technology_mode: str | None = None
         ("workbench.scan_summary.viable", int(scan_result.viable_kwp_count)),
         ("workbench.scan_summary.discard_peak_ratio", int((scan_result.discard_counts or {}).get("peak_ratio", 0))),
         ("workbench.scan_summary.discard_inverter_string", int((scan_result.discard_counts or {}).get("inverter_string", 0))),
+        ("Modelo de panel" if lang == "es" else "Panel model", _panel_model_summary_label(panel_name, lang=lang)),
         (panel_technology_field_label(lang), panel_technology_mode_label(panel_technology_mode, lang)),
     ]
     return [
@@ -439,6 +454,7 @@ def populate_results(session_payload, language_value, horizon_slider_value):
     summary_strip = _scan_summary_strip(
         scan,
         panel_technology_mode=active.config_bundle.config.get("panel_technology_mode"),
+        panel_name=active.config_bundle.config.get("panel_name"),
         lang=lang,
     )
     discard_explainer, discard_explainer_style = _scan_discard_explainer(scan, lang=lang)

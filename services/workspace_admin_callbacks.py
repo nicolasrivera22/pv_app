@@ -23,7 +23,7 @@ from .profile_charts import build_profile_chart
 from .project_io import save_project
 from .session_state import commit_client_session, resolve_client_session
 from .ui_schema import assumption_context_map, build_assumption_sections, build_table_display_columns
-from .validation import BATTERY_REQUIRED_COLUMNS, INVERTER_REQUIRED_COLUMNS
+from .validation import BATTERY_REQUIRED_COLUMNS, INVERTER_REQUIRED_COLUMNS, PANEL_REQUIRED_COLUMNS
 from .workbench_ui import collect_config_updates, workbench_status_message
 from .workspace_actions import (
     apply_workspace_draft_to_state,
@@ -100,6 +100,7 @@ PROFILE_CARD_ACTIVE_CLASS = f"{PROFILE_CARD_BASE_CLASS} profile-table-card-activ
 ADMIN_REQUIRED_TABLE_KEYS = (
     "inverter_catalog",
     "battery_catalog",
+    "panel_catalog",
     "month_profile",
     "sun_profile",
     "cop_kwp_table",
@@ -122,6 +123,7 @@ def _join_status_parts(*parts: str) -> str:
 def _admin_table_rows_payload(
     inverter_rows,
     battery_rows,
+    panel_rows,
     month_profile_rows,
     sun_profile_rows,
     price_kwp_rows,
@@ -130,6 +132,7 @@ def _admin_table_rows_payload(
     return {
         "inverter_catalog": inverter_rows,
         "battery_catalog": battery_rows,
+        "panel_catalog": panel_rows,
         "month_profile": month_profile_rows,
         "sun_profile": sun_profile_rows,
         "cop_kwp_table": price_kwp_rows,
@@ -344,8 +347,10 @@ def translate_admin_page_header(language_value):
     Output("catalog-editor-title", "children"),
     Output("inverter-editor-title", "children"),
     Output("battery-editor-title", "children"),
+    Output("panel-editor-title", "children"),
     Output("add-inverter-row-btn", "children"),
     Output("add-battery-row-btn", "children"),
+    Output("add-panel-row-btn", "children"),
     Input("language-selector", "value"),
 )
 def translate_admin_secure_content(language_value):
@@ -371,6 +376,8 @@ def translate_admin_secure_content(language_value):
         tr("workbench.catalogs", lang),
         tr("workbench.catalogs.inverters", lang),
         tr("workbench.catalogs.batteries", lang),
+        tr("workbench.catalogs.panels", lang),
+        tr("workbench.add_row", lang),
         tr("workbench.add_row", lang),
         tr("workbench.add_row", lang),
     )
@@ -396,6 +403,9 @@ def translate_profile_table_activators(language_value, activator_ids=None):
     Output("battery-table-editor", "data"),
     Output("battery-table-editor", "columns"),
     Output("battery-table-editor", "tooltip_header"),
+    Output("panel-table-editor", "data"),
+    Output("panel-table-editor", "columns"),
+    Output("panel-table-editor", "tooltip_header"),
     Output("month-profile-editor", "data"),
     Output("month-profile-editor", "columns"),
     Output("month-profile-editor", "tooltip_header"),
@@ -435,6 +445,7 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
             *empty,
             *empty,
             *empty,
+            *empty,
         )
     client_state, state, unlocked = _admin_session(session_payload, lang)
     empty = ([], [], {})
@@ -450,6 +461,7 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
                 context_note_type="admin-assumption-context-note",
             ),
             True,
+            *empty,
             *empty,
             *empty,
             *empty,
@@ -476,6 +488,7 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
             *empty,
             *empty,
             *empty,
+            *empty,
         )
 
     display_bundle = resolve_workspace_bundle_for_display(client_state.session_id, active.scenario_id, active.config_bundle)
@@ -488,6 +501,7 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
     partition = partition_assumption_sections(all_sections)
     inverter_columns, inverter_tooltips = build_table_display_columns("inverter_catalog", list(display_bundle.inverter_catalog.columns), lang)
     battery_columns, battery_tooltips = build_table_display_columns("battery_catalog", list(display_bundle.battery_catalog.columns), lang)
+    panel_columns, panel_tooltips = build_table_display_columns("panel_catalog", list(display_bundle.panel_catalog.columns), lang)
     month_columns, month_tooltips = build_table_display_columns("month_profile", list(display_bundle.month_profile_table.columns), lang)
     sun_columns, sun_tooltips = build_table_display_columns("sun_profile", list(display_bundle.sun_profile_table.columns), lang)
     kwp_columns, kwp_tooltips = build_table_display_columns("cop_kwp", list(display_bundle.cop_kwp_table.columns), lang)
@@ -509,6 +523,9 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
         display_bundle.battery_catalog.to_dict("records"),
         battery_columns,
         battery_tooltips,
+        display_bundle.panel_catalog.to_dict("records"),
+        panel_columns,
+        panel_tooltips,
         display_bundle.month_profile_table.to_dict("records"),
         month_columns,
         month_tooltips,
@@ -555,7 +572,7 @@ def sync_admin_assumption_context_ui(
         return [], [], [], []
 
     current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
-    context = assumption_context_map(current_config, lang=lang)
+    context = assumption_context_map(current_config, panel_catalog=active.config_bundle.panel_catalog, lang=lang)
     disabled_map = dict(context.get("field_disabled") or {})
     emphasis_map = dict(context.get("field_emphasis") or {})
     notes_map = dict(context.get("notes") or {})
@@ -645,6 +662,7 @@ def toggle_pricing_table_visibility(session_payload, assumption_input_ids, assum
     Input({"type": "admin-assumption-input", "field": ALL}, "value"),
     Input("inverter-table-editor", "data", allow_optional=True),
     Input("battery-table-editor", "data", allow_optional=True),
+    Input("panel-table-editor", "data", allow_optional=True),
     Input("month-profile-editor", "data", allow_optional=True),
     Input("sun-profile-editor", "data", allow_optional=True),
     Input("price-kwp-editor", "data", allow_optional=True),
@@ -657,6 +675,7 @@ def sync_admin_draft(
     assumption_values,
     inverter_rows,
     battery_rows,
+    panel_rows,
     month_profile_rows,
     sun_profile_rows,
     price_kwp_rows,
@@ -673,6 +692,7 @@ def sync_admin_draft(
     table_rows = _admin_table_rows_payload(
         inverter_rows,
         battery_rows,
+        panel_rows,
         month_profile_rows,
         sun_profile_rows,
         price_kwp_rows,
@@ -921,6 +941,20 @@ def add_battery_row(n_clicks, table_rows):
 
 
 @callback(
+    Output("panel-table-editor", "data", allow_duplicate=True),
+    Input("add-panel-row-btn", "n_clicks", allow_optional=True),
+    State("panel-table-editor", "data", allow_optional=True),
+    prevent_initial_call=True,
+)
+def add_panel_row(n_clicks, table_rows):
+    if not n_clicks:
+        raise PreventUpdate
+    rows = list(table_rows or [])
+    rows.append({column: "" for column in PANEL_REQUIRED_COLUMNS})
+    return rows
+
+
+@callback(
     Output("price-kwp-editor", "data", allow_duplicate=True),
     Input("add-price-kwp-row-btn", "n_clicks", allow_optional=True),
     State("price-kwp-editor", "data", allow_optional=True),
@@ -966,6 +1000,7 @@ def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
     State({"type": "admin-assumption-input", "field": ALL}, "value"),
     State("inverter-table-editor", "data", allow_optional=True),
     State("battery-table-editor", "data", allow_optional=True),
+    State("panel-table-editor", "data", allow_optional=True),
     State("month-profile-editor", "data", allow_optional=True),
     State("sun-profile-editor", "data", allow_optional=True),
     State("price-kwp-editor", "data", allow_optional=True),
@@ -981,6 +1016,7 @@ def apply_admin_edits(
     assumption_values,
     inverter_rows,
     battery_rows,
+    panel_rows,
     month_profile_rows,
     sun_profile_rows,
     price_kwp_rows,
@@ -1000,6 +1036,7 @@ def apply_admin_edits(
         table_rows = _admin_table_rows_payload(
             inverter_rows,
             battery_rows,
+            panel_rows,
             month_profile_rows,
             sun_profile_rows,
             price_kwp_rows,

@@ -7,6 +7,13 @@ import numpy as np
 import pandas as pd
 
 from pv_product.hardware import generate_kwp_candidates
+from pv_product.panel_catalog import (
+    MANUAL_PANEL_TOKEN,
+    PANEL_CATALOG_COLUMNS,
+    canonical_panel_name,
+    resolve_selected_panel,
+)
+from pv_product.panel_technology import PANEL_TECHNOLOGY_FACTORS, normalize_panel_technology_mode
 
 from .types import LoadedConfigBundle, ValidationIssue
 
@@ -19,14 +26,18 @@ VALID_PROFILE_MODES = {"perfil horario relativo", "perfil hora dia de semana", "
 
 INVERTER_REQUIRED_COLUMNS = ["name", "AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max", "Imax_mppt", "n_mppt", "price_COP"]
 BATTERY_REQUIRED_COLUMNS = ["name", "nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"]
+PANEL_REQUIRED_COLUMNS = list(PANEL_CATALOG_COLUMNS)
 INVERTER_NUMERIC_COLUMNS = ["AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max", "Imax_mppt", "n_mppt", "price_COP"]
 BATTERY_NUMERIC_COLUMNS = ["nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"]
+PANEL_NUMERIC_COLUMNS = ["P_mod_W", "Voc25", "Vmp25", "Isc", "length_m", "width_m"]
 PRICE_TABLE_REQUIRED_COLUMNS = ["MIN", "MAX", "PRECIO_POR_KWP"]
 PRICE_TABLE_NUMERIC_COLUMNS = ["MIN", "MAX", "PRECIO_POR_KWP"]
 
 _ROW_REQUIRED_RE = re.compile(r"Fila (\d+): el campo '([^']+)' es obligatorio\.")
 _ROW_NUMERIC_RE = re.compile(r"Fila (\d+): '([^']+)' debe ser numérico\.")
 _DUPLICATES_RE = re.compile(r"Los nombres deben ser únicos\. Duplicados: (.+)\.")
+_PANEL_RESERVED_RE = re.compile(r"Fila (\d+): el nombre '__manual__' está reservado\.")
+_PANEL_TECH_MODE_RE = re.compile(r"Fila (\d+): panel_technology_mode debe ser un modo soportado\.")
 _VALUE_GT_ZERO_RE = re.compile(r"El valor de '([^']+)' debe ser mayor que cero\.")
 _INVALID_VALUE_RE = re.compile(r"Valor inválido para '([^']+)': (.+)\.")
 _INVALID_BOOL_RE = re.compile(r"Valor booleano inválido para '([^']+)': (.+)\.")
@@ -48,6 +59,13 @@ _TABLE_COLUMN_LABELS = {
     "max_kW": {"es": "Potencia máxima", "en": "Maximum power"},
     "max_ch_kW": {"es": "Potencia máxima de carga", "en": "Maximum charge power"},
     "max_dis_kW": {"es": "Potencia máxima de descarga", "en": "Maximum discharge power"},
+    "P_mod_W": {"es": "Potencia módulo", "en": "Module power"},
+    "Voc25": {"es": "Voc a 25 °C", "en": "Voc at 25 °C"},
+    "Vmp25": {"es": "Vmp a 25 °C", "en": "Vmp at 25 °C"},
+    "Isc": {"es": "Isc", "en": "Isc"},
+    "length_m": {"es": "Largo", "en": "Length"},
+    "width_m": {"es": "Ancho", "en": "Width"},
+    "panel_technology_mode": {"es": "Tecnología de panel", "en": "Panel technology"},
     "MIN": {"es": "kWp mínimo", "en": "Minimum kWp"},
     "MAX": {"es": "kWp máximo", "en": "Maximum kWp"},
     "PRECIO_POR_KWP": {"es": "Precio por kWp", "en": "Price per kWp"},
@@ -186,6 +204,16 @@ def localize_validation_message(issue: ValidationIssue, *, lang: str = "es") -> 
         if lang == "en":
             return f"Each item must have a unique name. Duplicate names: {duplicates}."
         return f"Cada elemento debe tener un nombre único. Nombres duplicados: {duplicates}."
+    if match := _PANEL_RESERVED_RE.fullmatch(message):
+        row = match.group(1)
+        if lang == "en":
+            return f"Row {row}: '__manual__' is reserved for the manual panel-selection mode."
+        return f"Fila {row}: '__manual__' está reservado para el modo manual de selección de panel."
+    if match := _PANEL_TECH_MODE_RE.fullmatch(message):
+        row = match.group(1)
+        if lang == "en":
+            return f"Row {row}: choose a supported panel technology mode."
+        return f"Fila {row}: elige una tecnología de panel compatible."
     if _VALUE_GT_ZERO_RE.fullmatch(message):
         if lang == "en":
             return "Enter a value greater than zero."
@@ -250,6 +278,10 @@ def localize_validation_message(issue: ValidationIssue, *, lang: str = "es") -> 
         if lang == "en":
             return "Choose a fixed battery that exists in the battery catalog, or turn on battery optimization."
         return "Elige una batería fija que exista en el catálogo o activa la optimización de baterías."
+    if message == "panel_name no existe en el catálogo de paneles.":
+        if lang == "en":
+            return "Choose a panel that exists in the panel catalog, or switch back to manual configuration."
+        return "Elige un panel que exista en el catálogo o vuelve a la configuración manual."
     if message == "El perfil 7x24 debe tener forma (7, 24).":
         if lang == "en":
             return "The weekday 7x24 demand table must contain 7 days and 24 hourly values."
@@ -315,6 +347,92 @@ def normalize_battery_catalog_rows(rows: list[dict] | None) -> tuple[pd.DataFram
     return normalize_catalog_rows(rows, BATTERY_REQUIRED_COLUMNS, BATTERY_NUMERIC_COLUMNS, "Battery_Catalog")
 
 
+def normalize_panel_catalog_rows(rows: list[dict] | None) -> tuple[pd.DataFrame, list[ValidationIssue]]:
+    frame = pd.DataFrame(rows or [])
+    issues: list[ValidationIssue] = []
+
+    for column in PANEL_REQUIRED_COLUMNS:
+        if column not in frame.columns:
+            frame[column] = np.nan
+
+    frame = frame[PANEL_REQUIRED_COLUMNS].copy()
+    frame["_source_row"] = range(1, len(frame) + 1)
+    frame[PANEL_REQUIRED_COLUMNS] = frame[PANEL_REQUIRED_COLUMNS].replace(r"^\s*$", np.nan, regex=True)
+    frame = frame.loc[~frame[PANEL_REQUIRED_COLUMNS].isna().all(axis=1)].reset_index(drop=True)
+
+    if frame.empty:
+        return frame[PANEL_REQUIRED_COLUMNS], issues
+
+    for column in PANEL_REQUIRED_COLUMNS:
+        missing = frame[column].isna()
+        for index in frame.index[missing]:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "Panel_Catalog",
+                    f"Fila {int(frame.at[index, '_source_row'])}: el campo '{column}' es obligatorio.",
+                )
+            )
+
+    canonical_names: list[str] = []
+    for index, value in frame["name"].items():
+        if pd.isna(value) or not str(value).strip():
+            canonical_names.append("")
+            continue
+        name = str(value).strip()
+        frame.at[index, "name"] = name
+        canonical = canonical_panel_name(name)
+        canonical_names.append(canonical)
+        if canonical == canonical_panel_name(MANUAL_PANEL_TOKEN):
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "Panel_Catalog",
+                    f"Fila {int(frame.at[index, '_source_row'])}: el nombre '__manual__' está reservado.",
+                )
+            )
+
+    duplicated = pd.Series(canonical_names).replace("", np.nan).duplicated(keep=False)
+    if duplicated.any():
+        duplicate_names = sorted(frame.loc[duplicated, "name"].astype(str).unique().tolist())
+        issues.append(
+            ValidationIssue(
+                "error",
+                "Panel_Catalog",
+                f"Los nombres deben ser únicos. Duplicados: {', '.join(duplicate_names)}.",
+            )
+        )
+
+    for column in PANEL_NUMERIC_COLUMNS:
+        series = pd.to_numeric(frame[column], errors="coerce")
+        invalid = frame[column].notna() & series.isna()
+        for index in frame.index[invalid]:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "Panel_Catalog",
+                    f"Fila {int(frame.at[index, '_source_row'])}: '{column}' debe ser numérico.",
+                )
+            )
+        frame[column] = series
+
+    for index, value in frame["panel_technology_mode"].items():
+        if pd.isna(value):
+            continue
+        normalized = normalize_panel_technology_mode(value)
+        if canonical_panel_name(value) not in {mode.casefold() for mode in PANEL_TECHNOLOGY_FACTORS}:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "Panel_Catalog",
+                    f"Fila {int(frame.at[index, '_source_row'])}: panel_technology_mode debe ser un modo soportado.",
+                )
+            )
+        frame.at[index, "panel_technology_mode"] = normalized
+
+    return frame[PANEL_REQUIRED_COLUMNS], issues
+
+
 def refresh_bundle_issues(
     bundle: LoadedConfigBundle,
     extra_issues: list[ValidationIssue] | tuple[ValidationIssue, ...] = (),
@@ -372,6 +490,9 @@ def validate_config(config_bundle: LoadedConfigBundle) -> list[ValidationIssue]:
         issues.append(ValidationIssue("error", "Inversor_Catalog", "El catálogo de inversores está vacío."))
     if cfg.get("include_battery") and config_bundle.battery_catalog.empty:
         issues.append(ValidationIssue("error", "Battery_Catalog", "Se solicitó batería, pero el catálogo está vacío."))
+    panel_selection = resolve_selected_panel(cfg, config_bundle.panel_catalog)
+    if panel_selection.selection_mode == "invalid" and panel_selection.error_message:
+        issues.append(ValidationIssue("error", "panel_name", panel_selection.error_message))
 
     if cfg.get("include_battery") and (not cfg.get("optimize_battery")) and str(cfg.get("battery_name", "")).strip():
         names = set(config_bundle.battery_catalog.get("name", pd.Series(dtype=object)).astype(str).tolist())

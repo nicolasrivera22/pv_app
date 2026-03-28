@@ -250,6 +250,7 @@ def test_project_round_trip_uses_canonical_csv_tables_and_restores_workspace(tmp
     assert (canonical_root / "Config.csv").exists()
     assert (canonical_root / "Inversor_Catalog.csv").exists()
     assert (canonical_root / "Battery_Catalog.csv").exists()
+    assert (canonical_root / "Panel_Catalog.csv").exists()
 
     reopened = open_project(saved.project_slug)
     reopened_base = reopened.get_scenario(base.scenario_id)
@@ -279,7 +280,7 @@ def test_project_save_materializes_panel_technology_mode_without_persisting_deri
         ].copy()
     bundle = replace(
         base_bundle,
-        config={**base_bundle.config, "panel_technology_mode": "premium"},
+        config={**base_bundle.config, "panel_name": "__manual__", "panel_technology_mode": "premium"},
         config_table=config_table,
     )
 
@@ -300,7 +301,99 @@ def test_project_save_materializes_panel_technology_mode_without_persisting_deri
     reopened_active = reopened.get_scenario(reopened.active_scenario_id)
 
     assert reopened_active is not None
+    assert reopened_active.config_bundle.config["panel_name"] == "__manual__"
     assert reopened_active.config_bundle.config["panel_technology_mode"] == "premium"
+
+
+def test_project_save_persists_selected_panel_name_and_panel_catalog(tmp_path, monkeypatch) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+
+    bundle = _fast_bundle()
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", bundle))
+    saved = save_project(state, project_name="Proyecto Paneles", language="es")
+
+    root = projects_root() / saved.project_slug / "inputs" / saved.active_scenario_id
+    config_csv = pd.read_csv(root / "Config.csv")
+    panel_catalog_csv = pd.read_csv(root / "Panel_Catalog.csv")
+    panel_row = config_csv.loc[config_csv["Item"].astype(str).str.strip() == "panel_name"].iloc[0]
+
+    assert panel_row["Valor"] == bundle.config["panel_name"]
+    assert panel_catalog_csv.empty is False
+
+    reopened = open_project(saved.project_slug)
+    reopened_active = reopened.get_scenario(reopened.active_scenario_id)
+
+    assert reopened_active is not None
+    assert reopened_active.config_bundle.config["panel_name"] == bundle.config["panel_name"]
+    assert reopened_active.config_bundle.panel_catalog.empty is False
+
+
+def test_manual_panel_mode_does_not_refresh_compatibility_rows_from_catalog_on_save(tmp_path, monkeypatch) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+
+    bundle = _fast_bundle()
+    custom = replace(
+        bundle,
+        config={
+            **bundle.config,
+            "panel_name": "__manual__",
+            "P_mod_W": 777.0,
+            "Voc25": 58.0,
+            "Vmp25": 47.0,
+            "Isc": 15.5,
+            "panel_technology_mode": "premium",
+        },
+    )
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", custom))
+    saved = save_project(state, project_name="Proyecto Manual", language="es")
+    config_csv = pd.read_csv(projects_root() / saved.project_slug / "inputs" / saved.active_scenario_id / "Config.csv")
+    values = {
+        row["Item"].strip(): row["Valor"]
+        for _, row in config_csv.iterrows()
+        if isinstance(row.get("Item"), str)
+    }
+
+    assert values["panel_name"] == "__manual__"
+    assert float(values["P_mod_W"]) == pytest.approx(777.0)
+    assert float(values["Voc25"]) == pytest.approx(58.0)
+    assert float(values["Vmp25"]) == pytest.approx(47.0)
+    assert float(values["Isc"]) == pytest.approx(15.5)
+    assert values["panel_technology_mode"] == "premium"
+
+
+def test_invalid_real_panel_selection_does_not_overwrite_compatibility_rows_on_save(tmp_path, monkeypatch) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+
+    bundle = _fast_bundle()
+    invalid = replace(
+        bundle,
+        config={
+            **bundle.config,
+            "panel_name": "Panel inexistente",
+            "P_mod_W": 711.0,
+            "Voc25": 57.0,
+            "Vmp25": 46.0,
+            "Isc": 15.1,
+            "panel_technology_mode": "premium",
+        },
+    )
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", invalid))
+    saved = save_project(state, project_name="Proyecto Panel Invalido", language="es")
+    config_csv = pd.read_csv(projects_root() / saved.project_slug / "inputs" / saved.active_scenario_id / "Config.csv")
+    values = {
+        row["Item"].strip(): row["Valor"]
+        for _, row in config_csv.iterrows()
+        if isinstance(row.get("Item"), str)
+    }
+
+    assert values["panel_name"] == "Panel inexistente"
+    assert float(values["P_mod_W"]) == pytest.approx(711.0)
+    assert float(values["Voc25"]) == pytest.approx(57.0)
+    assert float(values["Vmp25"]) == pytest.approx(46.0)
+    assert float(values["Isc"]) == pytest.approx(15.1)
+    assert values["panel_technology_mode"] == "premium"
 
 
 def test_ui_mode_does_not_persist_into_project_manifest(tmp_path, monkeypatch) -> None:

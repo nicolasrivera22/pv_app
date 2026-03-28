@@ -160,6 +160,7 @@ from .ui_schema import (
 from .validation import (
     normalize_battery_catalog_rows,
     normalize_inverter_catalog_rows,
+    normalize_panel_catalog_rows,
     normalize_price_table_rows,
     refresh_bundle_issues,
     validate_config,
@@ -304,6 +305,7 @@ __all__ = [
     "overlay_bundle_with_draft",
     "normalize_battery_catalog_rows",
     "normalize_inverter_catalog_rows",
+    "normalize_panel_catalog_rows",
     "normalize_price_table_rows",
     "pages_dir",
     "private_config_root",

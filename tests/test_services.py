@@ -868,4 +868,6 @@ def test_template_round_trip(tmp_path) -> None:
 
     assert bundle.inverter_catalog.empty is False
     assert bundle.battery_catalog.empty is False
+    assert bundle.panel_catalog.empty is False
+    assert bundle.config["panel_name"] == "BASE-600W Standard"
     assert bundle.issues is not None

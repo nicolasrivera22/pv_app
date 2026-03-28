@@ -46,6 +46,7 @@ def _build_scan_result(config_bundle: LoadedConfigBundle, *, allow_parallel: boo
         config=_deterministic_config(config_bundle.config),
         inverter_catalog=config_bundle.inverter_catalog,
         battery_catalog=config_bundle.battery_catalog,
+        panel_catalog=config_bundle.panel_catalog,
         solar_profile=config_bundle.solar_profile,
         hsp_month=config_bundle.hsp_month,
         demand_profile_7x24=config_bundle.demand_profile_7x24,

@@ -53,6 +53,13 @@ def catalog_editor_section() -> html.Div:
                             _catalog_table("battery-table-editor"),
                         ],
                     ),
+                    html.Div(
+                        className="subpanel",
+                        children=[
+                            html.Div(className="section-head", children=[html.H4(tr("workbench.catalogs.panels", "es"), id="panel-editor-title"), html.Button(tr("workbench.add_row", "es"), id="add-panel-row-btn", n_clicks=0, className="action-btn tertiary")]),
+                            _catalog_table("panel-table-editor"),
+                        ],
+                    ),
                 ],
             ),
         ],

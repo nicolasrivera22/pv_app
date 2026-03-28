@@ -6,6 +6,11 @@ from typing import Any
 import pandas as pd
 from dash.dash_table.Format import Format, Group, Scheme
 
+from pv_product.panel_catalog import (
+    MANUAL_PANEL_TOKEN,
+    panel_catalog_options,
+    resolve_selected_panel,
+)
 from pv_product.panel_technology import panel_technology_options
 from pv_product.utils import DEFAULT_CONFIG
 
@@ -104,6 +109,14 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         ui_scale=100.0,
         min_value=0,
         max_value=100,
+    ),
+    "panel_name": FieldUiSchema(
+        "dropdown",
+        "basic",
+        "Modelo de panel",
+        "Panel model",
+        "Selecciona un panel del catálogo para este escenario o vuelve a la configuración manual.",
+        "Select a catalog panel for this scenario or switch back to manual configuration.",
     ),
     "panel_technology_mode": FieldUiSchema(
         "dropdown",
@@ -879,6 +892,16 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
         "max_dis_kW": TableColumnUiSchema("Descarga máx [kW]", "Max discharge [kW]", "Potencia máxima de descarga.", "Maximum discharge power.", "kw", 1, "numeric"),
         "price_COP": TableColumnUiSchema("Precio [COP]", "Price [COP]", "Costo de la batería.", "Battery cost.", "currency_cop", 0, "numeric"),
     },
+    "panel_catalog": {
+        "name": TableColumnUiSchema("Nombre", "Name", "Modelo o referencia visible del panel.", "Visible panel model or reference."),
+        "P_mod_W": TableColumnUiSchema("Potencia módulo [Wp]", "Module power [Wp]", "Potencia nominal del módulo.", "Rated module power.", "number", 0, "numeric"),
+        "Voc25": TableColumnUiSchema("Voc a 25 °C [V]", "Voc at 25 °C [V]", "Voltaje de circuito abierto del módulo a 25 °C.", "Module open-circuit voltage at 25 °C.", "volts", 1, "numeric"),
+        "Vmp25": TableColumnUiSchema("Vmp a 25 °C [V]", "Vmp at 25 °C [V]", "Voltaje de máxima potencia del módulo a 25 °C.", "Module maximum-power voltage at 25 °C.", "volts", 1, "numeric"),
+        "Isc": TableColumnUiSchema("Isc [A]", "Isc [A]", "Corriente de cortocircuito del módulo.", "Module short-circuit current.", "amps", 2, "numeric"),
+        "length_m": TableColumnUiSchema("Largo [m]", "Length [m]", "Largo del panel para referencia de huella.", "Panel length for footprint reference.", "number", 3, "numeric"),
+        "width_m": TableColumnUiSchema("Ancho [m]", "Width [m]", "Ancho del panel para referencia de huella.", "Panel width for footprint reference.", "number", 3, "numeric"),
+        "panel_technology_mode": TableColumnUiSchema("Tecnología", "Technology", "Tecnología de generación asociada al modelo.", "Generation technology associated with the model.", "text", 0),
+    },
     "month_profile": {
         "MONTH": TableColumnUiSchema("Mes", "Month", "Mes del año.", "Month of the year.", "integer", 0, "numeric"),
         "Demand_month": TableColumnUiSchema("Factor demanda", "Demand factor", "Multiplicador relativo de demanda mensual.", "Relative monthly demand multiplier.", "ratio", 3, "numeric"),
@@ -978,7 +1001,13 @@ def field_help(meta: ConfigFieldMeta, lang: str = "es") -> str:
     return field_label(meta, lang)
 
 
-def field_options(meta: ConfigFieldMeta, lang: str = "es") -> list[dict[str, Any]]:
+def field_options(meta: ConfigFieldMeta, bundle, lang: str = "es") -> list[dict[str, Any]]:
+    if meta.config_key == "panel_name":
+        options = [{"label": label, "value": value} for label, value in panel_catalog_options(bundle.panel_catalog, lang=lang)]
+        current_value = str(bundle.config.get("panel_name") or "").strip()
+        if current_value and current_value != MANUAL_PANEL_TOKEN and all(option["value"] != current_value for option in options):
+            options.append({"label": current_value, "value": current_value})
+        return options
     if meta.config_key == "panel_technology_mode":
         return [
             {"label": label, "value": value}
@@ -1089,10 +1118,12 @@ def _field_payload(meta: ConfigFieldMeta, bundle, *, lang: str = "es") -> dict[s
         "input_step": field_input_step(meta),
         "min": schema.min_value,
         "max": schema.max_value,
-        "options": field_options(meta, lang),
+        "options": field_options(meta, bundle, lang),
         "value": display_assumption_value(meta.config_key, bundle.config.get(meta.config_key, meta.value)),
         "supported": meta.supported,
     }
+    if meta.config_key == "panel_name":
+        payload["value"] = str(payload["value"] or MANUAL_PANEL_TOKEN)
     if meta.config_key == "mc_battery_name":
         names = [
             str(value).strip()
@@ -1128,6 +1159,7 @@ def build_config_fields(
 
 
 ASSUMPTION_CONTEXT_NOTE_IDS = {
+    "Sol y módulos": "panel-selection-context-note",
     "Controles de Batería y Exporte": "battery-export-context-note",
     "Semilla": "seed-context-note",
     "Restricción de Proporción Pico": "peak-ratio-context-note",
@@ -1141,7 +1173,20 @@ def _to_bool(value: Any) -> bool:
     return bool(value)
 
 
-def _assumption_context_note(config: dict[str, Any], group_key: str, *, lang: str = "es") -> str:
+def _assumption_context_note(
+    config: dict[str, Any],
+    group_key: str,
+    *,
+    panel_catalog: pd.DataFrame | None = None,
+    lang: str = "es",
+) -> str:
+    panel_catalog_frame = panel_catalog if panel_catalog is not None else pd.DataFrame()
+    if group_key == "Sol y módulos":
+        panel_resolution = resolve_selected_panel(config, panel_catalog_frame)
+        if panel_resolution.selection_mode == "catalog":
+            if lang == "en":
+                return "Module power, electrical values, and panel technology are derived from the selected panel model."
+            return "La potencia del módulo, los valores eléctricos y la tecnología del panel se derivan del modelo seleccionado."
     if group_key == "Controles de Batería y Exporte":
         include_battery = _to_bool(config.get("include_battery"))
         optimize_battery = _to_bool(config.get("optimize_battery"))
@@ -1160,7 +1205,12 @@ def _assumption_context_note(config: dict[str, Any], group_key: str, *, lang: st
     return ""
 
 
-def assumption_context_map(config: dict[str, Any], *, lang: str = "es") -> dict[str, Any]:
+def assumption_context_map(
+    config: dict[str, Any],
+    *,
+    panel_catalog: pd.DataFrame | None = None,
+    lang: str = "es",
+) -> dict[str, Any]:
     include_battery = _to_bool(config.get("include_battery"))
     optimize_battery = _to_bool(config.get("optimize_battery"))
     pricing_mode = str(config.get("pricing_mode", "")).strip().lower()
@@ -1168,8 +1218,15 @@ def assumption_context_map(config: dict[str, Any], *, lang: str = "es") -> dict[
     seed_mode = str(config.get("kWp_seed_mode", "")).strip().lower()
     peak_month_mode = str(config.get("limit_peak_month_mode", "")).strip().lower()
     use_manual_risk_kwp = _to_bool(config.get("mc_use_manual_kWp"))
+    panel_resolution = resolve_selected_panel(config, panel_catalog if panel_catalog is not None else pd.DataFrame())
+    panel_fields_derived = panel_resolution.selection_mode == "catalog"
 
     field_disabled = {
+        "P_mod_W": panel_fields_derived,
+        "Voc25": panel_fields_derived,
+        "Vmp25": panel_fields_derived,
+        "Isc": panel_fields_derived,
+        "panel_technology_mode": panel_fields_derived,
         "price_total_COP": pricing_mode == "variable",
         "optimize_battery": not include_battery,
         "battery_name": (not include_battery) or optimize_battery,
@@ -1188,7 +1245,7 @@ def assumption_context_map(config: dict[str, Any], *, lang: str = "es") -> dict[
         "battery_name": include_battery and not optimize_battery,
     }
     notes = {
-        group_key: _assumption_context_note(config, group_key, lang=lang)
+        group_key: _assumption_context_note(config, group_key, panel_catalog=panel_catalog, lang=lang)
         for group_key in ASSUMPTION_CONTEXT_NOTE_IDS
     }
     return {
@@ -1210,7 +1267,7 @@ def build_assumption_sections(
     hidden_fields = {str(field).strip() for field in (exclude_fields or set()) if str(field).strip()}
     sections_by_group: dict[str, dict[str, Any]] = {}
     raw_key_for_group: dict[str, str] = {}
-    context = assumption_context_map(bundle.config, lang=lang)
+    context = assumption_context_map(bundle.config, panel_catalog=bundle.panel_catalog, lang=lang)
     for meta in extract_config_metadata(bundle.config_table, bundle.config):
         if meta.group in excluded:
             continue

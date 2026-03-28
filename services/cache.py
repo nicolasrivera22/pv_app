@@ -14,7 +14,7 @@ import pandas as pd
 
 from .types import LoadedConfigBundle, ScanRunResult
 
-DETERMINISTIC_CACHE_SCHEMA_VERSION = 2
+DETERMINISTIC_CACHE_SCHEMA_VERSION = 3
 MAX_DETERMINISTIC_CACHE_ENTRIES = 16
 _MONTE_CARLO_CONFIG_DEFAULTS = {
     "mc_PR_std": 0.0,
@@ -33,6 +33,8 @@ def _normalize_deterministic_config(config: dict[str, Any]) -> dict[str, Any]:
     for field, default_value in _MONTE_CARLO_CONFIG_DEFAULTS.items():
         if field in normalized:
             normalized[field] = default_value
+    normalized.pop("panel_name", None)
+    normalized.pop("panel_area_m2", None)
     return normalized
 
 
@@ -65,7 +67,6 @@ def fingerprint_deterministic_input(config_bundle: LoadedConfigBundle) -> str:
         "demand_month_factor": np.asarray(config_bundle.demand_month_factor, dtype=float).tolist(),
         "cop_kwp_table": _frame_payload(config_bundle.cop_kwp_table),
         "cop_kwp_table_others": _frame_payload(config_bundle.cop_kwp_table_others),
-        "config_table": _frame_payload(config_bundle.config_table),
         "demand_profile_table": _frame_payload(config_bundle.demand_profile_table),
         "demand_profile_general_table": _frame_payload(config_bundle.demand_profile_general_table),
         "demand_profile_weights_table": _frame_payload(config_bundle.demand_profile_weights_table),

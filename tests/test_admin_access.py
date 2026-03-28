@@ -215,6 +215,7 @@ def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypa
     assert _find_component(rendered, "admin-assumption-sections") is not None
     assert _find_component(rendered, "profile-editor-title") is not None
     assert _find_component(rendered, "inverter-table-editor") is not None
+    assert _find_component(rendered, "panel-table-editor") is not None
     assert _find_component(rendered, "admin-pin-input") is None
     assert _find_component(rendered, "profile-demand-legacy-shell") is None
 
@@ -414,17 +415,19 @@ def test_populate_admin_page_renders_visible_admin_tables_for_example_bundle(mon
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     payload = commit_client_session(client_state, state).to_payload()
 
-    rendered_sections, disabled, inverter_rows, inverter_columns, _inverter_tooltips, battery_rows, battery_columns, _battery_tooltips, month_rows, month_columns, _month_tooltips, sun_rows, sun_columns, _sun_tooltips, price_rows, price_columns, _price_tooltips, price_other_rows, price_other_columns, _price_other_tooltips = populate_admin_page(payload, [], "es")
+    rendered_sections, disabled, inverter_rows, inverter_columns, _inverter_tooltips, battery_rows, battery_columns, _battery_tooltips, panel_rows, panel_columns, _panel_tooltips, month_rows, month_columns, _month_tooltips, sun_rows, sun_columns, _sun_tooltips, price_rows, price_columns, _price_tooltips, price_other_rows, price_other_columns, _price_other_tooltips = populate_admin_page(payload, [], "es")
 
     assert disabled is False
     assert inverter_rows
     assert battery_rows
+    assert panel_rows
     assert month_rows
     assert sun_rows
     assert price_rows
     assert price_other_rows
     assert inverter_columns
     assert battery_columns
+    assert panel_columns
     assert month_columns
     assert sun_columns
     assert price_columns
@@ -462,6 +465,7 @@ def test_populate_admin_page_rehydrates_immediately_after_unlock_with_same_sessi
     assert unlocked_outputs[11]
     assert unlocked_outputs[14]
     assert unlocked_outputs[17]
+    assert unlocked_outputs[20]
 
 
 def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(monkeypatch, tmp_path) -> None:
@@ -487,6 +491,7 @@ def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(mo
     assert outputs[11]
     assert outputs[14]
     assert outputs[17]
+    assert outputs[20]
 
 
 def test_table_draft_rows_skips_unhydrated_admin_tables() -> None:
@@ -535,6 +540,7 @@ def test_sync_admin_draft_waits_for_all_admin_tables_to_hydrate(monkeypatch, tmp
             [],
             None,
             active.config_bundle.battery_catalog.to_dict("records"),
+            active.config_bundle.panel_catalog.to_dict("records"),
             active.config_bundle.month_profile_table.to_dict("records"),
             active.config_bundle.sun_profile_table.to_dict("records"),
             active.config_bundle.cop_kwp_table.to_dict("records"),
@@ -568,6 +574,7 @@ def test_apply_admin_edits_waits_for_all_admin_tables_to_hydrate(monkeypatch, tm
             [],
             active.config_bundle.inverter_catalog.to_dict("records"),
             active.config_bundle.battery_catalog.to_dict("records"),
+            active.config_bundle.panel_catalog.to_dict("records"),
             None,
             active.config_bundle.sun_profile_table.to_dict("records"),
             active.config_bundle.cop_kwp_table.to_dict("records"),

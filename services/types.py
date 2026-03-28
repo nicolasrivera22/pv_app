@@ -54,6 +54,7 @@ class LoadedConfigBundle:
     config: dict[str, Any]
     inverter_catalog: pd.DataFrame
     battery_catalog: pd.DataFrame
+    panel_catalog: pd.DataFrame
     solar_profile: np.ndarray
     hsp_month: np.ndarray
     demand_profile_7x24: np.ndarray
@@ -75,6 +76,7 @@ class LoadedConfigBundle:
             "config": self.config,
             "inverter_catalog": _frame_to_payload(self.inverter_catalog),
             "battery_catalog": _frame_to_payload(self.battery_catalog),
+            "panel_catalog": _frame_to_payload(self.panel_catalog),
             "solar_profile": _array_to_list(self.solar_profile),
             "hsp_month": _array_to_list(self.hsp_month),
             "demand_profile_7x24": _array_to_list(self.demand_profile_7x24),
@@ -98,6 +100,7 @@ class LoadedConfigBundle:
             config=payload["config"],
             inverter_catalog=_frame_from_payload(payload["inverter_catalog"]),
             battery_catalog=_frame_from_payload(payload["battery_catalog"]),
+            panel_catalog=_frame_from_payload(payload["panel_catalog"]) if "panel_catalog" in payload else pd.DataFrame(),
             solar_profile=np.asarray(payload["solar_profile"], dtype=float),
             hsp_month=np.asarray(payload["hsp_month"], dtype=float),
             demand_profile_7x24=np.asarray(payload["demand_profile_7x24"], dtype=float),

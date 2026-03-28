@@ -7,11 +7,13 @@ from typing import Any
 import pandas as pd
 
 from .config_metadata import update_config_table_values
+from .io_excel import rebuild_config_bundle
 from .scenario_session import update_scenario_bundle
 from .types import LoadedConfigBundle
 from .validation import (
     normalize_battery_catalog_rows,
     normalize_inverter_catalog_rows,
+    normalize_panel_catalog_rows,
     normalize_price_table_rows,
     refresh_bundle_issues,
 )
@@ -24,6 +26,7 @@ logger = logging.getLogger(__name__)
 TABLE_BUNDLE_ATTRS = {
     "inverter_catalog": "inverter_catalog",
     "battery_catalog": "battery_catalog",
+    "panel_catalog": "panel_catalog",
     "month_profile": "month_profile_table",
     "sun_profile": "sun_profile_table",
     "cop_kwp_table": "cop_kwp_table",
@@ -141,7 +144,24 @@ def resolve_workspace_bundle_for_display(
     scenario_id: str,
     base_bundle: LoadedConfigBundle,
 ) -> LoadedConfigBundle:
-    return overlay_bundle_with_draft(base_bundle, get_workspace_draft(session_id, scenario_id))
+    draft_bundle = overlay_bundle_with_draft(base_bundle, get_workspace_draft(session_id, scenario_id))
+    if draft_bundle is base_bundle:
+        return base_bundle
+    return rebuild_config_bundle(
+        base_bundle,
+        config=draft_bundle.config,
+        config_table=draft_bundle.config_table,
+        inverter_catalog=draft_bundle.inverter_catalog,
+        battery_catalog=draft_bundle.battery_catalog,
+        panel_catalog=draft_bundle.panel_catalog,
+        demand_profile=draft_bundle.demand_profile_table,
+        demand_profile_weights=draft_bundle.demand_profile_weights_table,
+        demand_profile_general=draft_bundle.demand_profile_general_table,
+        month_profile=draft_bundle.month_profile_table,
+        sun_profile=draft_bundle.sun_profile_table,
+        cop_kwp_table=draft_bundle.cop_kwp_table,
+        cop_kwp_table_others=draft_bundle.cop_kwp_table_others,
+    )
 
 
 def _draft_table_rows_or_base(base_bundle: LoadedConfigBundle, draft: WorkspaceDraftState, table_key: str) -> list[dict[str, Any]]:
@@ -177,10 +197,12 @@ def apply_workspace_draft_to_state(
     config.update(draft.config_overrides)
     inverter_rows = _draft_table_rows_or_base(base_bundle, draft, "inverter_catalog")
     battery_rows = _draft_table_rows_or_base(base_bundle, draft, "battery_catalog")
+    panel_rows = _draft_table_rows_or_base(base_bundle, draft, "panel_catalog")
     price_rows = _draft_table_rows_or_base(base_bundle, draft, "cop_kwp_table")
     price_other_rows = _draft_table_rows_or_base(base_bundle, draft, "cop_kwp_table_others")
     inverter_catalog, inverter_issues = normalize_inverter_catalog_rows(inverter_rows)
     battery_catalog, battery_issues = normalize_battery_catalog_rows(battery_rows)
+    panel_catalog, panel_issues = normalize_panel_catalog_rows(panel_rows)
     price_kwp_table, price_kwp_issues = normalize_price_table_rows(price_rows, "Precios_kWp_relativos")
     price_kwp_table_others, price_kwp_others_issues = normalize_price_table_rows(
         price_other_rows,
@@ -192,6 +214,7 @@ def apply_workspace_draft_to_state(
         config_updates=config,
         inverter_catalog=inverter_catalog,
         battery_catalog=battery_catalog,
+        panel_catalog=panel_catalog,
         demand_profile=frame_from_rows(
             _draft_table_rows_or_base(base_bundle, draft, "demand_profile"),
             list(base_bundle.demand_profile_table.columns),
@@ -220,7 +243,7 @@ def apply_workspace_draft_to_state(
     )
     bundle = refresh_bundle_issues(
         bundle,
-        extra_issues=[*inverter_issues, *battery_issues, *price_kwp_issues, *price_kwp_others_issues],
+        extra_issues=[*inverter_issues, *battery_issues, *panel_issues, *price_kwp_issues, *price_kwp_others_issues],
     )
     next_state = update_scenario_bundle(state, scenario_id, bundle)
     updated = next_state.get_scenario(scenario_id)

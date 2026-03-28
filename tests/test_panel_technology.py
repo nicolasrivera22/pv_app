@@ -7,6 +7,7 @@ import pytest
 
 import services.deterministic_executor as deterministic_executor
 from pv_product.hardware import compute_kwp_seed, peak_ratio_ok
+from pv_product.panel_catalog import MANUAL_PANEL_TOKEN
 from pv_product.panel_technology import (
     DEFAULT_PANEL_TECHNOLOGY_MODE,
     panel_technology_factor,
@@ -21,6 +22,7 @@ def _fixed_design_bundle(mode: str | None, *, include_battery: bool = False, opt
     bundle = load_example_config()
     config = {
         **bundle.config,
+        "panel_name": MANUAL_PANEL_TOKEN,
         "years": 1,
         "include_battery": include_battery,
         "optimize_battery": optimize_battery,
@@ -94,6 +96,7 @@ def test_compute_kwp_seed_uses_resolved_generation_pr() -> None:
         "E_month_kWh": 2000.0,
         "HSP": 5.5,
         "PR": 0.80,
+        "panel_name": MANUAL_PANEL_TOKEN,
         "P_mod_W": 1.0,
         "kWp_seed_mode": "auto",
     }
@@ -122,6 +125,7 @@ def test_peak_ratio_uses_resolved_generation_pr() -> None:
     bundle = load_example_config()
     base_cfg = {
         **bundle.config,
+        "panel_name": MANUAL_PANEL_TOKEN,
         "deg_rate": 0.0,
         "limit_peak_ratio_enable": False,
     }
