@@ -13,6 +13,7 @@ from services.economics_engine import (
     calculate_economics_result,
     resolve_economics_preview,
     resolve_inverter_count,
+    resolve_economics_quantities,
     resolve_panel_count,
 )
 
@@ -114,6 +115,48 @@ def test_resolve_economics_preview_returns_ready_for_scanned_scenario() -> None:
     assert preview.state == PREVIEW_STATE_READY
     assert preview.result is not None
     assert preview.result.quantities.candidate_key == scan_result.best_candidate_key
+    assert preview.candidate_source == "selected"
+
+
+def test_resolve_economics_preview_marks_selected_even_when_selected_matches_best() -> None:
+    bundle = _fast_bundle()
+    scan_result = resolve_deterministic_scan(bundle, allow_parallel=False)
+    scenario = replace(
+        create_scenario_record("Base", bundle),
+        scan_result=scan_result,
+        selected_candidate_key=scan_result.best_candidate_key,
+        dirty=False,
+    )
+
+    preview = resolve_economics_preview(
+        scenario,
+        economics_cost_items=bundle.economics_cost_items_table,
+        economics_price_items=bundle.economics_price_items_table,
+    )
+
+    assert preview.state == PREVIEW_STATE_READY
+    assert preview.candidate_source == "selected"
+
+
+def test_resolve_economics_preview_marks_best_fallback_only_when_selected_is_missing() -> None:
+    bundle = _fast_bundle()
+    scan_result = resolve_deterministic_scan(bundle, allow_parallel=False)
+    scenario = replace(
+        create_scenario_record("Base", bundle),
+        scan_result=scan_result,
+        selected_candidate_key="missing-key",
+        dirty=False,
+    )
+
+    preview = resolve_economics_preview(
+        scenario,
+        economics_cost_items=bundle.economics_cost_items_table,
+        economics_price_items=bundle.economics_price_items_table,
+    )
+
+    assert preview.state == PREVIEW_STATE_READY
+    assert preview.candidate_key == scan_result.best_candidate_key
+    assert preview.candidate_source == "best_fallback"
 
 
 def test_resolve_economics_preview_blocks_when_dirty() -> None:
@@ -153,4 +196,24 @@ def test_resolve_economics_preview_reports_candidate_missing_when_no_key_is_reso
     )
 
     assert preview.state == PREVIEW_STATE_CANDIDATE_MISSING
+    assert preview.candidate_source is None
     assert preview.result is None
+
+
+def test_resolve_economics_quantities_keeps_raw_equipment_names() -> None:
+    detail = {
+        "kWp": 12.0,
+        "battery_name": "BAT-RAW",
+        "battery": {"nom_kWh": 9.5},
+        "inv_sel": {"N_mod": 24, "inverter": {"name": "INV-RAW"}},
+    }
+    config = {"P_mod_W": 500.0}
+
+    quantities = resolve_economics_quantities(
+        candidate_key="12.000::BAT-RAW",
+        detail=detail,
+        config=config,
+    )
+
+    assert quantities.battery_name == "BAT-RAW"
+    assert quantities.inverter_name == "INV-RAW"

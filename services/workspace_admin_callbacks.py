@@ -419,8 +419,9 @@ def _economics_preview_state_block(preview: EconomicsPreviewResult, *, lang: str
     )
 
 
-def _economics_quantity_card(label: str, value: str) -> html.Div:
+def _economics_quantity_card(label: str, value: str, *, component_id: str | None = None) -> html.Div:
     return html.Div(
+        id=component_id,
         className="field-card economics-preview-quantity-card",
         children=[
             html.Span(label, className="scan-summary-label"),
@@ -429,7 +430,23 @@ def _economics_quantity_card(label: str, value: str) -> html.Div:
     )
 
 
-def _economics_preview_quantities(result, *, lang: str) -> html.Div:
+def _economics_candidate_source_text(candidate_source: str | None, *, lang: str) -> str:
+    if candidate_source == "selected":
+        return tr("workspace.admin.economics.preview.candidate_source.selected", lang)
+    if candidate_source == "best_fallback":
+        return tr("workspace.admin.economics.preview.candidate_source.best_fallback", lang)
+    return tr("workspace.admin.economics.preview.placeholder.not_available", lang)
+
+
+def _economics_equipment_name(name: str | None, *, kind: str, lang: str) -> str:
+    stripped = str(name or "").strip()
+    if stripped:
+        return stripped
+    placeholder_key = "workspace.admin.economics.preview.placeholder.no_battery" if kind == "battery" else "workspace.admin.economics.preview.placeholder.no_inverter"
+    return tr(placeholder_key, lang)
+
+
+def _economics_preview_quantities(preview: EconomicsPreviewResult, result, *, lang: str) -> html.Div:
     quantities = result.quantities
     return html.Div(
         id="economics-preview-quantities-shell",
@@ -456,22 +473,45 @@ def _economics_preview_quantities(result, *, lang: str) -> html.Div:
                 id="economics-preview-quantities-grid",
                 className="economics-preview-quantities-grid",
                 children=[
-                    _economics_quantity_card(tr("workspace.admin.economics.preview.quantity.candidate", lang), quantities.candidate_key),
+                    _economics_quantity_card(
+                        tr("workspace.admin.economics.preview.quantity.candidate", lang),
+                        quantities.candidate_key,
+                        component_id="economics-preview-quantity-candidate",
+                    ),
+                    _economics_quantity_card(
+                        tr("workspace.admin.economics.preview.quantity.candidate_source", lang),
+                        _economics_candidate_source_text(preview.candidate_source, lang=lang),
+                        component_id="economics-preview-quantity-candidate-source",
+                    ),
                     _economics_quantity_card(
                         tr("workspace.admin.economics.preview.quantity.kwp", lang),
                         f"{_format_number(quantities.kWp, decimals=3)} kWp",
+                        component_id="economics-preview-quantity-kwp",
                     ),
                     _economics_quantity_card(
                         tr("workspace.admin.economics.preview.quantity.panel_count", lang),
                         _format_number(quantities.panel_count, decimals=0),
+                        component_id="economics-preview-quantity-panel-count",
                     ),
                     _economics_quantity_card(
                         tr("workspace.admin.economics.preview.quantity.inverter_count", lang),
                         _format_number(quantities.inverter_count, decimals=0),
+                        component_id="economics-preview-quantity-inverter-count",
                     ),
                     _economics_quantity_card(
                         tr("workspace.admin.economics.preview.quantity.battery_kwh", lang),
                         f"{_format_number(quantities.battery_kwh, decimals=1)} kWh",
+                        component_id="economics-preview-quantity-battery-kwh",
+                    ),
+                    _economics_quantity_card(
+                        tr("workspace.admin.economics.preview.quantity.inverter_name", lang),
+                        _economics_equipment_name(quantities.inverter_name, kind="inverter", lang=lang),
+                        component_id="economics-preview-quantity-inverter-name",
+                    ),
+                    _economics_quantity_card(
+                        tr("workspace.admin.economics.preview.quantity.battery_name", lang),
+                        _economics_equipment_name(quantities.battery_name, kind="battery", lang=lang),
+                        component_id="economics-preview-quantity-battery-name",
                     ),
                 ],
             ),
@@ -569,6 +609,7 @@ def _economics_breakdown_group(
     *,
     group_id: str,
     title: str,
+    description: str,
     subtotal_label: str,
     subtotal_value: float | None,
     rows,
@@ -584,6 +625,7 @@ def _economics_breakdown_group(
             ],
         )
     ]
+    children.append(html.P(description, id=f"{group_id}-copy", className="section-copy"))
     if table_rows:
         children.append(_economics_breakdown_table(f"{group_id}-table", table_rows, lang=lang))
     else:
@@ -643,6 +685,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
             _economics_breakdown_group(
                 group_id="economics-breakdown-technical",
                 title=tr("workspace.admin.economics.preview.breakdown.group.technical", lang),
+                description=tr("workspace.admin.economics.preview.breakdown.group.technical.copy", lang),
                 subtotal_label=tr("workspace.admin.economics.preview.summary.technical", lang),
                 subtotal_value=result.technical_subtotal_COP,
                 rows=[row for row in result.cost_rows if row.stage_or_layer == "technical"],
@@ -651,6 +694,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
             _economics_breakdown_group(
                 group_id="economics-breakdown-installed",
                 title=tr("workspace.admin.economics.preview.breakdown.group.installed", lang),
+                description=tr("workspace.admin.economics.preview.breakdown.group.installed.copy", lang),
                 subtotal_label=tr("workspace.admin.economics.preview.summary.installed", lang),
                 subtotal_value=result.installed_subtotal_COP,
                 rows=[row for row in result.cost_rows if row.stage_or_layer == "installed"],
@@ -659,6 +703,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
             _economics_breakdown_group(
                 group_id="economics-breakdown-commercial",
                 title=tr("workspace.admin.economics.preview.breakdown.group.commercial", lang),
+                description=tr("workspace.admin.economics.preview.breakdown.group.commercial.copy", lang),
                 subtotal_label=tr("workspace.admin.economics.preview.summary.commercial_adjustment", lang),
                 subtotal_value=result.commercial_adjustment_COP,
                 rows=[row for row in result.price_rows if row.stage_or_layer == "commercial"],
@@ -667,6 +712,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
             _economics_breakdown_group(
                 group_id="economics-breakdown-sale",
                 title=tr("workspace.admin.economics.preview.breakdown.group.sale", lang),
+                description=tr("workspace.admin.economics.preview.breakdown.group.sale.copy", lang),
                 subtotal_label=tr("workspace.admin.economics.preview.summary.sale_adjustment", lang),
                 subtotal_value=result.sale_adjustment_COP,
                 rows=[row for row in result.price_rows if row.stage_or_layer == "sale"],
@@ -676,7 +722,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
     )
     return [
         state_block,
-        _economics_preview_quantities(result, lang=lang),
+        _economics_preview_quantities(preview, result, lang=lang),
         _economics_preview_flow(result, lang=lang),
         summary_cards,
         breakdown_shell,

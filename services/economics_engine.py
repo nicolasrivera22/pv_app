@@ -62,6 +62,7 @@ class EconomicsResult:
 class EconomicsPreviewResult:
     state: str
     candidate_key: str | None = None
+    candidate_source: str | None = None
     message_key: str | None = None
     result: EconomicsResult | None = None
 
@@ -143,7 +144,7 @@ def resolve_economics_quantities(
         panel_count=resolve_panel_count(detail, config),
         inverter_count=resolve_inverter_count(detail),
         battery_kwh=resolve_battery_kwh(detail),
-        battery_name=str(battery.get("name", "") or ""),
+        battery_name=str(battery.get("name") or detail.get("battery_name") or ""),
         inverter_name=str(inverter.get("name", "") or ""),
     )
 
@@ -284,23 +285,29 @@ def resolve_economics_preview(
     if scenario.scan_result is None:
         return EconomicsPreviewResult(
             state=PREVIEW_STATE_NO_SCAN,
+            candidate_source=None,
             message_key="workspace.admin.economics.preview.state.no_scan",
         )
     if scenario.dirty:
         return EconomicsPreviewResult(
             state=PREVIEW_STATE_RERUN_REQUIRED,
+            candidate_source=None,
             message_key="workspace.admin.economics.preview.state.rerun_required",
         )
 
     candidate_key: str | None = None
+    candidate_source: str | None = None
     if scenario.selected_candidate_key in scenario.scan_result.candidate_details:
         candidate_key = str(scenario.selected_candidate_key)
+        candidate_source = "selected"
     elif scenario.scan_result.best_candidate_key in scenario.scan_result.candidate_details:
         candidate_key = str(scenario.scan_result.best_candidate_key)
+        candidate_source = "best_fallback"
 
     if not candidate_key:
         return EconomicsPreviewResult(
             state=PREVIEW_STATE_CANDIDATE_MISSING,
+            candidate_source=None,
             message_key="workspace.admin.economics.preview.state.candidate_missing",
         )
 
@@ -308,6 +315,7 @@ def resolve_economics_preview(
     if detail is None:
         return EconomicsPreviewResult(
             state=PREVIEW_STATE_CANDIDATE_MISSING,
+            candidate_source=None,
             message_key="workspace.admin.economics.preview.state.candidate_missing",
         )
 
@@ -324,6 +332,7 @@ def resolve_economics_preview(
     return EconomicsPreviewResult(
         state=PREVIEW_STATE_READY,
         candidate_key=candidate_key,
+        candidate_source=candidate_source,
         message_key="workspace.admin.economics.preview.state.ready",
         result=result,
     )

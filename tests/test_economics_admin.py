@@ -33,6 +33,7 @@ from services import (
     update_scenario_bundle,
 )
 from services.economics_tables import RICH_MIGRATION_NOTE_PREFIX, normalize_economics_cost_items_with_issues
+from services.economics_engine import EconomicsPreviewResult, EconomicsQuantities, EconomicsResult
 from services.project_io import projects_root
 from services.validation import localize_validation_message, validate_economics_tables
 from services.workspace_admin_callbacks import (
@@ -565,6 +566,10 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     technical_table = _find_component(children, "economics-breakdown-technical-table")
     commercial_table = _find_component(children, "economics-breakdown-commercial-table")
     sale_table = _find_component(children, "economics-breakdown-sale-table")
+    candidate_source = _find_component(children, "economics-preview-quantity-candidate-source")
+    inverter_name = _find_component(children, "economics-preview-quantity-inverter-name")
+    battery_name = _find_component(children, "economics-preview-quantity-battery-name")
+    technical_copy = _find_component(children, "economics-breakdown-technical-copy")
 
     assert status is not None
     assert "diseño determinístico actual" in str(status.children)
@@ -581,6 +586,12 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert technical_table is not None
     assert commercial_table is not None
     assert sale_table is not None
+    assert candidate_source is not None
+    assert "selected_candidate_key" in str(candidate_source.children)
+    assert inverter_name is not None
+    assert battery_name is not None
+    assert technical_copy is not None
+    assert "subtotal técnico" in str(technical_copy.children)
     assert len(technical_table.data) >= 1
     assert len(commercial_table.data) >= 1
     assert len(sale_table.data) >= 1
@@ -689,3 +700,52 @@ def test_apply_admin_edits_preserves_scan_for_economics_only_changes_and_preview
     assert preview_status is not None
     assert "diseño determinístico actual" in str(preview_status.children)
     assert preview_summary is not None
+
+
+def test_render_economics_preview_shows_localized_placeholders_from_ui_not_engine(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+
+    def _fake_preview(_scenario, *, economics_cost_items, economics_price_items):
+        _ = economics_cost_items, economics_price_items
+        return EconomicsPreviewResult(
+            state="ready",
+            candidate_key="12.000::None",
+            candidate_source="best_fallback",
+            message_key="workspace.admin.economics.preview.state.ready",
+            result=EconomicsResult(
+                quantities=EconomicsQuantities(
+                    candidate_key="12.000::None",
+                    kWp=12.0,
+                    panel_count=24,
+                    inverter_count=1,
+                    battery_kwh=0.0,
+                    battery_name="",
+                    inverter_name="",
+                ),
+                cost_rows=(),
+                price_rows=(),
+                technical_subtotal_COP=0.0,
+                installed_subtotal_COP=0.0,
+                cost_total_COP=0.0,
+                commercial_adjustment_COP=0.0,
+                commercial_offer_COP=0.0,
+                sale_adjustment_COP=0.0,
+                final_price_COP=0.0,
+                final_price_per_kwp_COP=0.0,
+            ),
+        )
+
+    monkeypatch.setattr(admin_callbacks, "resolve_economics_preview", _fake_preview)
+
+    children = render_economics_preview(payload, None, None, "es")
+
+    candidate_source = _find_component(children, "economics-preview-quantity-candidate-source")
+    inverter_name = _find_component(children, "economics-preview-quantity-inverter-name")
+    battery_name = _find_component(children, "economics-preview-quantity-battery-name")
+
+    assert candidate_source is not None
+    assert "fallback al mejor candidato" in str(candidate_source.children)
+    assert inverter_name is not None
+    assert "Sin nombre de inversor" in str(inverter_name.children)
+    assert battery_name is not None
+    assert "Sin batería seleccionada" in str(battery_name.children)
