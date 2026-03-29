@@ -2,14 +2,23 @@ from __future__ import annotations
 
 from dash import dash_table, html
 
+from services.economics_tables import economics_editor_dropdowns
 from services.i18n import tr
 
 
-def _economics_table(table_id: str, *, editable: bool = True, row_deletable: bool = True) -> dash_table.DataTable:
+def _economics_table(
+    table_id: str,
+    *,
+    table_kind: str,
+    lang: str,
+    editable: bool = True,
+    row_deletable: bool = True,
+) -> dash_table.DataTable:
     return dash_table.DataTable(
         id=table_id,
         editable=editable,
         row_deletable=row_deletable,
+        dropdown=economics_editor_dropdowns(table_kind, lang=lang),
         sort_action="native",
         page_size=8,
         style_table={"overflowX": "auto"},
@@ -57,7 +66,7 @@ def economics_editor_section(*, lang: str = "es") -> html.Div:
         className="panel secondary-panel",
         children=[
             html.Div(className="section-head", children=[html.H3(tr("workspace.admin.economics.title", lang), id="economics-editor-title")]),
-            html.Div(tr("workspace.admin.economics.note", lang), id="economics-editor-note", className="section-copy section-copy-wide"),
+            html.Div(tr("workspace.admin.economics.note", lang), id="economics-editor-note", className="section-copy section-copy-wide economics-editor-note"),
             html.Div(
                 id="economics-definition-grid",
                 className="economics-definition-grid",
@@ -161,7 +170,7 @@ def economics_editor_section(*, lang: str = "es") -> html.Div:
                                 ],
                             ),
                             html.P(tr("workspace.admin.economics.cost_items.copy", lang), id="economics-cost-items-copy", className="section-copy"),
-                            _economics_table("economics-cost-items-editor"),
+                            _economics_table("economics-cost-items-editor", table_kind="economics_cost_items", lang=lang),
                         ],
                     ),
                     html.Div(
@@ -180,7 +189,7 @@ def economics_editor_section(*, lang: str = "es") -> html.Div:
                                 ],
                             ),
                             html.P(tr("workspace.admin.economics.price_items.copy", lang), id="economics-price-items-copy", className="section-copy"),
-                            _economics_table("economics-price-items-editor"),
+                            _economics_table("economics-price-items-editor", table_kind="economics_price_items", lang=lang),
                         ],
                     ),
                 ],

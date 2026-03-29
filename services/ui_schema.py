@@ -904,32 +904,32 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
         "price_COP": TableColumnUiSchema("Precio [COP]", "Price [COP]", "Costo de referencia del panel para la capa económica.", "Reference panel cost for the economics layer.", "currency_cop", 0, "numeric"),
     },
     "economics_cost_items": {
-        "stage": TableColumnUiSchema("Etapa", "Stage", "Etapa económica de costo: technical o installed.", "Cost stage: technical or installed."),
+        "stage": TableColumnUiSchema("Etapa de costo", "Cost stage", "Ubica la partida dentro del costo técnico o del costo instalado.", "Places the line in technical cost or installed cost."),
         "name": TableColumnUiSchema("Partida", "Item", "Nombre visible de la partida de costo.", "Visible cost item name."),
-        "basis": TableColumnUiSchema("Base", "Basis", "Base de costo: fijo por proyecto o por unidad física.", "Cost basis: fixed per project or per physical unit."),
-        "amount_COP": TableColumnUiSchema("Monto [COP]", "Amount [COP]", "Monto en COP o COP por unidad según la base elegida.", "Amount in COP or COP per unit depending on the selected basis.", "currency_cop", 0, "numeric"),
+        "basis": TableColumnUiSchema("Base de cálculo", "Cost basis", "Define si el monto se aplica una vez por proyecto o por una unidad física del diseño.", "Defines whether the amount applies once per project or per physical unit in the design."),
+        "amount_COP": TableColumnUiSchema("Monto unitario [COP]", "Unit amount [COP]", "Monto en COP o COP por unidad según la base elegida.", "Amount in COP or COP per unit depending on the selected basis.", "currency_cop", 0, "numeric"),
         "enabled": TableColumnUiSchema("Activo", "Enabled", "Permite desactivar temporalmente esta partida sin eliminarla.", "Lets you temporarily disable this line without deleting it."),
         "notes": TableColumnUiSchema("Notas", "Notes", "Notas internas para explicar la fuente o el uso de la partida.", "Internal notes that explain the source or intent of the line."),
     },
     "economics_price_items": {
-        "layer": TableColumnUiSchema("Capa", "Layer", "Capa comercial: commercial o sale.", "Commercial layer: commercial or sale."),
+        "layer": TableColumnUiSchema("Etapa comercial", "Price stage", "Ubica el ajuste en la oferta comercial o en el cierre final.", "Places the adjustment in the commercial offer or in the final closing stage."),
         "name": TableColumnUiSchema("Ajuste", "Adjustment", "Nombre visible del ajuste comercial o final.", "Visible commercial or final-price adjustment name."),
-        "method": TableColumnUiSchema("Método", "Method", "Método de pricing: markup_pct, fixed_project o per_kwp.", "Pricing method: markup_pct, fixed_project, or per_kwp."),
-        "value": TableColumnUiSchema("Valor [COP o %]", "Value [COP or %]", "Usa 12 para 12% en markup_pct. Los otros métodos usan COP o COP por kWp.", "Use 12 for 12% in markup_pct. Other methods use COP or COP per kWp.", "text", 0, "numeric"),
+        "method": TableColumnUiSchema("Regla de ajuste", "Adjustment rule", "Usa ajuste porcentual, monto fijo por proyecto o monto por kWp.", "Use a percentage adjustment, a fixed project amount, or an amount per kWp."),
+        "value": TableColumnUiSchema("Valor [COP o %]", "Value [COP or %]", "Usa 12 para 12% en ajuste porcentual. Los otros métodos usan COP o COP por kWp.", "Use 12 for 12% in a percentage adjustment. Other methods use COP or COP per kWp.", "text", 0, "numeric"),
         "enabled": TableColumnUiSchema("Activo", "Enabled", "Permite desactivar temporalmente este ajuste sin eliminarlo.", "Lets you temporarily disable this adjustment without deleting it."),
         "notes": TableColumnUiSchema("Notas", "Notes", "Notas internas para aclarar el criterio comercial o de cierre.", "Internal notes that clarify the commercial or final-sale rationale."),
     },
     "economics_breakdown": {
-        "source_table": TableColumnUiSchema("Tabla", "Table", "Tabla de economics que originó la línea calculada.", "Economics table that produced the calculated line."),
+        "source_table": TableColumnUiSchema("Origen", "Source", "Bloque de economics que originó la línea calculada.", "Economics block that produced the calculated line."),
         "source_row": TableColumnUiSchema("Fila", "Row", "Fila 1-based del input normalizado usada en el cálculo.", "1-based normalized input row used in the calculation.", "integer", 0, "numeric"),
-        "group": TableColumnUiSchema("Grupo", "Group", "Separa líneas de costo y líneas de precio.", "Separates cost lines from price lines."),
-        "stage_or_layer": TableColumnUiSchema("Etapa / capa", "Stage / layer", "Etapa de costo o capa de precio usada en la línea.", "Cost stage or price layer used in the line."),
+        "group": TableColumnUiSchema("Grupo", "Group", "Separa costos y ajustes de precio.", "Separates costs from price adjustments."),
+        "stage_or_layer": TableColumnUiSchema("Etapa", "Stage", "Etapa de costo o de precio usada en la línea.", "Cost or price stage used in the line."),
         "name": TableColumnUiSchema("Partida", "Item", "Nombre visible de la línea calculada.", "Visible name of the calculated line."),
-        "rule": TableColumnUiSchema("Regla", "Rule", "Basis o method aplicado en la línea.", "Basis or method applied in the line."),
+        "rule": TableColumnUiSchema("Regla aplicada", "Applied rule", "Regla de cálculo aplicada en la línea.", "Calculation rule applied in the line."),
         "calculation": TableColumnUiSchema("Cálculo", "Calculation", "Explicación breve de cómo se calculó la línea con sus cantidades y base.", "Short explanation of how the line was calculated with its quantities and base."),
         "multiplier": TableColumnUiSchema("Multiplicador", "Multiplier", "Cantidad usada para multiplicar la tarifa o monto.", "Quantity used to multiply the rate or amount.", "number", 3, "numeric"),
-        "unit_rate_COP": TableColumnUiSchema("Tarifa / monto", "Rate / amount", "Monto unitario normalizado usado en la línea. Para markup_pct guarda la tasa decimal.", "Normalized unit amount used in the line. For markup_pct it stores the decimal rate.", "number", 3, "numeric"),
-        "base_amount_COP": TableColumnUiSchema("Base [COP]", "Base [COP]", "Base monetaria usada por markup_pct. Queda vacía cuando no aplica.", "Monetary base used by markup_pct. Empty when not applicable.", "currency_cop", 0, "numeric"),
+        "unit_rate_COP": TableColumnUiSchema("Monto unitario", "Unit amount", "Monto unitario normalizado usado en la línea. En ajustes porcentuales guarda la tasa decimal.", "Normalized unit amount used in the line. For percentage adjustments it stores the decimal rate.", "number", 3, "numeric"),
+        "base_amount_COP": TableColumnUiSchema("Base monetaria [COP]", "Monetary base [COP]", "Base monetaria usada por los ajustes porcentuales. Queda vacía cuando no aplica.", "Monetary base used by percentage adjustments. Empty when not applicable.", "currency_cop", 0, "numeric"),
         "line_amount_COP": TableColumnUiSchema("Resultado [COP]", "Result [COP]", "Monto total calculado para la línea.", "Total amount calculated for the line.", "currency_cop", 0, "numeric"),
         "notes": TableColumnUiSchema("Notas", "Notes", "Notas internas preservadas desde la fila de origen.", "Internal notes preserved from the source row."),
     },
@@ -1445,6 +1445,12 @@ def _prettify_column(column_key: str) -> str:
     return column_key.replace("_", " ").replace("kWh", "kWh").strip().capitalize()
 
 
+_TABLE_DROPDOWN_COLUMNS: dict[str, set[str]] = {
+    "economics_cost_items": {"stage", "basis"},
+    "economics_price_items": {"layer", "method"},
+}
+
+
 def build_table_display_columns(
     table_kind: str,
     column_keys: list[str],
@@ -1460,6 +1466,8 @@ def build_table_display_columns(
         column: dict[str, Any] = {"name": label, "id": key}
         if schema.type:
             column["type"] = schema.type
+        if key in _TABLE_DROPDOWN_COLUMNS.get(table_kind, set()):
+            column["presentation"] = "dropdown"
         data_format = _format_kind(schema.format, schema.precision)
         if data_format is not None:
             column["format"] = data_format

@@ -33,8 +33,15 @@ from services import (
     update_scenario_bundle,
 )
 from services.economics_tables import RICH_MIGRATION_NOTE_PREFIX, normalize_economics_cost_items_with_issues
+from services.economics_tables import (
+    economics_cost_items_rows_from_editor,
+    economics_cost_items_rows_to_editor,
+    economics_price_items_rows_from_editor,
+    economics_price_items_rows_to_editor,
+)
 from services.economics_engine import EconomicsPreviewResult, EconomicsQuantities, EconomicsResult
 from services.project_io import projects_root
+from services.ui_schema import build_table_display_columns
 from services.validation import localize_validation_message, validate_economics_tables
 from services.workspace_admin_callbacks import (
     apply_admin_edits,
@@ -132,6 +139,61 @@ def test_example_bundle_uses_simple_seeded_economics_and_panel_price_is_not_auth
     assert float(panel_cost_row["amount_COP"]) == pytest.approx(0.0)
 
 
+def test_economics_editor_round_trips_friendly_enum_labels_to_raw_values() -> None:
+    bundle = load_example_config()
+
+    cost_editor_rows = economics_cost_items_rows_to_editor(bundle.economics_cost_items_table, lang="es")
+    price_editor_rows = economics_price_items_rows_to_editor(bundle.economics_price_items_table, lang="es")
+
+    assert cost_editor_rows[0]["stage"] == "Costo técnico"
+    assert cost_editor_rows[0]["basis"] == "Por panel"
+    assert price_editor_rows[0]["layer"] == "Oferta comercial"
+    assert price_editor_rows[0]["method"] == "Ajuste porcentual"
+
+    round_trip_cost = economics_cost_items_rows_from_editor(cost_editor_rows)
+    round_trip_price = economics_price_items_rows_from_editor(price_editor_rows)
+
+    assert round_trip_cost[0]["stage"] == "technical"
+    assert round_trip_cost[0]["basis"] == "per_panel"
+    assert round_trip_price[0]["layer"] == "commercial"
+    assert round_trip_price[0]["method"] == "markup_pct"
+
+
+def test_economics_columns_mark_enum_fields_as_dropdowns() -> None:
+    cost_columns, _ = build_table_display_columns("economics_cost_items", ["stage", "basis", "amount_COP"], "es")
+    price_columns, _ = build_table_display_columns("economics_price_items", ["layer", "method", "value"], "es")
+
+    assert {column["id"]: column.get("presentation") for column in cost_columns} == {
+        "stage": "dropdown",
+        "basis": "dropdown",
+        "amount_COP": None,
+    }
+    assert {column["id"]: column.get("presentation") for column in price_columns} == {
+        "layer": "dropdown",
+        "method": "dropdown",
+        "value": None,
+    }
+
+
+def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> None:
+    section = economics_editor_section(lang="es")
+
+    note = _find_component(section, "economics-editor-note")
+    preview_copy = _find_component(section, "economics-preview-copy")
+    cost_table = _find_component(section, "economics-cost-items-editor")
+    price_table = _find_component(section, "economics-price-items-editor")
+
+    assert note is not None
+    assert "costeo interno" in str(note.children)
+    assert "nueva capa interna" not in str(note.children).lower()
+    assert preview_copy is not None
+    assert "runtime pricing" not in str(preview_copy.children).lower()
+    assert cost_table is not None
+    assert price_table is not None
+    assert "Costo técnico" in {option["label"] for option in cost_table.dropdown["stage"]["options"]}
+    assert "Ajuste porcentual" in {option["label"] for option in price_table.dropdown["method"]["options"]}
+
+
 def test_sync_admin_draft_tracks_economics_tables_with_simple_schema(monkeypatch, tmp_path) -> None:
     client_state, _state, active, payload = _admin_payload(monkeypatch, tmp_path)
 
@@ -170,8 +232,8 @@ def test_apply_admin_edits_persists_economics_tables_and_normalizes_markup_perce
     active = state.get_scenario()
     assert active is not None
 
-    economics_cost_rows = active.config_bundle.economics_cost_items_table.to_dict("records")
-    economics_price_rows = active.config_bundle.economics_price_items_table.to_dict("records")
+    economics_cost_rows = economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang="es")
+    economics_price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
     economics_cost_rows[0] = {**economics_cost_rows[0], "amount_COP": 777_000}
     economics_price_rows[0] = {**economics_price_rows[0], "value": 19}
 
@@ -208,6 +270,12 @@ def test_apply_admin_edits_persists_economics_tables_and_normalizes_markup_perce
     assert reopened_active is not None
     assert float(reopened_active.config_bundle.economics_cost_items_table.iloc[0]["amount_COP"]) == pytest.approx(777_000)
     assert float(reopened_active.config_bundle.economics_price_items_table.iloc[0]["value"]) == pytest.approx(0.19)
+    reopened_editor_cost_rows = economics_cost_items_rows_to_editor(reopened_active.config_bundle.economics_cost_items_table, lang="es")
+    reopened_editor_price_rows = economics_price_items_rows_to_editor(reopened_active.config_bundle.economics_price_items_table, lang="es")
+    assert reopened_editor_cost_rows[0]["stage"] == "Costo técnico"
+    assert reopened_editor_cost_rows[0]["basis"] == "Por panel"
+    assert reopened_editor_price_rows[0]["layer"] == "Oferta comercial"
+    assert reopened_editor_price_rows[0]["method"] == "Ajuste porcentual"
 
 
 def test_open_project_without_economics_csv_defaults_new_tables(monkeypatch, tmp_path) -> None:
@@ -572,13 +640,15 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     technical_copy = _find_component(children, "economics-breakdown-technical-copy")
 
     assert status is not None
-    assert "diseño determinístico actual" in str(status.children)
+    assert "diseño determinístico vigente" in str(status.children)
     assert quantities_shell is not None
     assert flow_shell is not None
+    assert "final_price_per_kwp_COP" not in str(flow_shell)
+    assert "markup_pct" not in str(flow_shell)
     assert summary_cards is not None
     assert len(summary_cards.children) == 8
     assert breakdown_title is not None
-    assert str(breakdown_title.children) == "Desglose económico"
+    assert str(breakdown_title.children) == "Desglose del cálculo"
     assert technical_shell is not None
     assert installed_shell is not None
     assert commercial_shell is not None
@@ -587,7 +657,7 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert commercial_table is not None
     assert sale_table is not None
     assert candidate_source is not None
-    assert "selected_candidate_key" in str(candidate_source.children)
+    assert "Diseño seleccionado" in str(candidate_source.children)
     assert inverter_name is not None
     assert battery_name is not None
     assert technical_copy is not None
@@ -595,6 +665,10 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert len(technical_table.data) >= 1
     assert len(commercial_table.data) >= 1
     assert len(sale_table.data) >= 1
+    assert technical_table.data[0]["stage_or_layer"] == "Costo técnico"
+    assert technical_table.data[0]["rule"] == "Por panel"
+    assert commercial_table.data[0]["stage_or_layer"] == "Oferta comercial"
+    assert commercial_table.data[0]["rule"] == "Ajuste porcentual"
     assert "calculation" in technical_table.data[0]
     assert "x" in str(technical_table.data[0]["calculation"])
 
@@ -698,7 +772,7 @@ def test_apply_admin_edits_preserves_scan_for_economics_only_changes_and_preview
     preview_summary = _find_component(preview_children, "economics-summary-cards")
 
     assert preview_status is not None
-    assert "diseño determinístico actual" in str(preview_status.children)
+    assert "diseño determinístico vigente" in str(preview_status.children)
     assert preview_summary is not None
 
 
@@ -744,8 +818,8 @@ def test_render_economics_preview_shows_localized_placeholders_from_ui_not_engin
     battery_name = _find_component(children, "economics-preview-quantity-battery-name")
 
     assert candidate_source is not None
-    assert "fallback al mejor candidato" in str(candidate_source.children)
+    assert "Mejor diseño disponible" in str(candidate_source.children)
     assert inverter_name is not None
-    assert "Sin nombre de inversor" in str(inverter_name.children)
+    assert "Sin inversor asignado" in str(inverter_name.children)
     assert battery_name is not None
-    assert "Sin batería seleccionada" in str(battery_name.children)
+    assert "Sin batería asignada" in str(battery_name.children)

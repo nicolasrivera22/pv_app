@@ -14,6 +14,33 @@ VALID_ECONOMICS_PRICE_METHODS = {"markup_pct", "fixed_project", "per_kwp"}
 ECONOMICS_PRICE_PERCENT_METHODS = {"markup_pct"}
 RICH_MIGRATION_NOTE_PREFIX = "Migrated from prior economics schema"
 
+_ECONOMICS_UI_LABELS: dict[str, dict[str, dict[str, str]]] = {
+    "stage": {
+        "technical": {"es": "Costo técnico", "en": "Technical cost"},
+        "installed": {"es": "Costo instalado", "en": "Installed cost"},
+    },
+    "basis": {
+        "fixed_project": {"es": "Fijo por proyecto", "en": "Fixed per project"},
+        "per_kwp": {"es": "Por kWp", "en": "Per kWp"},
+        "per_panel": {"es": "Por panel", "en": "Per panel"},
+        "per_inverter": {"es": "Por inversor", "en": "Per inverter"},
+        "per_battery_kwh": {"es": "Por kWh de batería", "en": "Per battery kWh"},
+    },
+    "layer": {
+        "commercial": {"es": "Oferta comercial", "en": "Commercial offer"},
+        "sale": {"es": "Ajuste final de venta", "en": "Final sale adjustment"},
+    },
+    "method": {
+        "markup_pct": {"es": "Ajuste porcentual", "en": "Percentage adjustment"},
+        "fixed_project": {"es": "Monto fijo por proyecto", "en": "Fixed project amount"},
+        "per_kwp": {"es": "Monto por kWp", "en": "Amount per kWp"},
+    },
+    "source_table": {
+        "Economics_Cost_Items": {"es": "Capas de costo", "en": "Cost layers"},
+        "Economics_Price_Items": {"es": "Capas de precio", "en": "Price layers"},
+    },
+}
+
 _RICH_COST_STAGE_MAP = {"technical_cost": "technical", "installed_cost": "installed"}
 _RICH_PRICE_LAYER_MAP = {"commercial_offer": "commercial", "final_sale_price": "sale"}
 _RICH_COST_BASIS_MAP = {
@@ -30,6 +57,74 @@ _RICH_PRICE_METHOD_MAP = {
 }
 _TECHNICAL_COST_NAMES = {"Panel hardware", "Inverter hardware", "Battery hardware"}
 _COMMERCIAL_PRICE_NAMES = {"Contingencia", "Margen comercial"}
+
+
+def _editor_lang(lang: str | None) -> str:
+    return "en" if lang == "en" else "es"
+
+
+def economics_ui_label(field: str, value: Any, *, lang: str = "es") -> str:
+    raw_value = _strip_text(value)
+    if not raw_value:
+        return ""
+    field_map = _ECONOMICS_UI_LABELS.get(field, {})
+    label_map = field_map.get(raw_value)
+    if not label_map:
+        return raw_value
+    active_lang = _editor_lang(lang)
+    return label_map.get(active_lang, label_map.get("es", raw_value))
+
+
+def _economics_ui_raw_value(field: str, value: Any) -> str:
+    text = _strip_text(value)
+    if not text:
+        return ""
+    field_map = _ECONOMICS_UI_LABELS.get(field, {})
+    if text in field_map:
+        return text
+    for raw_value, labels in field_map.items():
+        if text == labels.get("es") or text == labels.get("en"):
+            return raw_value
+    return text
+
+
+def economics_editor_dropdowns(table_kind: str, *, lang: str = "es") -> dict[str, dict[str, list[dict[str, str]]]]:
+    if table_kind == "economics_cost_items":
+        fields = ("stage", "basis")
+    elif table_kind == "economics_price_items":
+        fields = ("layer", "method")
+    else:
+        return {}
+    active_lang = _editor_lang(lang)
+    return {
+        field: {
+            "options": [
+                {"label": labels.get(active_lang, labels.get("es", raw_value)), "value": labels.get(active_lang, labels.get("es", raw_value))}
+                for raw_value, labels in _ECONOMICS_UI_LABELS[field].items()
+            ]
+        }
+        for field in fields
+    }
+
+
+def _map_editor_labels(rows: list[dict[str, Any]], *, fields: tuple[str, ...], lang: str) -> list[dict[str, Any]]:
+    mapped_rows: list[dict[str, Any]] = []
+    for row in rows:
+        mapped = dict(row)
+        for field in fields:
+            mapped[field] = economics_ui_label(field, mapped.get(field), lang=lang)
+        mapped_rows.append(mapped)
+    return mapped_rows
+
+
+def _map_editor_raw_values(rows: list[dict[str, Any]], *, fields: tuple[str, ...]) -> list[dict[str, Any]]:
+    mapped_rows: list[dict[str, Any]] = []
+    for row in rows or []:
+        mapped = dict(row)
+        for field in fields:
+            mapped[field] = _economics_ui_raw_value(field, mapped.get(field))
+        mapped_rows.append(mapped)
+    return mapped_rows
 
 
 def default_economics_cost_items_rows() -> list[dict[str, Any]]:
@@ -383,24 +478,24 @@ def normalize_economics_price_items_frame(frame: pd.DataFrame | list[dict[str, A
     return normalized
 
 
-def economics_cost_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+def economics_cost_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None, *, lang: str = "es") -> list[dict[str, Any]]:
     normalized = normalize_economics_cost_items_frame(frame)
-    return normalized.to_dict("records")
+    return _map_editor_labels(normalized.to_dict("records"), fields=("stage", "basis"), lang=lang)
 
 
-def economics_price_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+def economics_price_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None, *, lang: str = "es") -> list[dict[str, Any]]:
     normalized = normalize_economics_price_items_frame(frame)
     if normalized.empty:
         return []
     editor_frame = normalized.copy()
     mask = editor_frame["method"].astype(str).isin(ECONOMICS_PRICE_PERCENT_METHODS)
     editor_frame.loc[mask, "value"] = editor_frame.loc[mask, "value"].astype(float) * 100.0
-    return editor_frame.to_dict("records")
+    return _map_editor_labels(editor_frame.to_dict("records"), fields=("layer", "method"), lang=lang)
 
 
 def economics_cost_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    return normalize_economics_cost_items_frame(rows).to_dict("records")
+    return normalize_economics_cost_items_frame(_map_editor_raw_values(rows or [], fields=("stage", "basis"))).to_dict("records")
 
 
 def economics_price_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    return normalize_economics_price_items_frame(rows).to_dict("records")
+    return normalize_economics_price_items_frame(_map_editor_raw_values(rows or [], fields=("layer", "method"))).to_dict("records")

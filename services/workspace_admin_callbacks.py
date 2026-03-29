@@ -19,6 +19,7 @@ from .admin_access import (
     verify_admin_pin,
 )
 from .economics_tables import (
+    economics_ui_label,
     economics_cost_items_rows_from_editor,
     economics_cost_items_rows_to_editor,
     economics_price_items_rows_from_editor,
@@ -293,9 +294,9 @@ def _format_percent(value: float | None) -> str:
     return f"{formatted}%"
 
 
-def _economics_summary_card(label: str, value: str) -> html.Div:
+def _economics_summary_card(label: str, value: str, *, emphasized: bool = False) -> html.Div:
     return html.Div(
-        className="scan-summary-card",
+        className="scan-summary-card economics-summary-card" + (" economics-summary-card-key" if emphasized else ""),
         children=[
             html.Span(label, className="scan-summary-label"),
             html.Span(value, className="scan-summary-value"),
@@ -335,11 +336,11 @@ def _economics_breakdown_formula(row: dict[str, object], *, lang: str) -> str:
 def _economics_breakdown_rows(rows, *, lang: str) -> list[dict[str, object]]:
     return [
         {
-            "source_table": row.source_table,
+            "source_table": economics_ui_label("source_table", row.source_table, lang=lang),
             "source_row": row.source_row,
-            "stage_or_layer": row.stage_or_layer,
+            "stage_or_layer": economics_ui_label("stage" if row.group == "cost" else "layer", row.stage_or_layer, lang=lang),
             "name": row.name,
-            "rule": row.rule,
+            "rule": economics_ui_label("basis" if row.group == "cost" else "method", row.rule, lang=lang),
             "calculation": _economics_breakdown_formula(
                 {
                     "rule": row.rule,
@@ -410,7 +411,7 @@ def _economics_preview_state_block(preview: EconomicsPreviewResult, *, lang: str
     body = tr(preview.message_key or "workspace.admin.economics.preview.state.no_scan", lang)
     return html.Div(
         id="economics-preview-state-shell",
-        className="subpanel economics-preview-state-shell",
+        className=f"subpanel economics-preview-state-shell economics-preview-state-{state_key}",
         children=[
             html.H5(title, id="economics-preview-state-title"),
             html.Div(body, id="economics-preview-status", className="status-line economics-preview-status"),
@@ -654,6 +655,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.cost_total", lang),
                 _format_cop(result.cost_total_COP, lang),
+                emphasized=True,
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.commercial_adjustment", lang),
@@ -662,6 +664,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.commercial_offer", lang),
                 _format_cop(result.commercial_offer_COP, lang),
+                emphasized=True,
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.sale_adjustment", lang),
@@ -670,10 +673,12 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.final_price", lang),
                 _format_cop(result.final_price_COP, lang),
+                emphasized=True,
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
                 _format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
+                emphasized=True,
             ),
         ],
     )
@@ -1016,10 +1021,10 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
         display_bundle.cop_kwp_table_others.to_dict("records"),
         kwp_other_columns,
         kwp_other_tooltips,
-        economics_cost_items_rows_to_editor(display_bundle.economics_cost_items_table),
+        economics_cost_items_rows_to_editor(display_bundle.economics_cost_items_table, lang=lang),
         economics_cost_columns,
         economics_cost_tooltips,
-        economics_price_items_rows_to_editor(display_bundle.economics_price_items_table),
+        economics_price_items_rows_to_editor(display_bundle.economics_price_items_table, lang=lang),
         economics_price_columns,
         economics_price_tooltips,
     )
