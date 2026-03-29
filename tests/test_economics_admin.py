@@ -49,6 +49,9 @@ from services.workspace_admin_callbacks import (
     sync_admin_draft,
 )
 
+COST_COLUMNS = ["stage", "name", "basis", "amount_COP", "source_mode", "hardware_binding", "enabled", "notes"]
+PRICE_COLUMNS = ["layer", "name", "method", "value", "enabled", "notes"]
+
 
 def _fast_bundle():
     bundle = load_example_config()
@@ -124,8 +127,8 @@ def _scanned_admin_payload(monkeypatch, tmp_path: Path):
 def test_example_bundle_uses_simple_seeded_economics_and_panel_price_is_not_authoritative() -> None:
     bundle = load_example_config()
 
-    assert list(bundle.economics_cost_items_table.columns) == ["stage", "name", "basis", "amount_COP", "enabled", "notes"]
-    assert list(bundle.economics_price_items_table.columns) == ["layer", "name", "method", "value", "enabled", "notes"]
+    assert list(bundle.economics_cost_items_table.columns) == COST_COLUMNS
+    assert list(bundle.economics_price_items_table.columns) == PRICE_COLUMNS
     assert bundle.economics_cost_items_table.empty is False
     assert bundle.economics_price_items_table.empty is False
     assert "price_COP" in bundle.panel_catalog.columns
@@ -136,6 +139,8 @@ def test_example_bundle_uses_simple_seeded_economics_and_panel_price_is_not_auth
     )
     assert panel_cost_row["stage"] == "technical"
     assert panel_cost_row["basis"] == "per_panel"
+    assert panel_cost_row["source_mode"] == "selected_hardware"
+    assert panel_cost_row["hardware_binding"] == "panel"
     assert float(panel_cost_row["amount_COP"]) == pytest.approx(0.0)
 
 
@@ -147,6 +152,8 @@ def test_economics_editor_round_trips_friendly_enum_labels_to_raw_values() -> No
 
     assert cost_editor_rows[0]["stage"] == "Costo técnico"
     assert cost_editor_rows[0]["basis"] == "Por panel"
+    assert cost_editor_rows[0]["source_mode"] == "Hardware seleccionado"
+    assert cost_editor_rows[0]["hardware_binding"] == "Panel"
     assert price_editor_rows[0]["layer"] == "Oferta comercial"
     assert price_editor_rows[0]["method"] == "Ajuste porcentual"
 
@@ -155,17 +162,25 @@ def test_economics_editor_round_trips_friendly_enum_labels_to_raw_values() -> No
 
     assert round_trip_cost[0]["stage"] == "technical"
     assert round_trip_cost[0]["basis"] == "per_panel"
+    assert round_trip_cost[0]["source_mode"] == "selected_hardware"
+    assert round_trip_cost[0]["hardware_binding"] == "panel"
     assert round_trip_price[0]["layer"] == "commercial"
     assert round_trip_price[0]["method"] == "markup_pct"
 
 
 def test_economics_columns_mark_enum_fields_as_dropdowns() -> None:
-    cost_columns, _ = build_table_display_columns("economics_cost_items", ["stage", "basis", "amount_COP"], "es")
+    cost_columns, _ = build_table_display_columns(
+        "economics_cost_items",
+        ["stage", "basis", "source_mode", "hardware_binding", "amount_COP"],
+        "es",
+    )
     price_columns, _ = build_table_display_columns("economics_price_items", ["layer", "method", "value"], "es")
 
     assert {column["id"]: column.get("presentation") for column in cost_columns} == {
         "stage": "dropdown",
         "basis": "dropdown",
+        "source_mode": "dropdown",
+        "hardware_binding": "dropdown",
         "amount_COP": None,
     }
     assert {column["id"]: column.get("presentation") for column in price_columns} == {
@@ -191,6 +206,8 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     assert cost_table is not None
     assert price_table is not None
     assert "Costo técnico" in {option["label"] for option in cost_table.dropdown["stage"]["options"]}
+    assert "Hardware seleccionado" in {option["label"] for option in cost_table.dropdown["source_mode"]["options"]}
+    assert "Panel" in {option["label"] for option in cost_table.dropdown["hardware_binding"]["options"]}
     assert "Ajuste porcentual" in {option["label"] for option in price_table.dropdown["method"]["options"]}
 
 
@@ -261,8 +278,8 @@ def test_apply_admin_edits_persists_economics_tables_and_normalizes_markup_perce
     assert updated_active is not None
     assert float(updated_active.config_bundle.economics_cost_items_table.iloc[0]["amount_COP"]) == pytest.approx(777_000)
     assert float(updated_active.config_bundle.economics_price_items_table.iloc[0]["value"]) == pytest.approx(0.19)
-    assert list(updated_active.config_bundle.economics_cost_items_table.columns) == ["stage", "name", "basis", "amount_COP", "enabled", "notes"]
-    assert list(updated_active.config_bundle.economics_price_items_table.columns) == ["layer", "name", "method", "value", "enabled", "notes"]
+    assert list(updated_active.config_bundle.economics_cost_items_table.columns) == COST_COLUMNS
+    assert list(updated_active.config_bundle.economics_price_items_table.columns) == PRICE_COLUMNS
 
     reopened = open_project(updated_state.project_slug)
     reopened_active = reopened.get_scenario()
@@ -274,6 +291,8 @@ def test_apply_admin_edits_persists_economics_tables_and_normalizes_markup_perce
     reopened_editor_price_rows = economics_price_items_rows_to_editor(reopened_active.config_bundle.economics_price_items_table, lang="es")
     assert reopened_editor_cost_rows[0]["stage"] == "Costo técnico"
     assert reopened_editor_cost_rows[0]["basis"] == "Por panel"
+    assert reopened_editor_cost_rows[0]["source_mode"] == "Hardware seleccionado"
+    assert reopened_editor_cost_rows[0]["hardware_binding"] == "Panel"
     assert reopened_editor_price_rows[0]["layer"] == "Oferta comercial"
     assert reopened_editor_price_rows[0]["method"] == "Ajuste porcentual"
 
@@ -290,8 +309,8 @@ def test_open_project_without_economics_csv_defaults_new_tables(monkeypatch, tmp
     reopened_active = reopened.get_scenario()
 
     assert reopened_active is not None
-    assert list(reopened_active.config_bundle.economics_cost_items_table.columns) == ["stage", "name", "basis", "amount_COP", "enabled", "notes"]
-    assert list(reopened_active.config_bundle.economics_price_items_table.columns) == ["layer", "name", "method", "value", "enabled", "notes"]
+    assert list(reopened_active.config_bundle.economics_cost_items_table.columns) == COST_COLUMNS
+    assert list(reopened_active.config_bundle.economics_price_items_table.columns) == PRICE_COLUMNS
     assert "Panel hardware" in reopened_active.config_bundle.economics_cost_items_table["name"].astype(str).tolist()
     assert "Margen comercial" in reopened_active.config_bundle.economics_price_items_table["name"].astype(str).tolist()
 
@@ -328,10 +347,12 @@ def test_open_rich_economics_schema_migrates_in_memory_only_and_rewrites_on_save
     assert reopened_active is not None
     assert cost_path.read_text(encoding="utf-8") == original_cost_text
     assert price_path.read_text(encoding="utf-8") == original_price_text
-    assert list(reopened_active.config_bundle.economics_cost_items_table.columns) == ["stage", "name", "basis", "amount_COP", "enabled", "notes"]
-    assert list(reopened_active.config_bundle.economics_price_items_table.columns) == ["layer", "name", "method", "value", "enabled", "notes"]
+    assert list(reopened_active.config_bundle.economics_cost_items_table.columns) == COST_COLUMNS
+    assert list(reopened_active.config_bundle.economics_price_items_table.columns) == PRICE_COLUMNS
     assert reopened_active.config_bundle.economics_cost_items_table.iloc[0]["stage"] == "technical"
     assert reopened_active.config_bundle.economics_cost_items_table.iloc[0]["basis"] == "per_panel"
+    assert reopened_active.config_bundle.economics_cost_items_table.iloc[0]["source_mode"] == "manual"
+    assert reopened_active.config_bundle.economics_cost_items_table.iloc[0]["hardware_binding"] == "none"
     assert float(reopened_active.config_bundle.economics_cost_items_table.iloc[0]["amount_COP"]) == pytest.approx(555_000)
     assert bool(reopened_active.config_bundle.economics_cost_items_table.iloc[1]["enabled"]) is False
     assert "pct_of_running_subtotal" in str(reopened_active.config_bundle.economics_cost_items_table.iloc[1]["notes"])
@@ -357,8 +378,8 @@ def test_open_rich_economics_schema_migrates_in_memory_only_and_rewrites_on_save
     rewritten_cost = pd.read_csv(cost_path)
     rewritten_price = pd.read_csv(price_path)
 
-    assert list(rewritten_cost.columns) == ["stage", "name", "basis", "amount_COP", "enabled", "notes"]
-    assert list(rewritten_price.columns) == ["layer", "name", "method", "value", "enabled", "notes"]
+    assert list(rewritten_cost.columns) == COST_COLUMNS
+    assert list(rewritten_price.columns) == PRICE_COLUMNS
     assert "calculation_method" not in rewritten_cost.columns
     assert "calculation_method" not in rewritten_price.columns
     reopened_after_save = open_project(saved.project_slug)
@@ -400,19 +421,48 @@ def test_validate_economics_tables_only_emits_aggregated_operational_warnings() 
     bundle = _fast_bundle()
     cost_frame = pd.DataFrame(
         [
-            {"stage": "technical", "name": "Panel hardware", "basis": "per_panel", "amount_COP": 0.0, "enabled": True, "notes": ""},
-            {"stage": "technical", "name": "  panel hardware  ", "basis": "per_panel", "amount_COP": 0.0, "enabled": True, "notes": ""},
-            {"stage": "installed", "name": "", "basis": "fixed_project", "amount_COP": 0.0, "enabled": False, "notes": "Recovered invalid row (name='')."},
+            {
+                "stage": "technical",
+                "name": "Panel hardware",
+                "basis": "per_panel",
+                "amount_COP": 0.0,
+                "source_mode": "selected_hardware",
+                "hardware_binding": "panel",
+                "enabled": True,
+                "notes": "",
+            },
+            {
+                "stage": "technical",
+                "name": "  panel hardware  ",
+                "basis": "per_panel",
+                "amount_COP": 0.0,
+                "source_mode": "manual",
+                "hardware_binding": "none",
+                "enabled": True,
+                "notes": "",
+            },
+            {
+                "stage": "installed",
+                "name": "",
+                "basis": "fixed_project",
+                "amount_COP": 0.0,
+                "source_mode": "manual",
+                "hardware_binding": "none",
+                "enabled": False,
+                "notes": "Recovered invalid row (name='').",
+            },
             {
                 "stage": "installed",
                 "name": "Legacy contingency",
                 "basis": "fixed_project",
                 "amount_COP": 0.0,
+                "source_mode": "manual",
+                "hardware_binding": "none",
                 "enabled": False,
                 "notes": f"{RICH_MIGRATION_NOTE_PREFIX} (stage=installed_cost, method=pct_of_running_subtotal, value=0.12).",
             },
         ],
-        columns=["stage", "name", "basis", "amount_COP", "enabled", "notes"],
+        columns=COST_COLUMNS,
     )
     price_frame = pd.DataFrame(
         [
@@ -635,6 +685,7 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     commercial_table = _find_component(children, "economics-breakdown-commercial-table")
     sale_table = _find_component(children, "economics-breakdown-sale-table")
     candidate_source = _find_component(children, "economics-preview-quantity-candidate-source")
+    panel_name = _find_component(children, "economics-preview-quantity-panel-name")
     inverter_name = _find_component(children, "economics-preview-quantity-inverter-name")
     battery_name = _find_component(children, "economics-preview-quantity-battery-name")
     technical_copy = _find_component(children, "economics-breakdown-technical-copy")
@@ -658,6 +709,7 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert sale_table is not None
     assert candidate_source is not None
     assert "Diseño seleccionado" in str(candidate_source.children)
+    assert panel_name is not None
     assert inverter_name is not None
     assert battery_name is not None
     assert technical_copy is not None
@@ -667,6 +719,7 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert len(sale_table.data) >= 1
     assert technical_table.data[0]["stage_or_layer"] == "Costo técnico"
     assert technical_table.data[0]["rule"] == "Por panel"
+    assert technical_table.data[0]["value_source"] in {"Manual", "Catálogo de panel seleccionado"}
     assert commercial_table.data[0]["stage_or_layer"] == "Oferta comercial"
     assert commercial_table.data[0]["rule"] == "Ajuste porcentual"
     assert "calculation" in technical_table.data[0]
@@ -795,6 +848,7 @@ def test_render_economics_preview_shows_localized_placeholders_from_ui_not_engin
                     battery_kwh=0.0,
                     battery_name="",
                     inverter_name="",
+                    panel_name="",
                 ),
                 cost_rows=(),
                 price_rows=(),
@@ -814,12 +868,162 @@ def test_render_economics_preview_shows_localized_placeholders_from_ui_not_engin
     children = render_economics_preview(payload, None, None, "es")
 
     candidate_source = _find_component(children, "economics-preview-quantity-candidate-source")
+    panel_name = _find_component(children, "economics-preview-quantity-panel-name")
     inverter_name = _find_component(children, "economics-preview-quantity-inverter-name")
     battery_name = _find_component(children, "economics-preview-quantity-battery-name")
 
     assert candidate_source is not None
     assert "Mejor diseño disponible" in str(candidate_source.children)
+    assert panel_name is not None
+    assert "Sin panel de catálogo" in str(panel_name.children)
     assert inverter_name is not None
     assert "Sin inversor asignado" in str(inverter_name.children)
     assert battery_name is not None
     assert "Sin batería asignada" in str(battery_name.children)
+
+
+def test_economics_cost_editor_round_trips_source_mode_and_hardware_binding(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, _payload = _admin_payload(monkeypatch, tmp_path)
+    editor_rows = economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang="es")
+    editor_rows[0] = {
+        **editor_rows[0],
+        "source_mode": "Manual",
+        "hardware_binding": "Panel",
+        "amount_COP": 321_000.0,
+    }
+
+    raw_rows = economics_cost_items_rows_from_editor(editor_rows)
+
+    assert raw_rows[0]["source_mode"] == "manual"
+    assert raw_rows[0]["hardware_binding"] == "panel"
+    assert float(raw_rows[0]["amount_COP"]) == pytest.approx(321_000.0)
+
+    round_trip_editor = economics_cost_items_rows_to_editor(pd.DataFrame(raw_rows, columns=COST_COLUMNS), lang="es")
+    assert round_trip_editor[0]["source_mode"] == "Manual"
+    assert round_trip_editor[0]["hardware_binding"] == "Panel"
+
+
+def test_selected_hardware_none_keeps_line_unavailable_without_fallback(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    cost_rows = economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang="es")
+    price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
+    cost_rows[0] = {
+        **cost_rows[0],
+        "source_mode": "Hardware seleccionado",
+        "hardware_binding": "Sin vínculo",
+        "amount_COP": 999_999.0,
+    }
+
+    children = render_economics_preview(payload, cost_rows, price_rows, "es")
+
+    warnings_shell = _find_component(children, "economics-preview-warnings-shell")
+    technical_table = _find_component(children, "economics-breakdown-technical-table")
+
+    assert warnings_shell is not None
+    assert "requiere un vínculo hardware" in str(warnings_shell.children)
+    assert technical_table is not None
+    assert technical_table.data[0]["value_source"] == "No disponible"
+    assert technical_table.data[0]["hardware_binding"] == "Sin vínculo"
+    assert float(technical_table.data[0]["unit_rate_COP"]) == pytest.approx(0.0)
+    assert float(technical_table.data[0]["line_amount_COP"]) == pytest.approx(0.0)
+
+
+def test_preview_live_hardware_warnings_do_not_persist_before_apply(monkeypatch, tmp_path) -> None:
+    client_state, state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    cost_rows = economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang="es")
+    price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
+    cost_rows[0] = {**cost_rows[0], "source_mode": "Hardware seleccionado", "hardware_binding": "Sin vínculo"}
+
+    children = render_economics_preview(payload, cost_rows, price_rows, "es")
+    warnings_shell = _find_component(children, "economics-preview-warnings-shell")
+
+    assert warnings_shell is not None
+    assert "requiere un vínculo hardware" in str(warnings_shell.children)
+
+    _, current_state = resolve_client_session(payload, language="es")
+    current_active = current_state.get_scenario()
+    assert current_active is not None
+    persisted_messages = [issue.message for issue in current_active.config_bundle.issues if issue.field == "economics_cost_items"]
+    assert "Economics_Cost_Items fila 1: 'selected_hardware' requiere un 'hardware_binding' distinto de 'none'." not in persisted_messages
+
+
+def test_apply_persists_hardware_resolution_warning_when_scan_is_preserved(monkeypatch, tmp_path) -> None:
+    client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    state = save_project(state, project_name="Proyecto Economics Hardware Warning", language="es")
+    payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+    assert active is not None and active.scan_result is not None
+
+    economics_cost_rows = economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang="es")
+    economics_price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
+    economics_cost_rows[0] = {
+        **economics_cost_rows[0],
+        "source_mode": "Hardware seleccionado",
+        "hardware_binding": "Sin vínculo",
+        "amount_COP": 456_000.0,
+    }
+
+    next_payload, status = apply_admin_edits(
+        1,
+        payload,
+        "Proyecto Economics Hardware Warning",
+        [],
+        [],
+        active.config_bundle.inverter_catalog.to_dict("records"),
+        active.config_bundle.battery_catalog.to_dict("records"),
+        active.config_bundle.panel_catalog.to_dict("records"),
+        active.config_bundle.month_profile_table.to_dict("records"),
+        active.config_bundle.sun_profile_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table_others.to_dict("records"),
+        economics_cost_rows,
+        economics_price_rows,
+        "es",
+    )
+
+    _, updated_state = resolve_client_session(next_payload, language="es")
+    updated_active = updated_state.get_scenario()
+
+    assert updated_active is not None
+    assert updated_active.scan_result is not None
+    assert updated_active.dirty is False
+    assert "pendientes hasta volver a ejecutar" not in status
+    persisted_messages = [issue.message for issue in updated_active.config_bundle.issues if issue.field == "economics_cost_items"]
+    assert "Economics_Cost_Items fila 1: 'selected_hardware' requiere un 'hardware_binding' distinto de 'none'." in persisted_messages
+
+    preview_children = render_economics_preview(next_payload, None, None, "es")
+    warnings_shell = _find_component(preview_children, "economics-preview-warnings-shell")
+    assert warnings_shell is not None
+    assert "requiere un vínculo hardware" in str(warnings_shell.children)
+
+
+def test_run_scan_persists_hardware_resolution_warning_when_selected_hardware_is_unavailable(monkeypatch, tmp_path) -> None:
+    _client_state, state, active, _payload = _admin_payload(monkeypatch, tmp_path)
+    assert active is not None
+    changed_costs = active.config_bundle.economics_cost_items_table.copy()
+    changed_costs.at[0, "source_mode"] = "selected_hardware"
+    changed_costs.at[0, "hardware_binding"] = "none"
+    changed_bundle = replace(active.config_bundle, economics_cost_items_table=changed_costs)
+    state = update_scenario_bundle(state, active.scenario_id, changed_bundle)
+    state = run_scenario_scan(state, active.scenario_id)
+    scanned = state.get_scenario()
+
+    assert scanned is not None
+    messages = [issue.message for issue in scanned.config_bundle.issues if issue.field == "economics_cost_items"]
+    assert "Economics_Cost_Items fila 1: 'selected_hardware' requiere un 'hardware_binding' distinto de 'none'." in messages
+
+
+def test_amount_cop_manual_value_survives_mode_toggles() -> None:
+    rows = economics_cost_items_rows_to_editor(load_example_config().economics_cost_items_table, lang="es")
+    rows[0] = {**rows[0], "amount_COP": 654_321.0, "source_mode": "Manual", "hardware_binding": "Panel"}
+    manual_rows = economics_cost_items_rows_from_editor(rows)
+
+    rows[0] = {**rows[0], "source_mode": "Hardware seleccionado", "hardware_binding": "Panel"}
+    selected_rows = economics_cost_items_rows_from_editor(rows)
+
+    rows[0] = {**rows[0], "source_mode": "Manual", "hardware_binding": "Panel"}
+    manual_again_rows = economics_cost_items_rows_from_editor(rows)
+
+    assert float(manual_rows[0]["amount_COP"]) == pytest.approx(654_321.0)
+    assert float(selected_rows[0]["amount_COP"]) == pytest.approx(654_321.0)
+    assert float(manual_again_rows[0]["amount_COP"]) == pytest.approx(654_321.0)

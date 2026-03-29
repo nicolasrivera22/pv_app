@@ -20,7 +20,9 @@ from pv_product.panel_technology import (
 )
 
 from .economics_tables import (
+    VALID_ECONOMICS_COST_HARDWARE_BINDINGS,
     VALID_ECONOMICS_COST_STAGES,
+    VALID_ECONOMICS_COST_SOURCE_MODES,
     VALID_ECONOMICS_PRICE_LAYERS,
     economics_note_has_rich_migration,
 )
@@ -62,6 +64,16 @@ _ECON_DISABLED_INVALID_BOOL_RE = re.compile(r"(Economics_(?:Cost|Price)_Items) f
 _ECON_DISABLED_RICH_MIGRATION_RE = re.compile(
     r"(Economics_(?:Cost|Price)_Items) fila (\d+): migrada desde schema rico y desactivada por método no soportado '([^']+)'\."
 )
+_ECON_RECOVERED_MODE_RE = re.compile(r"(Economics_(?:Cost|Price)_Items) fila (\d+): se recuperó '([^']+)' inválido; se usará '([^']+)'\.")
+_ECON_SELECTED_HARDWARE_BINDING_RE = re.compile(
+    r"(Economics_Cost_Items) fila (\d+): 'selected_hardware' requiere un 'hardware_binding' distinto de 'none'\."
+)
+_ECON_HARDWARE_PRICE_MISSING_RE = re.compile(
+    r"(Economics_Cost_Items) fila (\d+): falta 'price_COP' para el hardware seleccionado '([^']+)'\."
+)
+_ECON_HARDWARE_UNRESOLVED_RE = re.compile(
+    r"(Economics_Cost_Items) fila (\d+): no se pudo resolver el hardware seleccionado para '([^']+)'\."
+)
 _ECON_DUPLICATES_RE = re.compile(r"(Economics_(?:Cost|Price)_Items): nombres habilitados duplicados: (.+)\.")
 _ECON_MISSING_LAYER_RE = re.compile(r"(Economics_(?:Cost|Price)_Items): no hay filas habilitadas en '([^']+)'\.")
 _ECON_MIGRATED_DISABLED_RE = re.compile(r"(Economics_(?:Cost|Price)_Items): (\d+) filas migradas desde schema rico siguen deshabilitadas\.")
@@ -89,6 +101,12 @@ _TABLE_COLUMN_LABELS = {
     "stage": {"es": "Etapa", "en": "Stage"},
     "basis": {"es": "Base", "en": "Basis"},
     "amount_COP": {"es": "Monto", "en": "Amount"},
+    "source_mode": {"es": "Fuente del costo", "en": "Cost source"},
+    "hardware_binding": {"es": "Vínculo hardware", "en": "Hardware binding"},
+    "panel": {"es": "panel", "en": "panel"},
+    "inverter": {"es": "inversor", "en": "inverter"},
+    "battery": {"es": "batería", "en": "battery"},
+    "none": {"es": "sin vínculo", "en": "no binding"},
     "layer": {"es": "Capa", "en": "Layer"},
     "method": {"es": "Método", "en": "Method"},
     "value": {"es": "Valor", "en": "Value"},
@@ -371,6 +389,32 @@ def localize_validation_message(issue: ValidationIssue, *, lang: str = "es") -> 
             f"Fila {row} en {table_label}: se migró desde el schema económico anterior y se desactivó porque "
             f"el método '{method_value}' no está soportado en Fase 1."
         )
+    if match := _ECON_RECOVERED_MODE_RE.fullmatch(message):
+        table_name, row, column, fallback = match.groups()
+        table_label = _economics_table_label(table_name, lang)
+        column_label = _economics_message_column_label(column, lang)
+        if lang == "en":
+            return f"Row {row} in {table_label} used the fallback '{fallback}' because {column_label} was invalid."
+        return f"Fila {row} en {table_label}: se usó el fallback '{fallback}' porque {column_label} era inválido."
+    if match := _ECON_SELECTED_HARDWARE_BINDING_RE.fullmatch(message):
+        table_name, row = match.groups()
+        table_label = _economics_table_label(table_name, lang)
+        if lang == "en":
+            return f"Row {row} in {table_label} uses Selected hardware but has no hardware binding."
+        return f"Fila {row} en {table_label}: Hardware seleccionado requiere un vínculo hardware."
+    if match := _ECON_HARDWARE_PRICE_MISSING_RE.fullmatch(message):
+        table_name, row, hardware_name = match.groups()
+        table_label = _economics_table_label(table_name, lang)
+        if lang == "en":
+            return f"Row {row} in {table_label} resolved hardware '{hardware_name}', but it has no price."
+        return f"Fila {row} en {table_label}: el hardware '{hardware_name}' se resolvió, pero no tiene precio."
+    if match := _ECON_HARDWARE_UNRESOLVED_RE.fullmatch(message):
+        table_name, row, binding = match.groups()
+        table_label = _economics_table_label(table_name, lang)
+        binding_label = _economics_message_column_label(binding, lang)
+        if lang == "en":
+            return f"Row {row} in {table_label} could not resolve the selected {binding_label.lower()}."
+        return f"Fila {row} en {table_label}: no se pudo resolver el {binding_label.lower()} seleccionado."
     if match := _ECON_DUPLICATES_RE.fullmatch(message):
         table_name, duplicates = match.groups()
         table_label = _economics_table_label(table_name, lang)

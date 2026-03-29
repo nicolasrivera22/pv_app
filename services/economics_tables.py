@@ -4,11 +4,13 @@ from typing import Any
 
 import pandas as pd
 
-ECONOMICS_COST_COLUMNS = ["stage", "name", "basis", "amount_COP", "enabled", "notes"]
+ECONOMICS_COST_COLUMNS = ["stage", "name", "basis", "amount_COP", "source_mode", "hardware_binding", "enabled", "notes"]
 ECONOMICS_PRICE_COLUMNS = ["layer", "name", "method", "value", "enabled", "notes"]
 
 VALID_ECONOMICS_COST_STAGES = {"technical", "installed"}
 VALID_ECONOMICS_COST_BASES = {"fixed_project", "per_kwp", "per_panel", "per_inverter", "per_battery_kwh"}
+VALID_ECONOMICS_COST_SOURCE_MODES = {"manual", "selected_hardware"}
+VALID_ECONOMICS_COST_HARDWARE_BINDINGS = {"none", "panel", "inverter", "battery"}
 VALID_ECONOMICS_PRICE_LAYERS = {"commercial", "sale"}
 VALID_ECONOMICS_PRICE_METHODS = {"markup_pct", "fixed_project", "per_kwp"}
 ECONOMICS_PRICE_PERCENT_METHODS = {"markup_pct"}
@@ -26,6 +28,16 @@ _ECONOMICS_UI_LABELS: dict[str, dict[str, dict[str, str]]] = {
         "per_inverter": {"es": "Por inversor", "en": "Per inverter"},
         "per_battery_kwh": {"es": "Por kWh de batería", "en": "Per battery kWh"},
     },
+    "source_mode": {
+        "manual": {"es": "Manual", "en": "Manual"},
+        "selected_hardware": {"es": "Hardware seleccionado", "en": "Selected hardware"},
+    },
+    "hardware_binding": {
+        "none": {"es": "Sin vínculo", "en": "No binding"},
+        "panel": {"es": "Panel", "en": "Panel"},
+        "inverter": {"es": "Inversor", "en": "Inverter"},
+        "battery": {"es": "Batería", "en": "Battery"},
+    },
     "layer": {
         "commercial": {"es": "Oferta comercial", "en": "Commercial offer"},
         "sale": {"es": "Ajuste final de venta", "en": "Final sale adjustment"},
@@ -38,6 +50,13 @@ _ECONOMICS_UI_LABELS: dict[str, dict[str, dict[str, str]]] = {
     "source_table": {
         "Economics_Cost_Items": {"es": "Capas de costo", "en": "Cost layers"},
         "Economics_Price_Items": {"es": "Capas de precio", "en": "Price layers"},
+    },
+    "value_source": {
+        "manual": {"es": "Manual", "en": "Manual"},
+        "selected_panel_catalog": {"es": "Catálogo de panel seleccionado", "en": "Selected panel catalog"},
+        "selected_inverter_catalog": {"es": "Catálogo de inversor seleccionado", "en": "Selected inverter catalog"},
+        "selected_battery_catalog": {"es": "Catálogo de batería seleccionada", "en": "Selected battery catalog"},
+        "unavailable": {"es": "No disponible", "en": "Unavailable"},
     },
 }
 
@@ -90,7 +109,7 @@ def _economics_ui_raw_value(field: str, value: Any) -> str:
 
 def economics_editor_dropdowns(table_kind: str, *, lang: str = "es") -> dict[str, dict[str, list[dict[str, str]]]]:
     if table_kind == "economics_cost_items":
-        fields = ("stage", "basis")
+        fields = ("stage", "basis", "source_mode", "hardware_binding")
     elif table_kind == "economics_price_items":
         fields = ("layer", "method")
     else:
@@ -129,14 +148,86 @@ def _map_editor_raw_values(rows: list[dict[str, Any]], *, fields: tuple[str, ...
 
 def default_economics_cost_items_rows() -> list[dict[str, Any]]:
     return [
-        {"stage": "technical", "name": "Panel hardware", "basis": "per_panel", "amount_COP": 0.0, "enabled": True, "notes": ""},
-        {"stage": "technical", "name": "Inverter hardware", "basis": "per_inverter", "amount_COP": 0.0, "enabled": True, "notes": ""},
-        {"stage": "technical", "name": "Battery hardware", "basis": "per_battery_kwh", "amount_COP": 0.0, "enabled": True, "notes": ""},
-        {"stage": "installed", "name": "BOS eléctrico", "basis": "per_kwp", "amount_COP": 0.0, "enabled": True, "notes": ""},
-        {"stage": "installed", "name": "Estructura", "basis": "per_kwp", "amount_COP": 0.0, "enabled": True, "notes": ""},
-        {"stage": "installed", "name": "Mano de obra", "basis": "per_kwp", "amount_COP": 0.0, "enabled": True, "notes": ""},
-        {"stage": "installed", "name": "Ingeniería", "basis": "fixed_project", "amount_COP": 0.0, "enabled": True, "notes": ""},
-        {"stage": "installed", "name": "Logística", "basis": "fixed_project", "amount_COP": 0.0, "enabled": True, "notes": ""},
+        {
+            "stage": "technical",
+            "name": "Panel hardware",
+            "basis": "per_panel",
+            "amount_COP": 0.0,
+            "source_mode": "selected_hardware",
+            "hardware_binding": "panel",
+            "enabled": True,
+            "notes": "",
+        },
+        {
+            "stage": "technical",
+            "name": "Inverter hardware",
+            "basis": "per_inverter",
+            "amount_COP": 0.0,
+            "source_mode": "selected_hardware",
+            "hardware_binding": "inverter",
+            "enabled": True,
+            "notes": "",
+        },
+        {
+            "stage": "technical",
+            "name": "Battery hardware",
+            "basis": "per_battery_kwh",
+            "amount_COP": 0.0,
+            "source_mode": "selected_hardware",
+            "hardware_binding": "battery",
+            "enabled": True,
+            "notes": "",
+        },
+        {
+            "stage": "installed",
+            "name": "BOS eléctrico",
+            "basis": "per_kwp",
+            "amount_COP": 0.0,
+            "source_mode": "manual",
+            "hardware_binding": "none",
+            "enabled": True,
+            "notes": "",
+        },
+        {
+            "stage": "installed",
+            "name": "Estructura",
+            "basis": "per_kwp",
+            "amount_COP": 0.0,
+            "source_mode": "manual",
+            "hardware_binding": "none",
+            "enabled": True,
+            "notes": "",
+        },
+        {
+            "stage": "installed",
+            "name": "Mano de obra",
+            "basis": "per_kwp",
+            "amount_COP": 0.0,
+            "source_mode": "manual",
+            "hardware_binding": "none",
+            "enabled": True,
+            "notes": "",
+        },
+        {
+            "stage": "installed",
+            "name": "Ingeniería",
+            "basis": "fixed_project",
+            "amount_COP": 0.0,
+            "source_mode": "manual",
+            "hardware_binding": "none",
+            "enabled": True,
+            "notes": "",
+        },
+        {
+            "stage": "installed",
+            "name": "Logística",
+            "basis": "fixed_project",
+            "amount_COP": 0.0,
+            "source_mode": "manual",
+            "hardware_binding": "none",
+            "enabled": True,
+            "notes": "",
+        },
     ]
 
 
@@ -279,6 +370,14 @@ def _rich_migration_warning(table_name: str, row_number: int, method_value: str)
     return f"{table_name} fila {row_number}: migrada desde schema rico y desactivada por método no soportado '{method_value}'."
 
 
+def _recovered_mode_warning(table_name: str, row_number: int, field_name: str, fallback_value: str) -> str:
+    return f"{table_name} fila {row_number}: se recuperó '{field_name}' inválido; se usará '{fallback_value}'."
+
+
+def _selected_hardware_binding_warning(table_name: str, row_number: int) -> str:
+    return f"{table_name} fila {row_number}: 'selected_hardware' requiere un 'hardware_binding' distinto de 'none'."
+
+
 def _normalize_cost_row(record: dict[str, Any], *, row_number: int) -> tuple[dict[str, Any] | None, list[str]]:
     issues: list[str] = []
     if _row_is_blank(record):
@@ -288,6 +387,8 @@ def _normalize_cost_row(record: dict[str, Any], *, row_number: int) -> tuple[dic
     notes = _strip_text(record.get("notes"))
     raw_stage = _strip_text(record.get("stage"))
     raw_basis = _strip_text(record.get("basis"))
+    raw_source_mode = _strip_text(record.get("source_mode"))
+    raw_hardware_binding = _strip_text(record.get("hardware_binding"))
     raw_method = _strip_text(record.get("calculation_method"))
     raw_amount = record.get("amount_COP") if "amount_COP" in record else record.get("value")
     raw_enabled = record.get("enabled")
@@ -295,6 +396,8 @@ def _normalize_cost_row(record: dict[str, Any], *, row_number: int) -> tuple[dic
 
     stage = _RICH_COST_STAGE_MAP.get(raw_stage, raw_stage)
     basis = raw_basis or _RICH_COST_BASIS_MAP.get(raw_method, raw_method)
+    source_mode = raw_source_mode or "manual"
+    hardware_binding = raw_hardware_binding or "none"
     amount = _coerce_numeric(raw_amount)
     if not name:
         issues.append(_invalid_name_warning("Economics_Cost_Items", row_number))
@@ -329,11 +432,26 @@ def _normalize_cost_row(record: dict[str, Any], *, row_number: int) -> tuple[dic
         amount = 0.0
         enabled = False
 
+    if source_mode not in VALID_ECONOMICS_COST_SOURCE_MODES:
+        issues.append(_recovered_mode_warning("Economics_Cost_Items", row_number, "source_mode", "manual"))
+        notes = _append_note(notes, _recovery_note(field="source_mode", raw_value=record.get("source_mode")))
+        source_mode = "manual"
+
+    if hardware_binding not in VALID_ECONOMICS_COST_HARDWARE_BINDINGS:
+        issues.append(_recovered_mode_warning("Economics_Cost_Items", row_number, "hardware_binding", "none"))
+        notes = _append_note(notes, _recovery_note(field="hardware_binding", raw_value=record.get("hardware_binding")))
+        hardware_binding = "none"
+
+    if source_mode == "selected_hardware" and hardware_binding == "none":
+        issues.append(_selected_hardware_binding_warning("Economics_Cost_Items", row_number))
+
     return {
         "stage": stage,
         "name": name,
         "basis": basis,
         "amount_COP": float(amount),
+        "source_mode": source_mode,
+        "hardware_binding": hardware_binding,
         "enabled": bool(enabled),
         "notes": notes,
     }, issues
@@ -480,7 +598,7 @@ def normalize_economics_price_items_frame(frame: pd.DataFrame | list[dict[str, A
 
 def economics_cost_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None, *, lang: str = "es") -> list[dict[str, Any]]:
     normalized = normalize_economics_cost_items_frame(frame)
-    return _map_editor_labels(normalized.to_dict("records"), fields=("stage", "basis"), lang=lang)
+    return _map_editor_labels(normalized.to_dict("records"), fields=("stage", "basis", "source_mode", "hardware_binding"), lang=lang)
 
 
 def economics_price_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None, *, lang: str = "es") -> list[dict[str, Any]]:
@@ -494,7 +612,9 @@ def economics_price_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, An
 
 
 def economics_cost_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    return normalize_economics_cost_items_frame(_map_editor_raw_values(rows or [], fields=("stage", "basis"))).to_dict("records")
+    return normalize_economics_cost_items_frame(
+        _map_editor_raw_values(rows or [], fields=("stage", "basis", "source_mode", "hardware_binding"))
+    ).to_dict("records")
 
 
 def economics_price_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:

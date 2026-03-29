@@ -29,6 +29,7 @@ from .economics_engine import (
     PREVIEW_STATE_NO_SCAN,
     PREVIEW_STATE_READY,
     EconomicsPreviewResult,
+    economics_preview_warning_messages,
     resolve_economics_preview,
 )
 from .i18n import tr
@@ -40,7 +41,9 @@ from .validation import (
     BATTERY_REQUIRED_COLUMNS,
     INVERTER_REQUIRED_COLUMNS,
     PANEL_REQUIRED_COLUMNS,
+    localize_validation_message,
 )
+from .types import ValidationIssue
 from .workbench_ui import collect_config_updates, workbench_status_message
 from .workspace_actions import (
     apply_workspace_draft_to_state,
@@ -334,6 +337,14 @@ def _economics_breakdown_formula(row: dict[str, object], *, lang: str) -> str:
 
 
 def _economics_breakdown_rows(rows, *, lang: str) -> list[dict[str, object]]:
+    def _hardware_name_cell(row) -> str:
+        hardware_name = str(row.hardware_name or "").strip()
+        if hardware_name:
+            return hardware_name
+        if str(row.hardware_binding or "").strip() or str(row.value_source or "").strip() == "unavailable":
+            return tr("workspace.admin.economics.preview.placeholder.not_available", lang)
+        return ""
+
     return [
         {
             "source_table": economics_ui_label("source_table", row.source_table, lang=lang),
@@ -341,6 +352,9 @@ def _economics_breakdown_rows(rows, *, lang: str) -> list[dict[str, object]]:
             "stage_or_layer": economics_ui_label("stage" if row.group == "cost" else "layer", row.stage_or_layer, lang=lang),
             "name": row.name,
             "rule": economics_ui_label("basis" if row.group == "cost" else "method", row.rule, lang=lang),
+            "value_source": economics_ui_label("value_source", row.value_source, lang=lang),
+            "hardware_binding": economics_ui_label("hardware_binding", row.hardware_binding, lang=lang),
+            "hardware_name": _hardware_name_cell(row),
             "calculation": _economics_breakdown_formula(
                 {
                     "rule": row.rule,
@@ -369,6 +383,9 @@ def _economics_breakdown_table(table_id: str, rows: list[dict[str, object]], *, 
             "stage_or_layer",
             "name",
             "rule",
+            "value_source",
+            "hardware_binding",
+            "hardware_name",
             "calculation",
             "multiplier",
             "unit_rate_COP",
@@ -443,7 +460,12 @@ def _economics_equipment_name(name: str | None, *, kind: str, lang: str) -> str:
     stripped = str(name or "").strip()
     if stripped:
         return stripped
-    placeholder_key = "workspace.admin.economics.preview.placeholder.no_battery" if kind == "battery" else "workspace.admin.economics.preview.placeholder.no_inverter"
+    if kind == "battery":
+        placeholder_key = "workspace.admin.economics.preview.placeholder.no_battery"
+    elif kind == "panel":
+        placeholder_key = "workspace.admin.economics.preview.placeholder.no_panel"
+    else:
+        placeholder_key = "workspace.admin.economics.preview.placeholder.no_inverter"
     return tr(placeholder_key, lang)
 
 
@@ -495,6 +517,11 @@ def _economics_preview_quantities(preview: EconomicsPreviewResult, result, *, la
                         component_id="economics-preview-quantity-panel-count",
                     ),
                     _economics_quantity_card(
+                        tr("workspace.admin.economics.preview.quantity.panel_name", lang),
+                        _economics_equipment_name(quantities.panel_name, kind="panel", lang=lang),
+                        component_id="economics-preview-quantity-panel-name",
+                    ),
+                    _economics_quantity_card(
                         tr("workspace.admin.economics.preview.quantity.inverter_count", lang),
                         _format_number(quantities.inverter_count, decimals=0),
                         component_id="economics-preview-quantity-inverter-count",
@@ -514,6 +541,29 @@ def _economics_preview_quantities(preview: EconomicsPreviewResult, result, *, la
                         _economics_equipment_name(quantities.battery_name, kind="battery", lang=lang),
                         component_id="economics-preview-quantity-battery-name",
                     ),
+                ],
+            ),
+        ],
+    )
+
+
+def _economics_preview_warning_block(messages: tuple[str, ...], *, lang: str) -> html.Div | None:
+    if not messages:
+        return None
+    return html.Div(
+        id="economics-preview-warnings-shell",
+        className="subpanel economics-preview-warnings-shell",
+        children=[
+            html.H5(tr("workspace.admin.economics.preview.warnings.title", lang), id="economics-preview-warnings-title"),
+            html.Ul(
+                id="economics-preview-warnings-list",
+                className="economics-preview-warnings-list",
+                children=[
+                    html.Li(
+                        localize_validation_message(ValidationIssue("warning", "economics_cost_items", message), lang=lang),
+                        className="status-line economics-preview-warning-item",
+                    )
+                    for message in messages
                 ],
             ),
         ],
@@ -634,12 +684,13 @@ def _economics_breakdown_group(
     return html.Div(id=f"{group_id}-shell", className="profile-table-subsection economics-breakdown-group-shell", children=children)
 
 
-def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
+def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings: tuple[str, ...] = (), lang: str):
     state_block = _economics_preview_state_block(preview, lang=lang)
     if preview.state != PREVIEW_STATE_READY or preview.result is None:
         return [state_block]
 
     result = preview.result
+    warnings_block = _economics_preview_warning_block(live_warnings, lang=lang)
     summary_cards = html.Div(
         id="economics-summary-cards",
         className="kpi-grid",
@@ -727,6 +778,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, lang: str):
     )
     return [
         state_block,
+        *( [warnings_block] if warnings_block is not None else [] ),
         _economics_preview_quantities(preview, result, lang=lang),
         _economics_preview_flow(result, lang=lang),
         summary_cards,
@@ -1062,7 +1114,7 @@ def render_economics_preview(session_payload, economics_cost_rows, economics_pri
         economics_cost_items=normalized_cost_rows,
         economics_price_items=normalized_price_rows,
     )
-    return _render_economics_preview(preview, lang=lang)
+    return _render_economics_preview(preview, live_warnings=economics_preview_warning_messages(preview), lang=lang)
 
 
 @callback(

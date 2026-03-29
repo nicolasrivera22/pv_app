@@ -59,7 +59,7 @@ TABLE_COLUMNS = {
     # Keep workbook import backward-compatible with older panel catalogs that
     # do not yet include price_COP. Canonical CSV persistence does include it.
     "Panel_Catalog": [column for column in PANEL_CATALOG_COLUMNS if column != "price_COP"],
-    "Economics_Cost_Items": ["stage", "name", "basis", "amount_COP", "enabled", "notes"],
+    "Economics_Cost_Items": ["stage", "name", "basis", "amount_COP", "source_mode", "hardware_binding", "enabled", "notes"],
     "Economics_Price_Items": ["layer", "name", "method", "value", "enabled", "notes"],
 }
 TABLE_FILE_MAP = {

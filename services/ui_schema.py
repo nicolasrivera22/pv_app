@@ -908,6 +908,8 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
         "name": TableColumnUiSchema("Partida", "Item", "Nombre visible de la partida de costo.", "Visible cost item name."),
         "basis": TableColumnUiSchema("Base de cálculo", "Cost basis", "Define si el monto se aplica una vez por proyecto o por una unidad física del diseño.", "Defines whether the amount applies once per project or per physical unit in the design."),
         "amount_COP": TableColumnUiSchema("Monto unitario [COP]", "Unit amount [COP]", "Monto en COP o COP por unidad según la base elegida.", "Amount in COP or COP per unit depending on the selected basis.", "currency_cop", 0, "numeric"),
+        "source_mode": TableColumnUiSchema("Fuente del costo", "Cost source", "Define si esta partida usa el monto manual guardado o el precio del hardware seleccionado.", "Defines whether this line uses the stored manual amount or the selected hardware price."),
+        "hardware_binding": TableColumnUiSchema("Vínculo hardware", "Hardware binding", "Define qué hardware alimenta la línea cuando la fuente es Hardware seleccionado.", "Defines which hardware feeds the line when the source is Selected hardware."),
         "enabled": TableColumnUiSchema("Activo", "Enabled", "Permite desactivar temporalmente esta partida sin eliminarla.", "Lets you temporarily disable this line without deleting it."),
         "notes": TableColumnUiSchema("Notas", "Notes", "Notas internas para explicar la fuente o el uso de la partida.", "Internal notes that explain the source or intent of the line."),
     },
@@ -926,6 +928,9 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
         "stage_or_layer": TableColumnUiSchema("Etapa", "Stage", "Etapa de costo o de precio usada en la línea.", "Cost or price stage used in the line."),
         "name": TableColumnUiSchema("Partida", "Item", "Nombre visible de la línea calculada.", "Visible name of the calculated line."),
         "rule": TableColumnUiSchema("Regla aplicada", "Applied rule", "Regla de cálculo aplicada en la línea.", "Calculation rule applied in the line."),
+        "value_source": TableColumnUiSchema("Fuente", "Source", "Indica si la línea usa un monto manual, un precio del hardware seleccionado o si no hay dato disponible.", "Shows whether the line uses a manual amount, a selected hardware price, or no available value."),
+        "hardware_binding": TableColumnUiSchema("Hardware", "Hardware", "Indica qué tipo de hardware alimenta la línea cuando aplica.", "Shows which hardware type feeds the line when applicable."),
+        "hardware_name": TableColumnUiSchema("Equipo usado", "Resolved hardware", "Modelo de hardware que alimentó la línea calculada.", "Hardware model that fed the calculated line."),
         "calculation": TableColumnUiSchema("Cálculo", "Calculation", "Explicación breve de cómo se calculó la línea con sus cantidades y base.", "Short explanation of how the line was calculated with its quantities and base."),
         "multiplier": TableColumnUiSchema("Multiplicador", "Multiplier", "Cantidad usada para multiplicar la tarifa o monto.", "Quantity used to multiply the rate or amount.", "number", 3, "numeric"),
         "unit_rate_COP": TableColumnUiSchema("Monto unitario", "Unit amount", "Monto unitario normalizado usado en la línea. En ajustes porcentuales guarda la tasa decimal.", "Normalized unit amount used in the line. For percentage adjustments it stores the decimal rate.", "number", 3, "numeric"),
@@ -1446,7 +1451,7 @@ def _prettify_column(column_key: str) -> str:
 
 
 _TABLE_DROPDOWN_COLUMNS: dict[str, set[str]] = {
-    "economics_cost_items": {"stage", "basis"},
+    "economics_cost_items": {"stage", "basis", "source_mode", "hardware_binding"},
     "economics_price_items": {"layer", "method"},
 }
 

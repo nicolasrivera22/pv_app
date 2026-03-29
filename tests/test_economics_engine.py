@@ -11,9 +11,13 @@ from services.economics_engine import (
     PREVIEW_STATE_RERUN_REQUIRED,
     EconomicsQuantities,
     calculate_economics_result,
+    economics_preview_warning_messages,
+    resolve_battery_hardware_price,
     resolve_economics_preview,
     resolve_inverter_count,
     resolve_economics_quantities,
+    resolve_inverter_hardware_price,
+    resolve_panel_hardware_price,
     resolve_panel_count,
 )
 
@@ -41,6 +45,7 @@ def test_calculate_economics_result_builds_cost_and_price_chain() -> None:
         battery_kwh=5.0,
         battery_name="",
         inverter_name="INV-A",
+        panel_name="PANEL-A",
     )
     cost_rows = [
         {"stage": "technical", "name": "Panel hardware", "basis": "per_panel", "amount_COP": 100.0, "enabled": True, "notes": ""},
@@ -74,6 +79,80 @@ def test_calculate_economics_result_builds_cost_and_price_chain() -> None:
     assert result.cost_rows[0].line_amount_COP == pytest.approx(2_000.0)
     assert result.price_rows[0].base_amount_COP == pytest.approx(12_000.0)
     assert result.price_rows[0].line_amount_COP == pytest.approx(1_200.0)
+
+
+def test_calculate_economics_result_uses_selected_hardware_rate_without_overwriting_manual_amount() -> None:
+    quantities = EconomicsQuantities(
+        candidate_key="12.000::",
+        kWp=10.0,
+        panel_count=20,
+        inverter_count=1,
+        battery_kwh=5.0,
+        battery_name="BAT-A",
+        inverter_name="INV-A",
+        panel_name="PANEL-A",
+    )
+    cost_rows = [
+        {
+            "stage": "technical",
+            "name": "Panel hardware renamed",
+            "basis": "per_panel",
+            "amount_COP": 123.0,
+            "source_mode": "selected_hardware",
+            "hardware_binding": "panel",
+            "enabled": True,
+            "notes": "",
+        }
+    ]
+
+    result = calculate_economics_result(
+        economics_cost_items=cost_rows,
+        economics_price_items=[],
+        quantities=quantities,
+        hardware_prices={
+            "panel": resolve_panel_hardware_price(
+                {"panel_name": "BASE-600W Standard"},
+                load_example_config().panel_catalog,
+            )
+        },
+    )
+
+    assert result.technical_subtotal_COP == pytest.approx(20 * 620_000.0)
+    assert result.cost_rows[0].unit_rate_COP == pytest.approx(620_000.0)
+    assert result.cost_rows[0].value_source == "selected_panel_catalog"
+    assert result.cost_rows[0].hardware_name == "BASE-600W Standard"
+
+
+def test_resolve_panel_hardware_price_uses_selected_catalog_panel() -> None:
+    bundle = load_example_config()
+
+    resolved = resolve_panel_hardware_price(bundle.config, bundle.panel_catalog)
+
+    assert resolved.value_source == "selected_panel_catalog"
+    assert resolved.hardware_name == bundle.config["panel_name"]
+    assert resolved.unit_rate_COP == pytest.approx(620_000.0)
+
+
+def test_resolve_inverter_hardware_price_prefers_candidate_detail_before_catalog_lookup() -> None:
+    bundle = load_example_config()
+    detail = {"inv_sel": {"inverter": {"name": "INV-10k", "price_COP": 8_888_000.0}}}
+
+    resolved = resolve_inverter_hardware_price(detail, bundle.inverter_catalog)
+
+    assert resolved.value_source == "selected_inverter_catalog"
+    assert resolved.hardware_name == "INV-10k"
+    assert resolved.unit_rate_COP == pytest.approx(8_888_000.0)
+
+
+def test_resolve_battery_hardware_price_falls_back_to_catalog_lookup() -> None:
+    bundle = load_example_config()
+    detail = {"battery_name": "BAT-10", "battery": {"name": "BAT-10", "nom_kWh": 10.0}}
+
+    resolved = resolve_battery_hardware_price(detail, bundle.battery_catalog)
+
+    assert resolved.value_source == "selected_battery_catalog"
+    assert resolved.hardware_name == "BAT-10"
+    assert resolved.unit_rate_COP == pytest.approx(12_500_000.0)
 
 
 def test_resolve_panel_count_uses_n_mod_before_fallback() -> None:
@@ -217,3 +296,36 @@ def test_resolve_economics_quantities_keeps_raw_equipment_names() -> None:
 
     assert quantities.battery_name == "BAT-RAW"
     assert quantities.inverter_name == "INV-RAW"
+
+
+def test_economics_preview_warning_messages_report_selected_hardware_none_without_fallback() -> None:
+    bundle = _fast_bundle()
+    scan_result = resolve_deterministic_scan(bundle, allow_parallel=False)
+    scenario = replace(
+        create_scenario_record("Base", bundle),
+        scan_result=scan_result,
+        selected_candidate_key=scan_result.best_candidate_key,
+        dirty=False,
+    )
+    cost_rows = bundle.economics_cost_items_table.to_dict("records")
+    cost_rows[0] = {
+        **cost_rows[0],
+        "source_mode": "selected_hardware",
+        "hardware_binding": "none",
+        "amount_COP": 777_000.0,
+    }
+
+    preview = resolve_economics_preview(
+        scenario,
+        economics_cost_items=cost_rows,
+        economics_price_items=bundle.economics_price_items_table,
+    )
+
+    assert preview.state == PREVIEW_STATE_READY
+    assert preview.result is not None
+    assert preview.result.cost_rows[0].value_source == "unavailable"
+    assert preview.result.cost_rows[0].unit_rate_COP == pytest.approx(0.0)
+    assert preview.result.cost_rows[0].line_amount_COP == pytest.approx(0.0)
+    assert economics_preview_warning_messages(preview) == (
+        "Economics_Cost_Items fila 1: 'selected_hardware' requiere un 'hardware_binding' distinto de 'none'.",
+    )

@@ -5,6 +5,8 @@ from typing import Any
 
 import pandas as pd
 
+from pv_product.panel_catalog import PANEL_SELECTION_CATALOG, resolve_selected_panel
+
 from .economics_tables import ECONOMICS_COST_COLUMNS, ECONOMICS_PRICE_COLUMNS
 from .types import ScenarioRecord
 
@@ -26,6 +28,7 @@ class EconomicsQuantities:
     battery_kwh: float
     battery_name: str
     inverter_name: str
+    panel_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,9 @@ class EconomicsBreakdownRow:
     base_amount_COP: float | None
     line_amount_COP: float
     notes: str
+    value_source: str = "manual"
+    hardware_binding: str = "none"
+    hardware_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -65,6 +71,14 @@ class EconomicsPreviewResult:
     candidate_source: str | None = None
     message_key: str | None = None
     result: EconomicsResult | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedHardwarePrice:
+    value_source: str
+    hardware_binding: str
+    hardware_name: str
+    unit_rate_COP: float
 
 
 def _as_frame(
@@ -102,6 +116,22 @@ def _positive_float(value: Any) -> float:
     return numeric if numeric > 0 else 0.0
 
 
+def _positive_price(value: Any) -> float | None:
+    numeric = _positive_float(value)
+    return numeric if numeric > 0 else None
+
+
+def _catalog_price_by_name(catalog: pd.DataFrame, name: Any) -> float | None:
+    raw_name = str(name or "").strip()
+    if not raw_name or catalog.empty or "name" not in catalog.columns:
+        return None
+    names = catalog["name"].astype(str).str.strip()
+    matches = catalog.loc[names == raw_name]
+    if matches.empty or "price_COP" not in matches.columns:
+        return None
+    return _positive_price(matches.iloc[0].get("price_COP"))
+
+
 def resolve_panel_count(detail: dict[str, Any], config: dict[str, Any]) -> int:
     inv_sel = detail.get("inv_sel") or {}
     explicit = _positive_int(inv_sel.get("N_mod"))
@@ -135,9 +165,15 @@ def resolve_economics_quantities(
     candidate_key: str,
     detail: dict[str, Any],
     config: dict[str, Any],
+    panel_catalog: pd.DataFrame | None = None,
 ) -> EconomicsQuantities:
     inverter = ((detail.get("inv_sel") or {}).get("inverter") or {})
     battery = detail.get("battery") or {}
+    panel_name = ""
+    if panel_catalog is not None:
+        panel_selection = resolve_selected_panel(config, panel_catalog)
+        if panel_selection.selection_mode == PANEL_SELECTION_CATALOG and panel_selection.selected_panel_name:
+            panel_name = str(panel_selection.selected_panel_name)
     return EconomicsQuantities(
         candidate_key=candidate_key,
         kWp=float(detail.get("kWp", 0.0) or 0.0),
@@ -146,6 +182,86 @@ def resolve_economics_quantities(
         battery_kwh=resolve_battery_kwh(detail),
         battery_name=str(battery.get("name") or detail.get("battery_name") or ""),
         inverter_name=str(inverter.get("name", "") or ""),
+        panel_name=panel_name,
+    )
+
+
+def resolve_panel_hardware_price(config: dict[str, Any], panel_catalog: pd.DataFrame) -> ResolvedHardwarePrice:
+    selection = resolve_selected_panel(config, panel_catalog)
+    if selection.selection_mode != PANEL_SELECTION_CATALOG or not selection.selected_panel_name:
+        return ResolvedHardwarePrice(
+            value_source="unavailable",
+            hardware_binding="panel",
+            hardware_name="",
+            unit_rate_COP=0.0,
+        )
+    panel_row = selection.panel_row or {}
+    unit_rate = _positive_price(panel_row.get("price_COP"))
+    return ResolvedHardwarePrice(
+        value_source="selected_panel_catalog" if unit_rate is not None else "unavailable",
+        hardware_binding="panel",
+        hardware_name=str(selection.selected_panel_name or ""),
+        unit_rate_COP=float(unit_rate or 0.0),
+    )
+
+
+def resolve_inverter_hardware_price(detail: dict[str, Any], inverter_catalog: pd.DataFrame) -> ResolvedHardwarePrice:
+    inverter = ((detail.get("inv_sel") or {}).get("inverter") or {})
+    hardware_name = str(inverter.get("name") or "").strip()
+    unit_rate = _positive_price(inverter.get("price_COP"))
+    if unit_rate is None and hardware_name:
+        unit_rate = _catalog_price_by_name(inverter_catalog, hardware_name)
+    return ResolvedHardwarePrice(
+        value_source="selected_inverter_catalog" if unit_rate is not None else "unavailable",
+        hardware_binding="inverter",
+        hardware_name=hardware_name,
+        unit_rate_COP=float(unit_rate or 0.0),
+    )
+
+
+def resolve_battery_hardware_price(detail: dict[str, Any], battery_catalog: pd.DataFrame) -> ResolvedHardwarePrice:
+    battery = detail.get("battery") or {}
+    hardware_name = str(battery.get("name") or detail.get("battery_name") or "").strip()
+    unit_rate = _positive_price(battery.get("price_COP"))
+    if unit_rate is None and hardware_name:
+        unit_rate = _catalog_price_by_name(battery_catalog, hardware_name)
+    return ResolvedHardwarePrice(
+        value_source="selected_battery_catalog" if unit_rate is not None else "unavailable",
+        hardware_binding="battery",
+        hardware_name=hardware_name,
+        unit_rate_COP=float(unit_rate or 0.0),
+    )
+
+
+def _resolve_cost_line_rate(
+    *,
+    source_mode: str,
+    hardware_binding: str,
+    manual_amount: float,
+    hardware_prices: dict[str, ResolvedHardwarePrice] | None,
+) -> ResolvedHardwarePrice:
+    if source_mode != "selected_hardware":
+        return ResolvedHardwarePrice(
+            value_source="manual",
+            hardware_binding=hardware_binding or "none",
+            hardware_name="",
+            unit_rate_COP=float(manual_amount),
+        )
+    if not hardware_prices:
+        return ResolvedHardwarePrice(
+            value_source="unavailable",
+            hardware_binding=hardware_binding or "none",
+            hardware_name="",
+            unit_rate_COP=0.0,
+        )
+    return hardware_prices.get(
+        hardware_binding or "none",
+        ResolvedHardwarePrice(
+            value_source="unavailable",
+            hardware_binding=hardware_binding or "none",
+            hardware_name="",
+            unit_rate_COP=0.0,
+        ),
     )
 
 
@@ -178,6 +294,7 @@ def calculate_economics_result(
     economics_cost_items: pd.DataFrame | list[dict[str, Any]] | None,
     economics_price_items: pd.DataFrame | list[dict[str, Any]] | None,
     quantities: EconomicsQuantities,
+    hardware_prices: dict[str, ResolvedHardwarePrice] | None = None,
 ) -> EconomicsResult:
     cost_frame = _as_frame(economics_cost_items, columns=ECONOMICS_COST_COLUMNS)
     price_frame = _as_frame(economics_price_items, columns=ECONOMICS_PRICE_COLUMNS)
@@ -191,8 +308,16 @@ def calculate_economics_result(
         stage = str(row.get("stage") or "").strip()
         basis = str(row.get("basis") or "").strip()
         amount = float(row.get("amount_COP", 0.0) or 0.0)
+        source_mode = str(row.get("source_mode") or "manual").strip() or "manual"
+        hardware_binding = str(row.get("hardware_binding") or "none").strip() or "none"
+        resolved_rate = _resolve_cost_line_rate(
+            source_mode=source_mode,
+            hardware_binding=hardware_binding,
+            manual_amount=amount,
+            hardware_prices=hardware_prices,
+        )
         multiplier = _cost_multiplier(basis, quantities)
-        line_amount = amount * multiplier
+        line_amount = resolved_rate.unit_rate_COP * multiplier
         if stage == "technical":
             technical_subtotal += line_amount
         elif stage == "installed":
@@ -206,10 +331,13 @@ def calculate_economics_result(
                 name=str(row.get("name") or ""),
                 rule=basis,
                 multiplier=float(multiplier),
-                unit_rate_COP=float(amount),
+                unit_rate_COP=float(resolved_rate.unit_rate_COP),
                 base_amount_COP=None,
                 line_amount_COP=float(line_amount),
                 notes=str(row.get("notes") or ""),
+                value_source=resolved_rate.value_source,
+                hardware_binding=resolved_rate.hardware_binding,
+                hardware_name=resolved_rate.hardware_name,
             )
         )
 
@@ -254,6 +382,9 @@ def calculate_economics_result(
                 base_amount_COP=base_amount,
                 line_amount_COP=float(line_amount),
                 notes=str(row.get("notes") or ""),
+                value_source="",
+                hardware_binding="",
+                hardware_name="",
             )
         )
         if layer == "commercial":
@@ -323,11 +454,24 @@ def resolve_economics_preview(
         candidate_key=candidate_key,
         detail=detail,
         config=scenario.config_bundle.config,
+        panel_catalog=scenario.config_bundle.panel_catalog,
     )
+    hardware_prices = {
+        "none": ResolvedHardwarePrice(
+            value_source="unavailable",
+            hardware_binding="none",
+            hardware_name="",
+            unit_rate_COP=0.0,
+        ),
+        "panel": resolve_panel_hardware_price(scenario.config_bundle.config, scenario.config_bundle.panel_catalog),
+        "inverter": resolve_inverter_hardware_price(detail, scenario.config_bundle.inverter_catalog),
+        "battery": resolve_battery_hardware_price(detail, scenario.config_bundle.battery_catalog),
+    }
     result = calculate_economics_result(
         economics_cost_items=economics_cost_items,
         economics_price_items=economics_price_items,
         quantities=quantities,
+        hardware_prices=hardware_prices,
     )
     return EconomicsPreviewResult(
         state=PREVIEW_STATE_READY,
@@ -336,3 +480,29 @@ def resolve_economics_preview(
         message_key="workspace.admin.economics.preview.state.ready",
         result=result,
     )
+
+
+def economics_preview_warning_messages(preview: EconomicsPreviewResult) -> tuple[str, ...]:
+    if preview.result is None:
+        return ()
+    warnings: list[str] = []
+    for row in preview.result.cost_rows:
+        if row.value_source != "unavailable":
+            continue
+        if row.hardware_binding == "none":
+            warnings.append(
+                f"Economics_Cost_Items fila {row.source_row}: 'selected_hardware' requiere un 'hardware_binding' distinto de 'none'."
+            )
+            continue
+        if str(row.hardware_name or "").strip():
+            warnings.append(
+                f"Economics_Cost_Items fila {row.source_row}: falta 'price_COP' para el hardware seleccionado '{row.hardware_name}'."
+            )
+            continue
+        warnings.append(
+            f"Economics_Cost_Items fila {row.source_row}: no se pudo resolver el hardware seleccionado para '{row.hardware_binding}'."
+        )
+    deduped: dict[str, None] = {}
+    for message in warnings:
+        deduped[message] = None
+    return tuple(deduped)

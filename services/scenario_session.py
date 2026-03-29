@@ -7,8 +7,9 @@ from uuid import uuid4
 
 from .config_metadata import update_config_table_values
 from .cache import fingerprint_deterministic_input
+from .economics_engine import economics_preview_warning_messages, resolve_economics_preview
 from .scenario_runner import resolve_deterministic_scan
-from .types import LoadedConfigBundle, ScenarioRecord, ScenarioSessionState
+from .types import LoadedConfigBundle, ScenarioRecord, ScenarioSessionState, ValidationIssue
 from .validation import refresh_bundle_issues
 
 
@@ -158,18 +159,36 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
     scenario: ScenarioRecord | None = state.get_scenario(scenario_id)
     if scenario is None:
         raise KeyError(f"No existe el escenario '{scenario_id}'.")
-    refreshed_bundle = refresh_bundle_issues(bundle)
     preserve_scan = False
     next_fingerprint: str | None = None
     if scenario.scan_result is not None and not scenario.dirty:
-        next_fingerprint = fingerprint_deterministic_input(refreshed_bundle)
+        next_fingerprint = fingerprint_deterministic_input(bundle)
         current_fingerprint = scenario.scan_fingerprint or fingerprint_deterministic_input(scenario.config_bundle)
         preserve_scan = next_fingerprint == current_fingerprint
+    persisted_extra_issues: list[ValidationIssue] = []
     if preserve_scan and scenario.scan_result is not None:
         if scenario.selected_candidate_key in scenario.scan_result.candidate_details:
             selected_candidate_key = scenario.selected_candidate_key
         else:
             selected_candidate_key = scenario.scan_result.best_candidate_key
+        preview = resolve_economics_preview(
+            replace(
+                scenario,
+                config_bundle=bundle,
+                scan_result=scenario.scan_result,
+                scan_fingerprint=next_fingerprint or scenario.scan_fingerprint,
+                selected_candidate_key=selected_candidate_key,
+                dirty=False,
+            ),
+            economics_cost_items=bundle.economics_cost_items_table,
+            economics_price_items=bundle.economics_price_items_table,
+        )
+        persisted_extra_issues = [
+            ValidationIssue("warning", "economics_cost_items", message)
+            for message in economics_preview_warning_messages(preview)
+        ]
+    refreshed_bundle = refresh_bundle_issues(bundle, extra_issues=tuple(persisted_extra_issues))
+    if preserve_scan and scenario.scan_result is not None:
         updated = replace(
             scenario,
             config_bundle=refreshed_bundle,
@@ -246,10 +265,28 @@ def _apply_scan_result(
         selected_candidate_key = scenario.selected_candidate_key
     else:
         selected_candidate_key = scan_result.best_candidate_key
+    preview = resolve_economics_preview(
+        replace(
+            scenario,
+            scan_result=scan_result,
+            selected_candidate_key=selected_candidate_key,
+            dirty=False,
+        ),
+        economics_cost_items=scenario.config_bundle.economics_cost_items_table,
+        economics_price_items=scenario.config_bundle.economics_price_items_table,
+    )
+    refreshed_bundle = refresh_bundle_issues(
+        scenario.config_bundle,
+        extra_issues=tuple(
+            ValidationIssue("warning", "economics_cost_items", message)
+            for message in economics_preview_warning_messages(preview)
+        ),
+    )
     updated = replace(
         scenario,
+        config_bundle=refreshed_bundle,
         scan_result=scan_result,
-        scan_fingerprint=fingerprint_deterministic_input(scenario.config_bundle),
+        scan_fingerprint=fingerprint_deterministic_input(refreshed_bundle),
         selected_candidate_key=selected_candidate_key,
         dirty=False,
         last_run_at=datetime.now().isoformat(timespec="seconds"),
