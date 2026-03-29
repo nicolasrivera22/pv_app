@@ -13,7 +13,6 @@ import plotly.graph_objects as go
 from components.admin_view import build_admin_access_shell
 from components.assumption_editor import render_assumption_sections
 from components.ui_mode_gate import render_ui_mode_gate
-from .config_metadata import update_config_table_values
 from .admin_access import (
     admin_pin_configured,
     grant_admin_session_access,
@@ -39,8 +38,9 @@ from .i18n import tr
 from .profile_charts import build_profile_chart
 from .project_io import save_project
 from .scenario_session import (
-    apply_runtime_price_bridge,
-    build_runtime_price_bridge_record,
+    PreparedEconomicsRuntimePriceBridge,
+    apply_prepared_economics_runtime_price_bridge,
+    prepare_economics_runtime_price_bridge,
     resolve_runtime_price_bridge_state,
 )
 from .session_state import commit_client_session, resolve_client_session
@@ -52,7 +52,7 @@ from .validation import (
     localize_validation_message,
 )
 from .types import ValidationIssue
-from .workbench_ui import collect_config_updates, frame_from_rows, workbench_status_message
+from .workbench_ui import collect_config_updates, workbench_status_message
 from .workspace_actions import (
     apply_workspace_draft_to_state,
     resolve_workspace_bundle_for_display,
@@ -242,6 +242,7 @@ def _resolve_economics_bridge_context(
     price_kwp_others_rows,
     economics_cost_rows,
     economics_price_rows,
+    applied_at: str | None = None,
 ):
     changes = _admin_current_changes(
         active,
@@ -257,26 +258,26 @@ def _resolve_economics_bridge_context(
         economics_cost_rows=economics_cost_rows,
         economics_price_rows=economics_price_rows,
     )
-    preview = resolve_economics_preview(
+    prepared = prepare_economics_runtime_price_bridge(
         active,
         economics_cost_items=changes["normalized_cost_rows"],
         economics_price_items=changes["normalized_price_rows"],
+        applied_at=applied_at,
     )
-    live_warnings = economics_preview_warning_messages(preview)
     if changes["unhydrated_tables"]:
         blocker_key = "workspace.admin.economics.bridge.cta.loading"
     elif _has_non_economics_pending_changes(changes):
         blocker_key = "workspace.admin.economics.bridge.cta.blocked_non_economics"
-    elif preview.state != PREVIEW_STATE_READY or preview.result is None:
-        blocker_key = f"workspace.admin.economics.bridge.cta.state.{preview.state}"
-    elif live_warnings:
+    elif prepared.blocker_key == "warnings":
         blocker_key = "workspace.admin.economics.bridge.cta.blocked_warnings"
+    elif not prepared.applied:
+        blocker_key = f"workspace.admin.economics.bridge.cta.state.{prepared.preview_state}"
     else:
         blocker_key = None
     return {
         **changes,
-        "preview": preview,
-        "live_warnings": live_warnings,
+        "prepared": prepared,
+        "live_warnings": prepared.warning_messages,
         "eligible": blocker_key is None,
         "blocker_key": blocker_key,
     }
@@ -286,44 +287,13 @@ def _economics_bridge_cta_text(bridge_context: dict[str, object], *, lang: str) 
     blocker_key = bridge_context.get("blocker_key")
     if blocker_key:
         return tr(str(blocker_key), lang)
-    preview = bridge_context.get("preview")
-    if not isinstance(preview, EconomicsPreviewResult) or preview.result is None:
+    prepared = bridge_context.get("prepared")
+    if not isinstance(prepared, PreparedEconomicsRuntimePriceBridge) or prepared.final_price_COP is None:
         return tr("workspace.admin.economics.bridge.cta.loading", lang)
     return tr(
         "workspace.admin.economics.bridge.cta.ready",
         lang,
-        final_price=_format_cop(preview.result.final_price_COP, lang),
-    )
-
-
-def _build_runtime_price_bridge_bundle(
-    active,
-    *,
-    final_price_COP: float,
-    normalized_cost_rows: list[dict[str, object]],
-    normalized_price_rows: list[dict[str, object]],
-):
-    next_config = dict(active.config_bundle.config)
-    next_config.update(
-        {
-            "pricing_mode": "total",
-            "price_total_COP": float(final_price_COP),
-            "include_hw_in_price": False,
-            "price_others_total": 0.0,
-        }
-    )
-    return replace(
-        active.config_bundle,
-        config=next_config,
-        config_table=update_config_table_values(active.config_bundle.config_table, next_config),
-        economics_cost_items_table=frame_from_rows(
-            normalized_cost_rows,
-            list(active.config_bundle.economics_cost_items_table.columns),
-        ),
-        economics_price_items_table=frame_from_rows(
-            normalized_price_rows,
-            list(active.config_bundle.economics_price_items_table.columns),
-        ),
+        final_price=_format_cop(prepared.final_price_COP, lang),
     )
 
 
@@ -494,6 +464,8 @@ def _economics_summary_card(label: str, value: str, *, emphasized: bool = False)
 
 def _economics_breakdown_formula(row: dict[str, object], *, lang: str) -> str:
     rule = str(row.get("rule") or "")
+    value_source = str(row.get("value_source") or "")
+    hardware_binding = str(row.get("hardware_binding") or "")
     multiplier = float(row.get("multiplier", 0.0) or 0.0)
     unit_rate = float(row.get("unit_rate_COP", 0.0) or 0.0)
     base_amount = row.get("base_amount_COP")
@@ -503,19 +475,29 @@ def _economics_breakdown_formula(row: dict[str, object], *, lang: str) -> str:
             "per_panel": "panels",
             "per_inverter": "inverter(s)",
             "per_battery_kwh": "battery kWh",
+            "selected_battery_catalog": "battery",
+            "unavailable_battery": "battery",
         },
         "es": {
             "per_kwp": "kWp",
             "per_panel": "paneles",
             "per_inverter": "inversor(es)",
             "per_battery_kwh": "kWh batería",
+            "selected_battery_catalog": "batería",
+            "unavailable_battery": "batería",
         },
     }
     if rule == "markup_pct":
         return f"{_format_percent(unit_rate)} x {_format_cop(None if base_amount is None else float(base_amount), lang)}"
     if rule == "fixed_project":
         return f"1 x {_format_cop(unit_rate, lang)}"
-    unit = quantity_labels.get(lang, quantity_labels["es"]).get(rule, "")
+    if hardware_binding == "battery" and value_source in {"selected_battery_catalog", "unavailable"}:
+        unit = quantity_labels.get(lang, quantity_labels["es"]).get(
+            "selected_battery_catalog" if value_source == "selected_battery_catalog" else "unavailable_battery",
+            "",
+        )
+    else:
+        unit = quantity_labels.get(lang, quantity_labels["es"]).get(rule, "")
     quantity = _format_number(multiplier, decimals=3)
     unit_suffix = f" {unit}" if unit else ""
     return f"{quantity}{unit_suffix} x {_format_cop(unit_rate, lang)}"
@@ -543,6 +525,8 @@ def _economics_breakdown_rows(rows, *, lang: str) -> list[dict[str, object]]:
             "calculation": _economics_breakdown_formula(
                 {
                     "rule": row.rule,
+                    "value_source": row.value_source,
+                    "hardware_binding": row.hardware_binding,
                     "multiplier": row.multiplier,
                     "unit_rate_COP": row.unit_rate_COP,
                     "base_amount_COP": row.base_amount_COP,
@@ -1400,6 +1384,7 @@ def sync_economics_bridge_cta(
         price_kwp_others_rows=price_kwp_others_rows,
         economics_cost_rows=economics_cost_rows,
         economics_price_rows=economics_price_rows,
+        applied_at=None,
     )
     return (not bool(bridge_context["eligible"])), _economics_bridge_cta_text(bridge_context, lang=lang)
 
@@ -1483,31 +1468,22 @@ def apply_economics_runtime_price_bridge(
             price_kwp_others_rows=price_kwp_others_rows,
             economics_cost_rows=economics_cost_rows,
             economics_price_rows=economics_price_rows,
+            applied_at=datetime.now().isoformat(timespec="seconds"),
         )
         if not bridge_context["eligible"]:
             client_state = commit_client_session(client_state, state, bump_revision=False)
             return client_state.to_payload(), _economics_bridge_cta_text(bridge_context, lang=lang)
-        preview = bridge_context["preview"]
-        assert isinstance(preview, EconomicsPreviewResult)
-        assert preview.result is not None
-        bridge_bundle = _build_runtime_price_bridge_bundle(
-            active,
-            final_price_COP=preview.result.final_price_COP,
-            normalized_cost_rows=bridge_context["normalized_cost_rows"],
-            normalized_price_rows=bridge_context["normalized_price_rows"],
-        )
-        bridge_record = build_runtime_price_bridge_record(
-            candidate_key=preview.candidate_key or preview.result.quantities.candidate_key,
-            final_price_COP=preview.result.final_price_COP,
-            resolved_preview_state=preview.state,
-            applied_at=datetime.now().isoformat(timespec="seconds"),
-        )
-        state = apply_runtime_price_bridge(
+        prepared = bridge_context["prepared"]
+        assert isinstance(prepared, PreparedEconomicsRuntimePriceBridge)
+        state = apply_prepared_economics_runtime_price_bridge(
             state,
             active.scenario_id,
-            bundle=bridge_bundle,
-            bridge_record=bridge_record,
+            prepared,
+            mark_project_dirty=True,
         )
+        updated_active = state.get_scenario(active.scenario_id)
+        bridge_record = None if updated_active is None else updated_active.runtime_price_bridge
+        assert bridge_record is not None
         saved = False
         if _project_is_bound(state):
             state = save_project(state, project_name=_resolved_project_name(project_name_value, state), language=lang)

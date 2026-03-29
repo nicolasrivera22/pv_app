@@ -1,13 +1,23 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import replace
+import hashlib
+import json
+from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import Any
 from uuid import uuid4
+
+import pandas as pd
 
 from .config_metadata import update_config_table_values
 from .cache import fingerprint_deterministic_input
-from .economics_engine import economics_preview_warning_messages, resolve_economics_preview
+from .economics_engine import (
+    PREVIEW_STATE_CANDIDATE_MISSING,
+    PREVIEW_STATE_READY,
+    economics_preview_warning_messages,
+    resolve_economics_preview,
+)
+from .economics_tables import normalize_economics_cost_items_frame, normalize_economics_price_items_frame
 from .scenario_runner import resolve_deterministic_scan
 from .types import LoadedConfigBundle, RuntimePriceBridgeRecord, ScenarioRecord, ScenarioSessionState, ValidationIssue
 from .validation import refresh_bundle_issues
@@ -74,6 +84,103 @@ def _normalize_bridge_compare_value(value: object) -> object:
     return value
 
 
+@dataclass(frozen=True)
+class PreparedEconomicsRuntimePriceBridge:
+    applied: bool
+    candidate_key: str | None
+    preview_state: str
+    blocker_key: str | None = None
+    warning_messages: tuple[str, ...] = ()
+    final_price_COP: float | None = None
+    economics_signature: str | None = None
+    bundle: LoadedConfigBundle | None = None
+    bridge_record: RuntimePriceBridgeRecord | None = None
+
+
+def _json_default(value: Any) -> Any:
+    if hasattr(value, "item"):
+        return value.item()
+    raise TypeError(f"Unsupported value for bridge signature serialization: {type(value)!r}")
+
+
+def _frame_signature_payload(frame: pd.DataFrame) -> dict[str, object]:
+    sanitized = frame.copy()
+    sanitized.columns = [str(column) for column in sanitized.columns]
+    sanitized = sanitized.where(pd.notna(sanitized), None)
+    return {
+        "columns": list(sanitized.columns),
+        "records": sanitized.to_dict(orient="records"),
+    }
+
+
+def _normalized_economics_tables(
+    scenario: ScenarioRecord,
+    *,
+    economics_cost_items: pd.DataFrame | list[dict[str, Any]] | None = None,
+    economics_price_items: pd.DataFrame | list[dict[str, Any]] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    cost_source = scenario.config_bundle.economics_cost_items_table if economics_cost_items is None else economics_cost_items
+    price_source = scenario.config_bundle.economics_price_items_table if economics_price_items is None else economics_price_items
+    return (
+        normalize_economics_cost_items_frame(cost_source),
+        normalize_economics_price_items_frame(price_source),
+    )
+
+
+def compute_economics_runtime_signature(
+    economics_cost_items: pd.DataFrame | list[dict[str, Any]] | None,
+    economics_price_items: pd.DataFrame | list[dict[str, Any]] | None,
+) -> str:
+    cost_frame = normalize_economics_cost_items_frame(economics_cost_items)
+    price_frame = normalize_economics_price_items_frame(economics_price_items)
+    payload = {
+        "economics_cost_items": _frame_signature_payload(cost_frame),
+        "economics_price_items": _frame_signature_payload(price_frame),
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=_json_default,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def resolve_runtime_bridge_candidate_key(scenario: ScenarioRecord) -> str | None:
+    if scenario.scan_result is not None:
+        if scenario.selected_candidate_key in scenario.scan_result.candidate_details:
+            return str(scenario.selected_candidate_key)
+        if scenario.scan_result.best_candidate_key in scenario.scan_result.candidate_details:
+            return str(scenario.scan_result.best_candidate_key)
+        return None
+    if scenario.selected_candidate_key in (None, ""):
+        return None
+    return str(scenario.selected_candidate_key)
+
+
+BRIDGE_RUNTIME_CONFIG_FIELDS = (
+    "pricing_mode",
+    "price_total_COP",
+    "include_hw_in_price",
+    "price_others_total",
+)
+
+
+def _bridge_aware_scan_fingerprint(
+    bundle: LoadedConfigBundle,
+    record: RuntimePriceBridgeRecord | None,
+) -> str:
+    if record is None or record.stale or not runtime_price_bridge_matches_config(record, bundle.config):
+        return fingerprint_deterministic_input(bundle)
+    fingerprint_config = {
+        key: value
+        for key, value in bundle.config.items()
+        if key not in BRIDGE_RUNTIME_CONFIG_FIELDS
+    }
+    return fingerprint_deterministic_input(replace(bundle, config=fingerprint_config))
+
+
 def runtime_price_bridge_matches_config(record: RuntimePriceBridgeRecord | None, config: dict[str, object]) -> bool:
     if record is None:
         return False
@@ -91,13 +198,33 @@ def runtime_price_bridge_matches_config(record: RuntimePriceBridgeRecord | None,
     )
 
 
+def runtime_price_bridge_matches_scenario(record: RuntimePriceBridgeRecord | None, scenario: ScenarioRecord) -> bool:
+    if not runtime_price_bridge_matches_config(record, scenario.config_bundle.config):
+        return False
+    current_candidate_key = resolve_runtime_bridge_candidate_key(scenario)
+    current_economics_signature = compute_economics_runtime_signature(
+        scenario.config_bundle.economics_cost_items_table,
+        scenario.config_bundle.economics_price_items_table,
+    )
+    return all(
+        (
+            _normalize_bridge_compare_value(record.candidate_key)
+            == _normalize_bridge_compare_value(current_candidate_key),
+            _normalize_bridge_compare_value(record.applied_scan_fingerprint)
+            == _normalize_bridge_compare_value(scenario.scan_fingerprint),
+            _normalize_bridge_compare_value(record.applied_economics_signature)
+            == _normalize_bridge_compare_value(current_economics_signature),
+        )
+    )
+
+
 def invalidate_runtime_price_bridge_if_needed(
     record: RuntimePriceBridgeRecord | None,
-    config: dict[str, object],
+    scenario: ScenarioRecord,
 ) -> RuntimePriceBridgeRecord | None:
     if record is None or record.stale:
         return record
-    if runtime_price_bridge_matches_config(record, config):
+    if runtime_price_bridge_matches_scenario(record, scenario):
         return record
     return replace(record, stale=True)
 
@@ -106,7 +233,7 @@ def resolve_runtime_price_bridge_state(scenario: ScenarioRecord) -> str:
     record = scenario.runtime_price_bridge
     if record is None:
         return "none"
-    if record.stale or not runtime_price_bridge_matches_config(record, scenario.config_bundle.config):
+    if record.stale or not runtime_price_bridge_matches_scenario(record, scenario):
         return "stale"
     return "active"
 
@@ -116,6 +243,8 @@ def build_runtime_price_bridge_record(
     candidate_key: str,
     final_price_COP: float,
     resolved_preview_state: str,
+    applied_scan_fingerprint: str | None = None,
+    applied_economics_signature: str | None = None,
     applied_at: str | None = None,
 ) -> RuntimePriceBridgeRecord:
     resolved_total = float(final_price_COP)
@@ -129,8 +258,187 @@ def build_runtime_price_bridge_record(
         applied_price_total_COP=resolved_total,
         applied_include_hw_in_price=False,
         applied_price_others_total=0.0,
+        applied_scan_fingerprint=applied_scan_fingerprint,
+        applied_economics_signature=applied_economics_signature,
         stale=False,
     )
+
+
+def prepare_economics_runtime_price_bridge(
+    scenario: ScenarioRecord,
+    *,
+    candidate_key: str | None = None,
+    economics_cost_items: pd.DataFrame | list[dict[str, Any]] | None = None,
+    economics_price_items: pd.DataFrame | list[dict[str, Any]] | None = None,
+    applied_at: str | None = None,
+) -> PreparedEconomicsRuntimePriceBridge:
+    normalized_cost_items, normalized_price_items = _normalized_economics_tables(
+        scenario,
+        economics_cost_items=economics_cost_items,
+        economics_price_items=economics_price_items,
+    )
+    economics_signature = compute_economics_runtime_signature(normalized_cost_items, normalized_price_items)
+
+    if scenario.scan_result is None:
+        return PreparedEconomicsRuntimePriceBridge(
+            applied=False,
+            candidate_key=resolve_runtime_bridge_candidate_key(scenario),
+            preview_state="no_scan",
+            blocker_key="preview_state:no_scan",
+            economics_signature=economics_signature,
+        )
+
+    resolved_candidate_key: str | None
+    if candidate_key not in (None, ""):
+        explicit_candidate_key = str(candidate_key)
+        if explicit_candidate_key not in scenario.scan_result.candidate_details:
+            return PreparedEconomicsRuntimePriceBridge(
+                applied=False,
+                candidate_key=explicit_candidate_key,
+                preview_state=PREVIEW_STATE_CANDIDATE_MISSING,
+                blocker_key=f"preview_state:{PREVIEW_STATE_CANDIDATE_MISSING}",
+                economics_signature=economics_signature,
+            )
+        resolved_candidate_key = explicit_candidate_key
+    else:
+        resolved_candidate_key = resolve_runtime_bridge_candidate_key(scenario)
+
+    preview_scenario = scenario
+    if resolved_candidate_key is not None and resolved_candidate_key != scenario.selected_candidate_key:
+        preview_scenario = replace(scenario, selected_candidate_key=resolved_candidate_key)
+
+    preview = resolve_economics_preview(
+        preview_scenario,
+        economics_cost_items=normalized_cost_items,
+        economics_price_items=normalized_price_items,
+    )
+    warning_messages = economics_preview_warning_messages(preview)
+    final_price_COP = None if preview.result is None else float(preview.result.final_price_COP)
+
+    if preview.state != PREVIEW_STATE_READY or preview.result is None:
+        return PreparedEconomicsRuntimePriceBridge(
+            applied=False,
+            candidate_key=preview.candidate_key or resolved_candidate_key,
+            preview_state=preview.state,
+            blocker_key=f"preview_state:{preview.state}",
+            warning_messages=warning_messages,
+            final_price_COP=final_price_COP,
+            economics_signature=economics_signature,
+        )
+    if warning_messages:
+        return PreparedEconomicsRuntimePriceBridge(
+            applied=False,
+            candidate_key=preview.candidate_key or resolved_candidate_key,
+            preview_state=preview.state,
+            blocker_key="warnings",
+            warning_messages=warning_messages,
+            final_price_COP=final_price_COP,
+            economics_signature=economics_signature,
+        )
+
+    next_config = dict(scenario.config_bundle.config)
+    next_config.update(
+        {
+            "pricing_mode": "total",
+            "price_total_COP": final_price_COP,
+            "include_hw_in_price": False,
+            "price_others_total": 0.0,
+        }
+    )
+    prepared_bundle = replace(
+        scenario.config_bundle,
+        config=next_config,
+        config_table=update_config_table_values(scenario.config_bundle.config_table, next_config),
+        economics_cost_items_table=normalized_cost_items,
+        economics_price_items_table=normalized_price_items,
+    )
+    bridge_record = build_runtime_price_bridge_record(
+        candidate_key=preview.candidate_key or resolved_candidate_key or preview.result.quantities.candidate_key,
+        final_price_COP=final_price_COP,
+        resolved_preview_state=preview.state,
+        applied_scan_fingerprint=scenario.scan_fingerprint,
+        applied_economics_signature=economics_signature,
+        applied_at=applied_at,
+    )
+    return PreparedEconomicsRuntimePriceBridge(
+        applied=True,
+        candidate_key=bridge_record.candidate_key,
+        preview_state=preview.state,
+        warning_messages=warning_messages,
+        final_price_COP=final_price_COP,
+        economics_signature=economics_signature,
+        bundle=prepared_bundle,
+        bridge_record=bridge_record,
+    )
+
+
+def apply_prepared_economics_runtime_price_bridge(
+    state: ScenarioSessionState,
+    scenario_id: str,
+    prepared: PreparedEconomicsRuntimePriceBridge,
+    *,
+    mark_project_dirty: bool,
+) -> ScenarioSessionState:
+    if not prepared.applied or prepared.bundle is None or prepared.bridge_record is None:
+        return state
+    scenario = state.get_scenario(scenario_id)
+    if scenario is None:
+        raise KeyError(f"No existe el escenario '{scenario_id}'.")
+
+    refreshed_bundle = refresh_bundle_issues(prepared.bundle)
+    final_economics_signature = compute_economics_runtime_signature(
+        refreshed_bundle.economics_cost_items_table,
+        refreshed_bundle.economics_price_items_table,
+    )
+    final_bridge_record = replace(
+        prepared.bridge_record,
+        applied_economics_signature=final_economics_signature,
+        stale=False,
+    )
+    updated = replace(
+        scenario,
+        config_bundle=refreshed_bundle,
+        source_name=refreshed_bundle.source_name,
+        runtime_price_bridge=final_bridge_record,
+    )
+    next_state = _replace_scenario(state, updated)
+    if mark_project_dirty:
+        next_state = _mark_project_dirty(next_state, dirty=True)
+    return next_state
+
+
+def sync_selected_candidate_runtime_price(
+    state: ScenarioSessionState,
+    scenario_id: str,
+) -> tuple[ScenarioSessionState, PreparedEconomicsRuntimePriceBridge]:
+    scenario = state.get_scenario(scenario_id)
+    if scenario is None:
+        raise KeyError(f"No existe el escenario '{scenario_id}'.")
+    prepared = prepare_economics_runtime_price_bridge(scenario)
+    if prepared.applied:
+        return (
+            apply_prepared_economics_runtime_price_bridge(
+                state,
+                scenario_id,
+                prepared,
+                mark_project_dirty=False,
+            ),
+            prepared,
+        )
+
+    stale_record = invalidate_runtime_price_bridge_if_needed(scenario.runtime_price_bridge, scenario)
+    if stale_record is scenario.runtime_price_bridge:
+        return state, prepared
+    return _replace_scenario(state, replace(scenario, runtime_price_bridge=stale_record)), prepared
+
+
+def select_candidate_and_sync_runtime_price(
+    state: ScenarioSessionState,
+    scenario_id: str,
+    candidate_key: str | None,
+) -> tuple[ScenarioSessionState, PreparedEconomicsRuntimePriceBridge]:
+    next_state = update_selected_candidate(state, scenario_id, candidate_key)
+    return sync_selected_candidate_runtime_price(next_state, scenario_id)
 
 
 def _sanitize_design_comparison_keys(
@@ -247,8 +555,8 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
     preserve_scan = False
     next_fingerprint: str | None = None
     if scenario.scan_result is not None and not scenario.dirty:
-        next_fingerprint = fingerprint_deterministic_input(bundle)
-        current_fingerprint = scenario.scan_fingerprint or fingerprint_deterministic_input(scenario.config_bundle)
+        next_fingerprint = _bridge_aware_scan_fingerprint(bundle, scenario.runtime_price_bridge)
+        current_fingerprint = _bridge_aware_scan_fingerprint(scenario.config_bundle, scenario.runtime_price_bridge)
         preserve_scan = next_fingerprint == current_fingerprint
     persisted_extra_issues: list[ValidationIssue] = []
     if preserve_scan and scenario.scan_result is not None:
@@ -261,7 +569,7 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
                 scenario,
                 config_bundle=bundle,
                 scan_result=scenario.scan_result,
-                scan_fingerprint=next_fingerprint or scenario.scan_fingerprint,
+                scan_fingerprint=scenario.scan_fingerprint,
                 selected_candidate_key=selected_candidate_key,
                 dirty=False,
             ),
@@ -273,17 +581,15 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
             for message in economics_preview_warning_messages(preview)
         ]
     refreshed_bundle = refresh_bundle_issues(bundle, extra_issues=tuple(persisted_extra_issues))
-    bridge_record = invalidate_runtime_price_bridge_if_needed(scenario.runtime_price_bridge, refreshed_bundle.config)
     if preserve_scan and scenario.scan_result is not None:
         updated = replace(
             scenario,
             config_bundle=refreshed_bundle,
             source_name=refreshed_bundle.source_name,
             scan_result=scenario.scan_result,
-            scan_fingerprint=next_fingerprint or scenario.scan_fingerprint,
+            scan_fingerprint=scenario.scan_fingerprint,
             selected_candidate_key=selected_candidate_key,
             dirty=False,
-            runtime_price_bridge=bridge_record,
         )
     else:
         updated = replace(
@@ -295,8 +601,11 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
             selected_candidate_key=None,
             dirty=True,
             last_run_at=None,
-            runtime_price_bridge=bridge_record,
         )
+    updated = replace(
+        updated,
+        runtime_price_bridge=invalidate_runtime_price_bridge_if_needed(scenario.runtime_price_bridge, updated),
+    )
     return _mark_project_dirty(_replace_scenario(state, updated))
 
 
@@ -335,23 +644,12 @@ def update_scenario_risk_config(
         config_bundle=updated_bundle,
         source_name=updated_bundle.source_name,
         scan_fingerprint=updated_fingerprint,
-        runtime_price_bridge=invalidate_runtime_price_bridge_if_needed(scenario.runtime_price_bridge, updated_bundle.config),
+    )
+    updated = replace(
+        updated,
+        runtime_price_bridge=invalidate_runtime_price_bridge_if_needed(scenario.runtime_price_bridge, updated),
     )
     return _mark_project_dirty(_replace_scenario(state, updated))
-
-
-def apply_runtime_price_bridge(
-    state: ScenarioSessionState,
-    scenario_id: str,
-    *,
-    bundle: LoadedConfigBundle,
-    bridge_record: RuntimePriceBridgeRecord,
-) -> ScenarioSessionState:
-    next_state = update_scenario_bundle(state, scenario_id, bundle)
-    updated = next_state.get_scenario(scenario_id)
-    if updated is None:
-        raise KeyError(f"No existe el escenario '{scenario_id}'.")
-    return _replace_scenario(next_state, replace(updated, runtime_price_bridge=bridge_record))
 
 
 def _apply_scan_result(
@@ -359,6 +657,7 @@ def _apply_scan_result(
     scenario_id: str,
     *,
     preserve_selection: bool,
+    auto_bridge: bool,
 ) -> ScenarioSessionState:
     scenario = state.get_scenario(scenario_id)
     if scenario is None:
@@ -396,18 +695,22 @@ def _apply_scan_result(
     )
     next_state = _replace_scenario(state, updated)
     selections = _sanitize_design_comparison_keys(next_state, scenario_id, set(scan_result.candidate_details))
-    return replace(next_state, design_comparison_candidate_keys=selections)
+    next_state = replace(next_state, design_comparison_candidate_keys=selections)
+    if not auto_bridge:
+        return next_state
+    synced_state, _prepared = sync_selected_candidate_runtime_price(next_state, scenario_id)
+    return synced_state
 
 
 def run_scenario_scan(state: ScenarioSessionState, scenario_id: str) -> ScenarioSessionState:
-    return _apply_scan_result(state, scenario_id, preserve_selection=False)
+    return _apply_scan_result(state, scenario_id, preserve_selection=False, auto_bridge=True)
 
 
 def hydrate_scenario_scan(state: ScenarioSessionState, scenario_id: str) -> ScenarioSessionState:
     scenario = state.get_scenario(scenario_id)
     if scenario is None or scenario.dirty or scenario.scan_result is not None:
         return state
-    return _apply_scan_result(state, scenario_id, preserve_selection=True)
+    return _apply_scan_result(state, scenario_id, preserve_selection=True, auto_bridge=False)
 
 
 def update_selected_candidate(state: ScenarioSessionState, scenario_id: str, candidate_key: str | None) -> ScenarioSessionState:

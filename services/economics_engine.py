@@ -17,6 +17,8 @@ PREVIEW_STATE_CANDIDATE_MISSING = "candidate_missing"
 
 BREAKDOWN_COST_SOURCE = "Economics_Cost_Items"
 BREAKDOWN_PRICE_SOURCE = "Economics_Price_Items"
+BATTERY_ENERGY_FIELDS = ("nom_kWh", "nominal_kWh", "capacity_kWh", "energy_kWh", "usable_kWh")
+BATTERY_POWER_FIELDS = ("max_kW", "max_ch_kW", "max_dis_kW")
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,7 @@ class EconomicsQuantities:
     battery_name: str
     inverter_name: str
     panel_name: str = ""
+    battery_energy_missing_with_power: bool = False
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,13 @@ class ResolvedHardwarePrice:
     unit_rate_COP: float
 
 
+@dataclass(frozen=True)
+class ResolvedBatteryEnergy:
+    battery_kwh: float
+    source_field: str = ""
+    missing_with_power: bool = False
+
+
 def _as_frame(
     source: pd.DataFrame | list[dict[str, Any]] | None,
     *,
@@ -121,6 +131,10 @@ def _positive_price(value: Any) -> float | None:
     return numeric if numeric > 0 else None
 
 
+def _casefold_dict(data: dict[str, Any]) -> dict[str, Any]:
+    return {str(key).strip().casefold(): value for key, value in data.items()}
+
+
 def _catalog_price_by_name(catalog: pd.DataFrame, name: Any) -> float | None:
     raw_name = str(name or "").strip()
     if not raw_name or catalog.empty or "name" not in catalog.columns:
@@ -155,9 +169,27 @@ def resolve_inverter_count(detail: dict[str, Any]) -> int:
     return 1 if (inv_sel.get("inverter") or {}) else 0
 
 
-def resolve_battery_kwh(detail: dict[str, Any]) -> float:
+def resolve_battery_energy(detail: dict[str, Any]) -> ResolvedBatteryEnergy:
     battery = detail.get("battery") or {}
-    return _positive_float(battery.get("nom_kWh"))
+    if not isinstance(battery, dict):
+        return ResolvedBatteryEnergy(battery_kwh=0.0)
+    battery_lookup = _casefold_dict(battery)
+    for field in BATTERY_ENERGY_FIELDS:
+        raw_value = battery.get(field)
+        if raw_value in (None, ""):
+            raw_value = battery_lookup.get(field.casefold())
+        numeric = _positive_float(raw_value)
+        if numeric > 0:
+            return ResolvedBatteryEnergy(battery_kwh=numeric, source_field=field)
+    has_power_fields = any(_positive_float(battery_lookup.get(field.casefold())) > 0 for field in BATTERY_POWER_FIELDS)
+    return ResolvedBatteryEnergy(
+        battery_kwh=0.0,
+        missing_with_power=has_power_fields,
+    )
+
+
+def resolve_battery_kwh(detail: dict[str, Any]) -> float:
+    return resolve_battery_energy(detail).battery_kwh
 
 
 def resolve_economics_quantities(
@@ -169,6 +201,7 @@ def resolve_economics_quantities(
 ) -> EconomicsQuantities:
     inverter = ((detail.get("inv_sel") or {}).get("inverter") or {})
     battery = detail.get("battery") or {}
+    resolved_battery_energy = resolve_battery_energy(detail)
     panel_name = ""
     if panel_catalog is not None:
         panel_selection = resolve_selected_panel(config, panel_catalog)
@@ -179,10 +212,11 @@ def resolve_economics_quantities(
         kWp=float(detail.get("kWp", 0.0) or 0.0),
         panel_count=resolve_panel_count(detail, config),
         inverter_count=resolve_inverter_count(detail),
-        battery_kwh=resolve_battery_kwh(detail),
+        battery_kwh=resolved_battery_energy.battery_kwh,
         battery_name=str(battery.get("name") or detail.get("battery_name") or ""),
         inverter_name=str(inverter.get("name", "") or ""),
         panel_name=panel_name,
+        battery_energy_missing_with_power=resolved_battery_energy.missing_with_power,
     )
 
 
@@ -265,7 +299,17 @@ def _resolve_cost_line_rate(
     )
 
 
-def _cost_multiplier(basis: str, quantities: EconomicsQuantities) -> float:
+def _cost_multiplier(
+    basis: str,
+    quantities: EconomicsQuantities,
+    *,
+    source_mode: str = "manual",
+    hardware_binding: str = "none",
+) -> float:
+    # Selected battery hardware resolves a whole-battery catalog price, not a per-kWh rate.
+    # Multiply that total battery price by one design-level battery selection.
+    if source_mode == "selected_hardware" and hardware_binding == "battery":
+        return 1.0
     if basis == "fixed_project":
         return 1.0
     if basis == "per_kwp":
@@ -316,7 +360,12 @@ def calculate_economics_result(
             manual_amount=amount,
             hardware_prices=hardware_prices,
         )
-        multiplier = _cost_multiplier(basis, quantities)
+        multiplier = _cost_multiplier(
+            basis,
+            quantities,
+            source_mode=source_mode,
+            hardware_binding=hardware_binding,
+        )
         line_amount = resolved_rate.unit_rate_COP * multiplier
         if stage == "technical":
             technical_subtotal += line_amount
@@ -487,6 +536,10 @@ def economics_preview_warning_messages(preview: EconomicsPreviewResult) -> tuple
         return ()
     warnings: list[str] = []
     for row in preview.result.cost_rows:
+        if row.rule == "per_battery_kwh" and preview.result.quantities.battery_energy_missing_with_power:
+            warnings.append(
+                f"Economics_Cost_Items fila {row.source_row}: la batería seleccionada tiene campos de potencia pero no una energía válida ('nom_kWh' o alias soportado); la cantidad energética quedará en 0 kWh."
+            )
         if row.value_source != "unavailable":
             continue
         if row.hardware_binding == "none":

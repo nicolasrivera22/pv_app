@@ -155,6 +155,77 @@ def test_resolve_battery_hardware_price_falls_back_to_catalog_lookup() -> None:
     assert resolved.unit_rate_COP == pytest.approx(12_500_000.0)
 
 
+def test_resolve_economics_quantities_prefers_nominal_energy_over_power_fields() -> None:
+    detail = {
+        "kWp": 12.0,
+        "battery_name": "BAT-ENERGY",
+        "battery": {"name": "BAT-ENERGY", "nom_kWh": 10.0, "max_kW": 80.0, "max_ch_kW": 80.0, "max_dis_kW": 80.0},
+        "inv_sel": {"N_mod": 24, "inverter": {"name": "INV-RAW"}},
+    }
+    config = {"P_mod_W": 500.0}
+
+    quantities = resolve_economics_quantities(
+        candidate_key="12.000::BAT-ENERGY",
+        detail=detail,
+        config=config,
+    )
+
+    assert quantities.battery_kwh == pytest.approx(10.0)
+    assert quantities.battery_energy_missing_with_power is False
+
+
+def test_resolve_economics_quantities_supports_explicit_energy_aliases_without_inferring_from_power() -> None:
+    detail = {
+        "kWp": 12.0,
+        "battery_name": "BAT-ALIAS",
+        "battery": {"name": "BAT-ALIAS", "nominal_kWh": 12.5, "max_kW": 80.0, "max_ch_kW": 80.0, "max_dis_kW": 80.0},
+        "inv_sel": {"N_mod": 24, "inverter": {"name": "INV-RAW"}},
+    }
+    config = {"P_mod_W": 500.0}
+
+    quantities = resolve_economics_quantities(
+        candidate_key="12.000::BAT-ALIAS",
+        detail=detail,
+        config=config,
+    )
+
+    assert quantities.battery_kwh == pytest.approx(12.5)
+    assert quantities.battery_energy_missing_with_power is False
+
+
+def test_manual_per_battery_kwh_keeps_using_battery_energy() -> None:
+    quantities = EconomicsQuantities(
+        candidate_key="12.000::BAT-A",
+        kWp=10.0,
+        panel_count=20,
+        inverter_count=1,
+        battery_kwh=35.0,
+        battery_name="BAT-A",
+        inverter_name="INV-A",
+        panel_name="PANEL-A",
+    )
+
+    result = calculate_economics_result(
+        economics_cost_items=[
+            {
+                "stage": "technical",
+                "name": "Battery adder manual",
+                "basis": "per_battery_kwh",
+                "amount_COP": 1_000.0,
+                "source_mode": "manual",
+                "hardware_binding": "battery",
+                "enabled": True,
+                "notes": "",
+            }
+        ],
+        economics_price_items=[],
+        quantities=quantities,
+    )
+
+    assert result.cost_rows[0].multiplier == pytest.approx(35.0)
+    assert result.cost_rows[0].line_amount_COP == pytest.approx(35_000.0)
+
+
 def test_resolve_panel_count_uses_n_mod_before_fallback() -> None:
     detail = {"kWp": 10.0, "inv_sel": {"N_mod": 33}}
     config = {"P_mod_W": 500.0}
@@ -328,4 +399,88 @@ def test_economics_preview_warning_messages_report_selected_hardware_none_withou
     assert preview.result.cost_rows[0].line_amount_COP == pytest.approx(0.0)
     assert economics_preview_warning_messages(preview) == (
         "Economics_Cost_Items fila 1: 'selected_hardware' requiere un 'hardware_binding' distinto de 'none'.",
+    )
+
+
+def test_selected_battery_hardware_uses_one_unit_not_energy_kwh() -> None:
+    quantities = EconomicsQuantities(
+        candidate_key="12.000::BAT-10",
+        kWp=10.0,
+        panel_count=20,
+        inverter_count=1,
+        battery_kwh=35.0,
+        battery_name="BAT-10",
+        inverter_name="INV-A",
+        panel_name="PANEL-A",
+    )
+
+    result = calculate_economics_result(
+        economics_cost_items=[
+            {
+                "stage": "technical",
+                "name": "Battery hardware",
+                "basis": "per_battery_kwh",
+                "amount_COP": 0.0,
+                "source_mode": "selected_hardware",
+                "hardware_binding": "battery",
+                "enabled": True,
+                "notes": "",
+            }
+        ],
+        economics_price_items=[],
+        quantities=quantities,
+        hardware_prices={
+            "battery": resolve_battery_hardware_price(
+                {"battery_name": "BAT-10", "battery": {"name": "BAT-10", "nom_kWh": 10.0}},
+                load_example_config().battery_catalog,
+            )
+        },
+    )
+
+    assert result.cost_rows[0].multiplier == pytest.approx(1.0)
+    assert result.cost_rows[0].unit_rate_COP == pytest.approx(12_500_000.0)
+    assert result.cost_rows[0].line_amount_COP == pytest.approx(12_500_000.0)
+
+
+def test_preview_battery_energy_warning_does_not_turn_selected_battery_price_into_per_kw_cost() -> None:
+    bundle = _fast_bundle()
+    scan_result = resolve_deterministic_scan(bundle, allow_parallel=False)
+    candidate_key = scan_result.best_candidate_key
+    assert candidate_key is not None
+    original_detail = dict(scan_result.candidate_details[candidate_key])
+    mutated_detail = {
+        **original_detail,
+        "battery_name": "BAT-POWER-ONLY",
+        "battery": {
+            "name": "BAT-POWER-ONLY",
+            "price_COP": 12_500_000.0,
+            "max_kW": 80.0,
+            "max_ch_kW": 80.0,
+            "max_dis_kW": 80.0,
+        },
+    }
+    scenario = replace(
+        create_scenario_record("Base", bundle),
+        scan_result=replace(
+            scan_result,
+            candidate_details={**scan_result.candidate_details, candidate_key: mutated_detail},
+        ),
+        selected_candidate_key=candidate_key,
+        dirty=False,
+    )
+
+    preview = resolve_economics_preview(
+        scenario,
+        economics_cost_items=bundle.economics_cost_items_table,
+        economics_price_items=bundle.economics_price_items_table,
+    )
+
+    assert preview.state == PREVIEW_STATE_READY
+    assert preview.result is not None
+    battery_row = next(row for row in preview.result.cost_rows if row.rule == "per_battery_kwh")
+    assert battery_row.multiplier == pytest.approx(1.0)
+    assert battery_row.unit_rate_COP == pytest.approx(12_500_000.0)
+    assert battery_row.line_amount_COP == pytest.approx(12_500_000.0)
+    assert economics_preview_warning_messages(preview) == (
+        "Economics_Cost_Items fila 3: la batería seleccionada tiene campos de potencia pero no una energía válida ('nom_kWh' o alias soportado); la cantidad energética quedará en 0 kWh.",
     )

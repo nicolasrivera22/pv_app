@@ -44,11 +44,13 @@ from services import (
     load_config_from_excel,
     load_example_config,
     normalize_price_table_rows,
+    prepare_economics_runtime_price_bridge,
     rebuild_bundle_from_ui,
     resolve_client_session,
     run_monte_carlo,
     run_scan,
     run_scenario_scan,
+    resolve_runtime_price_bridge_state,
     save_project,
     tr,
     update_selected_candidate,
@@ -543,8 +545,9 @@ def test_candidate_horizon_slider_defaults_to_scan_horizon_and_preserves_current
 
     minimum, maximum, marks, value, disabled, style, value_label, context = workbench_page.sync_candidate_horizon_slider(payload, "es", None, {})
 
-    assert minimum == 1
+    assert minimum == 0
     assert maximum == 5
+    assert marks[0] == "0"
     assert marks[1] == "1"
     assert value == 5
     assert disabled is False
@@ -563,10 +566,10 @@ def test_candidate_horizon_slider_hides_cleanly_without_results() -> None:
 
     minimum, maximum, marks, value, disabled, style, value_label, context = workbench_page.sync_candidate_horizon_slider(payload, "es", None, {})
 
-    assert minimum == 1
-    assert maximum == 1
-    assert marks == {1: "1"}
-    assert value == 1
+    assert minimum == 0
+    assert maximum == 0
+    assert marks == {0: "0"}
+    assert value == 0
     assert disabled is True
     assert style == {"display": "none"}
     assert value_label == ""
@@ -1598,6 +1601,47 @@ def test_npv_chart_adds_top_axis_for_panel_count() -> None:
     assert any(trace.name == "Diseño seleccionado" for trace in figure.data)
 
 
+def test_npv_chart_switches_to_project_price_axis_for_year_zero() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery": "None",
+                "NPV_COP": 58_000_000,
+                "payback_years": 5.5,
+                "self_consumption_ratio": 0.45,
+                "peak_ratio": 1.1,
+                "scan_order": 0,
+            },
+            {
+                "candidate_key": "18.000::BAT-10",
+                "kWp": 18.0,
+                "battery": "BAT-10",
+                "NPV_COP": 72_000_000,
+                "payback_years": 6.2,
+                "self_consumption_ratio": 0.52,
+                "peak_ratio": 1.25,
+                "scan_order": 1,
+            },
+        ]
+    )
+
+    figure = build_npv_figure(
+        table,
+        selected_key="18.000::BAT-10",
+        lang="es",
+        horizon_years=0,
+        display_metric_key="capex_client",
+        module_power_w=600.0,
+    )
+
+    assert figure.layout.title.text.endswith("Horizonte financiero: 0 años</sup>")
+    assert figure.layout.yaxis.title.text == tr("workbench.project_price.axis_label", "es")
+    assert figure.layout.yaxis2.title.text == "Payback [años]"
+    assert any(tr("workbench.project_price.axis_label", "es") in hover for hover in figure.data[0].hovertext)
+
+
 def test_npv_chart_omits_top_axis_without_valid_module_power() -> None:
     table = pd.DataFrame(
         [
@@ -1745,6 +1789,27 @@ def test_populate_results_uses_horizon_adjusted_summary_without_losing_selection
     assert short_row["NPV_COP"] != full_row["NPV_COP"]
 
 
+def test_populate_results_year_zero_shows_project_price_in_main_ui() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    payload = _session_payload(state)
+
+    year_zero = workbench_page.populate_results(payload, "es", 0)
+    table_rows = year_zero[11]
+    selected_rows = year_zero[13]
+    selected_row = table_rows[selected_rows[0]]
+    columns = year_zero[12]
+    selected_detail = state.get_scenario().scan_result.candidate_details[selected_row["candidate_key"]]
+
+    assert year_zero[4].layout.title.text.endswith("Horizonte financiero: 0 años</sup>")
+    assert year_zero[4].layout.yaxis.title.text == tr("workbench.project_price.axis_label", "es")
+    assert next(column["name"] for column in columns if column["id"] == "NPV_COP") == tr("workbench.project_price.axis_label", "es")
+    assert all(column["id"] != "capex_client" for column in columns)
+    assert selected_row["NPV_COP"] == pytest.approx(float(selected_detail["summary"]["capex_client"]))
+    assert tr("workbench.project_price.label", "es") in str(year_zero[5][3].to_plotly_json())
+    assert tr("workbench.project_price.axis_label", "es") in str(year_zero[3][2].to_plotly_json())
+
+
 def test_graph_click_selection_updates_store_table_and_selected_marker() -> None:
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     state = run_scenario_scan(state, state.active_scenario_id)
@@ -1783,6 +1848,15 @@ def test_graph_click_selection_updates_store_table_and_selected_marker() -> None
     active = next_state.get_scenario()
     assert active is not None
     assert active.selected_candidate_key == curve_key
+    expected_bridge = prepare_economics_runtime_price_bridge(active)
+    assert expected_bridge.applied is True
+    assert active.runtime_price_bridge is not None
+    assert active.runtime_price_bridge.candidate_key == curve_key
+    assert resolve_runtime_price_bridge_state(active) == "active"
+    assert active.config_bundle.config["pricing_mode"] == "total"
+    assert float(active.config_bundle.config["price_total_COP"]) == pytest.approx(float(expected_bridge.final_price_COP))
+    assert active.config_bundle.config["include_hw_in_price"] is False
+    assert float(active.config_bundle.config["price_others_total"]) == pytest.approx(0.0)
 
     outputs = workbench_page.populate_results(next_payload, "es", 5)
     table_rows = outputs[11]

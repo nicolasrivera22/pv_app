@@ -66,6 +66,8 @@ class RuntimePriceBridgeRecord:
     applied_price_total_COP: float
     applied_include_hw_in_price: bool
     applied_price_others_total: float
+    applied_scan_fingerprint: str | None = None
+    applied_economics_signature: str | None = None
     stale: bool = False
 
     def to_payload(self) -> dict[str, Any]:
@@ -79,6 +81,8 @@ class RuntimePriceBridgeRecord:
             "applied_price_total_COP": self.applied_price_total_COP,
             "applied_include_hw_in_price": self.applied_include_hw_in_price,
             "applied_price_others_total": self.applied_price_others_total,
+            "applied_scan_fingerprint": self.applied_scan_fingerprint,
+            "applied_economics_signature": self.applied_economics_signature,
             "stale": self.stale,
         }
 
@@ -94,6 +98,16 @@ class RuntimePriceBridgeRecord:
             applied_price_total_COP=float(payload.get("applied_price_total_COP", payload.get("final_price_COP", 0.0))),
             applied_include_hw_in_price=bool(payload.get("applied_include_hw_in_price", False)),
             applied_price_others_total=float(payload.get("applied_price_others_total", 0.0)),
+            applied_scan_fingerprint=(
+                None
+                if payload.get("applied_scan_fingerprint") in (None, "")
+                else str(payload.get("applied_scan_fingerprint"))
+            ),
+            applied_economics_signature=(
+                None
+                if payload.get("applied_economics_signature") in (None, "")
+                else str(payload.get("applied_economics_signature"))
+            ),
             stale=bool(payload.get("stale", False)),
         )
 

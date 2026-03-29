@@ -377,6 +377,41 @@ def test_build_visible_horizon_candidate_summary_preserves_project_payback() -> 
     assert kpis["payback_years"] == pytest.approx(1.5)
 
 
+def test_build_visible_horizon_candidate_summary_uses_project_price_for_year_zero() -> None:
+    monthly = pd.DataFrame(
+        {
+            "Año_mes": list(range(1, 25)),
+            "NPV_COP": [-120.0] * 12 + [-20.0, -10.0, -5.0, -1.0, -0.5, 5.0, 10.0, 15.0, 30.0, 40.0, 50.0, 60.0],
+            "Ahorro_COP": [10.0] * 24,
+            "Demanda_kWh": [100.0] * 24,
+            "Importacion_Red_kWh": [30.0] * 24,
+            "Exportacion_kWh": [5.0] * 24,
+            "PV_a_Carga_kWh": [55.0] * 24,
+            "Bateria_a_Carga_kWh": [15.0] * 24,
+        }
+    )
+    detail = {
+        "scan_order": 0,
+        "candidate_key": "12.000::None",
+        "kWp": 12.0,
+        "battery_name": "None",
+        "peak_ratio": 1.1,
+        "summary": {"cum_disc_final": 60.0, "payback_years": 1.5, "payback_month": 18, "capex_client": 1_000.0},
+        "monthly": monthly,
+    }
+
+    presentation = build_visible_horizon_candidate_summary(detail, 0)
+    kpis = build_kpis(presentation)
+
+    assert presentation["visible_horizon_summary"]["horizon_years"] == 0
+    assert presentation["visible_horizon_summary"]["NPV_COP"] is None
+    assert presentation["visible_horizon_summary"]["display_metric_key"] == "capex_client"
+    assert presentation["visible_horizon_summary"]["display_value_COP"] == pytest.approx(1_000.0)
+    assert presentation["payback_display_state"]["message_key"] == "workbench.payback.note.visible_horizon"
+    assert kpis["financial_metric_key"] == "capex_client"
+    assert kpis["NPV"] == pytest.approx(1_000.0)
+
+
 def test_summarize_candidates_for_horizon_rebuilds_display_order_and_best_flag() -> None:
     monthly_base = pd.DataFrame(
         {
@@ -431,6 +466,56 @@ def test_summarize_candidates_for_horizon_rebuilds_display_order_and_best_flag()
     assert not horizon_table.loc[horizon_table["candidate_key"] == "12.000::BAT-10", "best_battery_for_kwp"].iloc[0]
     assert not full_table.loc[full_table["candidate_key"] == "12.000::None", "best_battery_for_kwp"].iloc[0]
     assert full_table.loc[full_table["candidate_key"] == "12.000::BAT-10", "best_battery_for_kwp"].iloc[0]
+
+
+def test_summarize_candidates_for_horizon_year_zero_prefers_lower_project_price() -> None:
+    monthly_base = pd.DataFrame(
+        {
+            "Año_mes": list(range(1, 25)),
+            "Ahorro_COP": [10.0] * 24,
+            "Demanda_kWh": [100.0] * 24,
+            "Importacion_Red_kWh": [25.0] * 24,
+            "Exportacion_kWh": [5.0] * 24,
+            "PV_a_Carga_kWh": [60.0] * 24,
+            "Bateria_a_Carga_kWh": [15.0] * 24,
+        }
+    )
+    detail_map = {
+        "12.000::None": {
+            "scan_order": 0,
+            "candidate_key": "12.000::None",
+            "kWp": 12.0,
+            "battery_name": "None",
+            "peak_ratio": 1.05,
+            "summary": {"cum_disc_final": 200.0, "payback_years": 1.5, "payback_month": 18, "capex_client": 1_000.0},
+            "monthly": monthly_base.assign(NPV_COP=[50.0] * 12 + [200.0] * 12),
+        },
+        "12.000::BAT-10": {
+            "scan_order": 1,
+            "candidate_key": "12.000::BAT-10",
+            "kWp": 12.0,
+            "battery_name": "BAT-10",
+            "peak_ratio": 1.05,
+            "summary": {"cum_disc_final": 120.0, "payback_years": 1.0, "payback_month": 12, "capex_client": 900.0},
+            "monthly": monthly_base.assign(NPV_COP=[30.0] * 12 + [120.0] * 12),
+        },
+        "18.000::None": {
+            "scan_order": 2,
+            "candidate_key": "18.000::None",
+            "kWp": 18.0,
+            "battery_name": "None",
+            "peak_ratio": 1.2,
+            "summary": {"cum_disc_final": 140.0, "payback_years": 1.0, "payback_month": 12, "capex_client": 1_500.0},
+            "monthly": monthly_base.assign(NPV_COP=[90.0] * 12 + [140.0] * 12),
+        },
+    }
+
+    horizon_table = summarize_candidates_for_horizon(detail_map, 0)
+
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::None", "NPV_COP"].iloc[0] == pytest.approx(1_000.0)
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::BAT-10", "NPV_COP"].iloc[0] == pytest.approx(900.0)
+    assert horizon_table.loc[horizon_table["candidate_key"] == "12.000::BAT-10", "best_battery_for_kwp"].iloc[0]
+    assert not horizon_table.loc[horizon_table["candidate_key"] == "12.000::None", "best_battery_for_kwp"].iloc[0]
 
 
 def test_build_npv_figure_keeps_missing_payback_as_gap() -> None:

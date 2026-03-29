@@ -138,23 +138,55 @@ def _normalize_payback_month(value: Any) -> int | None:
 def build_candidate_project_summary(detail: dict[str, Any]) -> dict[str, Any]:
     summary = dict(detail.get("summary") or {})
     summary["cum_disc_final"] = _normalize_optional_float(summary.get("cum_disc_final"))
+    summary["capex_client"] = _normalize_optional_float(summary.get("capex_client"))
     summary["payback_years"] = _normalize_payback_years(summary.get("payback_years"))
     summary["payback_month"] = _normalize_payback_month(summary.get("payback_month"))
     return summary
 
 
+def _coerce_visible_horizon_years(value: Any, *, default: int = 1, max_years: int | None = None) -> int:
+    try:
+        resolved = int(float(value))
+    except (TypeError, ValueError):
+        resolved = default
+    resolved = max(0, resolved)
+    if max_years is not None:
+        resolved = min(resolved, max_years)
+    return resolved
+
+
+def visible_financial_metric_key(horizon_years: Any) -> str:
+    return "capex_client" if _coerce_visible_horizon_years(horizon_years, default=1) == 0 else "NPV_COP"
+
+
+def _display_metric_prefers_lower_value(metric_key: str) -> bool:
+    return metric_key == "capex_client"
+
+
 def summarize_candidate_for_horizon(detail: dict[str, Any], horizon_years: int) -> dict[str, Any]:
     monthly = detail.get("monthly")
     project_summary = build_candidate_project_summary(detail)
-    if not isinstance(monthly, pd.DataFrame) or monthly.empty or "NPV_COP" not in monthly.columns:
+    display_metric_key = visible_financial_metric_key(horizon_years)
+    if display_metric_key == "capex_client":
         return {
-            "horizon_years": max(1, int(horizon_years or 1)),
+            "horizon_years": 0,
+            "horizon_months": 0,
+            "NPV_COP": None,
+            "display_metric_key": display_metric_key,
+            "display_value_COP": project_summary.get("capex_client"),
+        }
+    if not isinstance(monthly, pd.DataFrame) or monthly.empty or "NPV_COP" not in monthly.columns:
+        effective_years = _coerce_visible_horizon_years(horizon_years, default=1)
+        return {
+            "horizon_years": effective_years,
             "horizon_months": 0,
             "NPV_COP": project_summary.get("cum_disc_final"),
+            "display_metric_key": "NPV_COP",
+            "display_value_COP": project_summary.get("cum_disc_final"),
         }
 
     max_years = _available_horizon_years(monthly)
-    effective_years = max(1, min(int(horizon_years or max_years), max_years))
+    effective_years = _coerce_visible_horizon_years(horizon_years, default=max_years, max_years=max_years)
     horizon_months = min(len(monthly), effective_years * MONTHS_PER_YEAR)
     truncated = monthly.iloc[:horizon_months].reset_index(drop=True)
     npv_series = pd.to_numeric(truncated["NPV_COP"], errors="coerce")
@@ -165,6 +197,8 @@ def summarize_candidate_for_horizon(detail: dict[str, Any], horizon_years: int) 
         "horizon_years": effective_years,
         "horizon_months": horizon_months,
         "NPV_COP": npv_value,
+        "display_metric_key": "NPV_COP",
+        "display_value_COP": npv_value,
     }
 
 
@@ -174,10 +208,7 @@ def resolve_payback_display_state(
     *,
     payback_month: Any = None,
 ) -> dict[str, Any]:
-    try:
-        resolved_visible_horizon = max(1, int(float(visible_horizon_years or 1)))
-    except (TypeError, ValueError):
-        resolved_visible_horizon = 1
+    resolved_visible_horizon = _coerce_visible_horizon_years(visible_horizon_years, default=1)
     resolved_payback_years = _normalize_payback_years(payback_years)
     resolved_payback_month = _normalize_payback_month(payback_month)
     if resolved_payback_years is None:
@@ -225,19 +256,23 @@ def _candidate_summary_row(
     detail: dict[str, Any],
     *,
     npv_cop: float | None = None,
+    display_value_cop: float | None = None,
     payback_years: float | None = None,
 ) -> dict[str, Any]:
     energy = summarize_energy_metrics(detail["monthly"])
     project_summary = build_candidate_project_summary(detail)
-    resolved_npv = npv_cop if npv_cop is not None else project_summary.get("cum_disc_final")
+    resolved_display_value = display_value_cop if display_value_cop is not None else npv_cop
+    if resolved_display_value is None:
+        resolved_display_value = project_summary.get("cum_disc_final")
+    capex_client = project_summary.get("capex_client")
     return {
         "scan_order": int(detail["scan_order"]),
         "candidate_key": detail["candidate_key"],
         "kWp": round(float(detail["kWp"]), 3),
         "battery": detail["battery_name"],
-        "NPV_COP": float(resolved_npv) if resolved_npv is not None else None,
+        "NPV_COP": float(resolved_display_value) if resolved_display_value is not None else None,
         "payback_years": payback_years if payback_years is not None else project_summary.get("payback_years"),
-        "capex_client": float(project_summary["capex_client"]),
+        "capex_client": float(capex_client) if capex_client is not None else None,
         "self_consumption_ratio": energy["self_consumption_ratio"],
         "self_sufficiency_ratio": energy["self_sufficiency_ratio"],
         "annual_import_kwh": energy["annual_import_kwh"],
@@ -246,12 +281,13 @@ def _candidate_summary_row(
     }
 
 
-def _finalize_candidate_table(frame: pd.DataFrame) -> pd.DataFrame:
+def _finalize_candidate_table(frame: pd.DataFrame, *, display_metric_key: str = "NPV_COP") -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame(columns=CANDIDATE_TABLE_COLUMNS)
+    value_ascending = _display_metric_prefers_lower_value(display_metric_key)
     frame = frame.sort_values(
         by=["kWp", "NPV_COP", "scan_order"],
-        ascending=[True, False, True],
+        ascending=[True, value_ascending, True],
         kind="mergesort",
     ).reset_index(drop=True)
     frame["best_battery_for_kwp"] = False
@@ -266,17 +302,18 @@ def build_candidate_table(detail_map: dict[str, dict]) -> pd.DataFrame:
 
 
 def summarize_candidates_for_horizon(detail_map: dict[str, dict], horizon_years: int) -> pd.DataFrame:
+    display_metric_key = visible_financial_metric_key(horizon_years)
     rows = []
     for detail in detail_map.values():
         presentation = build_visible_horizon_candidate_summary(detail, horizon_years)
         rows.append(
             _candidate_summary_row(
                 detail,
-                npv_cop=presentation["visible_horizon_summary"]["NPV_COP"],
+                display_value_cop=presentation["visible_horizon_summary"].get("display_value_COP"),
                 payback_years=presentation["payback_display_state"]["trace_payback_years"],
             )
         )
-    return _finalize_candidate_table(pd.DataFrame(rows))
+    return _finalize_candidate_table(pd.DataFrame(rows), display_metric_key=display_metric_key)
 
 
 def build_kpis(detail: dict) -> dict[str, float | str | None]:
@@ -284,9 +321,10 @@ def build_kpis(detail: dict) -> dict[str, float | str | None]:
     visible_horizon_summary = detail.get("visible_horizon_summary") or {}
     payback_display_state = detail.get("payback_display_state") or {}
     metrics = summarize_energy_metrics(detail["monthly"])
-    npv_value = visible_horizon_summary.get("NPV_COP")
+    display_metric_key = str(visible_horizon_summary.get("display_metric_key") or "NPV_COP")
+    npv_value = visible_horizon_summary.get("display_value_COP")
     if npv_value is None:
-        npv_value = project_summary.get("cum_disc_final")
+        npv_value = project_summary.get("capex_client") if display_metric_key == "capex_client" else project_summary.get("cum_disc_final")
     payback_value = payback_display_state.get("project_payback_years")
     if payback_value is None:
         payback_value = project_summary.get("payback_years")
@@ -294,6 +332,7 @@ def build_kpis(detail: dict) -> dict[str, float | str | None]:
         "best_kWp": round(float(detail["kWp"]), 3),
         "selected_battery": detail["battery_name"],
         "NPV": float(npv_value) if npv_value is not None else None,
+        "financial_metric_key": display_metric_key,
         "payback_years": payback_value,
         "self_consumption_ratio": float(detail.get("self_consumption_ratio", metrics["self_consumption_ratio"])),
         "self_sufficiency_ratio": float(detail.get("self_sufficiency_ratio", metrics["self_sufficiency_ratio"])),
@@ -455,11 +494,12 @@ def build_cash_flow(monthly: pd.DataFrame, *, base_year: int | None = None) -> p
     return frame
 
 
-def build_npv_curve(candidate_table: pd.DataFrame) -> pd.DataFrame:
+def build_npv_curve(candidate_table: pd.DataFrame, *, display_metric_key: str = "NPV_COP") -> pd.DataFrame:
     if candidate_table.empty:
         return pd.DataFrame(columns=NPV_CURVE_COLUMNS)
+    value_ascending = _display_metric_prefers_lower_value(display_metric_key)
     grouped = (
-        candidate_table.sort_values(["kWp", "NPV_COP", "scan_order"], ascending=[True, False, True], kind="mergesort")
+        candidate_table.sort_values(["kWp", "NPV_COP", "scan_order"], ascending=[True, value_ascending, True], kind="mergesort")
         .groupby("kWp", as_index=False, sort=True)
         .first()[NPV_CURVE_COLUMNS]
     )
@@ -517,7 +557,7 @@ def _discard_hover_text(point: dict[str, Any], lang: str) -> str:
 
 
 def format_horizon_year_value(years: int, *, lang: str = "es") -> str:
-    resolved_years = max(1, int(years))
+    resolved_years = max(0, int(years))
     if lang == "es":
         unit = "año" if resolved_years == 1 else "años"
     else:
@@ -538,7 +578,19 @@ def _format_payback_hover_value(value: Any, *, lang: str = "es") -> str:
     return format_metric("payback_years", normalized, lang)
 
 
-def _curve_hover_lines(curve: pd.DataFrame, *, lang: str, payback_label: str) -> list[str]:
+def _financial_axis_label(metric_key: str, *, lang: str) -> str:
+    if metric_key == "capex_client":
+        return tr("workbench.project_price.axis_label", lang)
+    return metric_label("NPV_COP", lang)
+
+
+def _financial_chart_title(metric_key: str, *, lang: str) -> str:
+    if metric_key == "capex_client":
+        return tr("workbench.project_price.chart_title", lang)
+    return "VPN vs kWp" if lang == "es" else "NPV vs kWp"
+
+
+def _curve_hover_lines(curve: pd.DataFrame, *, lang: str, display_metric_key: str, payback_label: str) -> list[str]:
     lines: list[str] = []
     for row in curve.to_dict("records"):
         panel_count = row.get("panel_count")
@@ -549,7 +601,7 @@ def _curve_hover_lines(curve: pd.DataFrame, *, lang: str, payback_label: str) ->
                     f"kWp: {float(row['kWp']):.3f}",
                     f"{tr('common.chart.panels', lang)}: {panel_value}",
                     f"{'Batería' if lang == 'es' else 'Battery'}: {row['battery_display']}",
-                    f"{metric_label('NPV_COP', lang)}: {format_metric('NPV_COP', row['NPV_COP'], lang)}",
+                    f"{_financial_axis_label(display_metric_key, lang=lang)}: {format_metric(display_metric_key, row['NPV_COP'], lang)}",
                     f"{payback_label}: {_format_payback_hover_value(row.get('payback_years'), lang=lang)}",
                     f"{metric_label('self_consumption_ratio', lang)}: {100 * float(row['self_consumption_ratio']):.1f}%",
                     f"{metric_label('peak_ratio', lang)}: {100 * float(row['peak_ratio']):.1f}%",
@@ -575,10 +627,20 @@ def _candidate_overlay_row(candidate_table: pd.DataFrame, candidate_key: str | N
     return selected.sort_values(["scan_order", "kWp"], kind="mergesort").head(1).reset_index(drop=True)
 
 
-def _best_candidate_overlay_row(candidate_table: pd.DataFrame, *, exclude_candidate_key: str | None = None) -> pd.DataFrame:
+def _best_candidate_overlay_row(
+    candidate_table: pd.DataFrame,
+    *,
+    display_metric_key: str = "NPV_COP",
+    exclude_candidate_key: str | None = None,
+) -> pd.DataFrame:
     if candidate_table.empty:
         return candidate_table.iloc[0:0].copy()
-    best_row = candidate_table.sort_values(["NPV_COP", "scan_order", "kWp"], ascending=[False, True, True], kind="mergesort").head(1)
+    value_ascending = _display_metric_prefers_lower_value(display_metric_key)
+    best_row = candidate_table.sort_values(
+        ["NPV_COP", "scan_order", "kWp"],
+        ascending=[value_ascending, True, True],
+        kind="mergesort",
+    ).head(1)
     if exclude_candidate_key and str(best_row.iloc[0]["candidate_key"]) == str(exclude_candidate_key):
         return candidate_table.iloc[0:0].copy()
     return best_row.reset_index(drop=True)
@@ -594,6 +656,7 @@ def _add_viable_npv_traces(
     *,
     lang: str,
     figure_title: str,
+    display_metric_key: str,
     payback_label: str,
     best_row: pd.DataFrame,
     selected_row: pd.DataFrame,
@@ -610,7 +673,7 @@ def _add_viable_npv_traces(
             marker={"size": 9, "color": "#2563eb"},
             ids=curve["candidate_key"],
             customdata=_chart_point_customdata(curve, point_role=CLICK_ROLE_NPV_CURVE),
-            hovertext=_curve_hover_lines(curve, lang=lang, payback_label=payback_label),
+            hovertext=_curve_hover_lines(curve, lang=lang, display_metric_key=display_metric_key, payback_label=payback_label),
             hovertemplate="%{hovertext}<extra></extra>",
         ),
         **add_trace_kwargs,
@@ -625,7 +688,7 @@ def _add_viable_npv_traces(
                 name=tr("common.chart.best_design", lang),
                 ids=best_row["candidate_key"],
                 customdata=_chart_point_customdata(best_row, point_role=CLICK_ROLE_BEST_OVERLAY),
-                hovertext=_curve_hover_lines(best_row, lang=lang, payback_label=payback_label),
+                hovertext=_curve_hover_lines(best_row, lang=lang, display_metric_key=display_metric_key, payback_label=payback_label),
                 hovertemplate=tr("common.chart.best_design", lang) + "<br>%{hovertext}<extra></extra>",
             ),
             **add_trace_kwargs,
@@ -641,7 +704,7 @@ def _add_viable_npv_traces(
             name=tr("common.chart.selected_design", lang),
             ids=selected_row["candidate_key"],
             customdata=_chart_point_customdata(selected_row, point_role=CLICK_ROLE_SELECTED_OVERLAY),
-            hovertext=_curve_hover_lines(selected_row, lang=lang, payback_label=payback_label),
+            hovertext=_curve_hover_lines(selected_row, lang=lang, display_metric_key=display_metric_key, payback_label=payback_label),
             hovertemplate=tr("common.chart.selected_design", lang) + "<br>%{hovertext}<extra></extra>",
         ),
         **add_trace_kwargs,
@@ -682,26 +745,32 @@ def build_npv_figure(
     lang: str = "es",
     title: str | None = None,
     horizon_years: int | None = None,
+    display_metric_key: str | None = None,
     payback_label: str | None = None,
     module_power_w: float | None = None,
     discarded_points: tuple[dict[str, Any], ...] | list[dict[str, Any]] | None = None,
 ) -> go.Figure:
+    resolved_display_metric = display_metric_key or visible_financial_metric_key(horizon_years)
     display_table = candidate_table.copy()
     display_table["battery_display"] = display_table["battery"].map(lambda value: format_metric("selected_battery", value, lang))
     if module_power_w and float(module_power_w) > 0:
         display_table["panel_count"] = display_table["kWp"].map(lambda value: int(round(float(value) / (float(module_power_w) / 1000.0))))
     else:
         display_table["panel_count"] = None
-    curve = build_npv_curve(candidate_table)
+    curve = build_npv_curve(candidate_table, display_metric_key=resolved_display_metric)
     curve = curve.copy()
     curve["battery_display"] = curve["battery"].map(lambda value: format_metric("selected_battery", value, lang))
     if module_power_w and float(module_power_w) > 0:
         curve["panel_count"] = curve["kWp"].map(lambda value: int(round(float(value) / (float(module_power_w) / 1000.0))))
     else:
         curve["panel_count"] = None
-    best_row = _best_candidate_overlay_row(display_table, exclude_candidate_key=selected_key)
+    best_row = _best_candidate_overlay_row(
+        display_table,
+        display_metric_key=resolved_display_metric,
+        exclude_candidate_key=selected_key,
+    )
     selected_row = _candidate_overlay_row(display_table, selected_key)
-    figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
+    figure_title = title or _financial_chart_title(resolved_display_metric, lang=lang)
     full_title = _npv_figure_title(figure_title, horizon_years=horizon_years, lang=lang)
     resolved_payback_label = payback_label or metric_label("payback_years", lang)
     discarded = [dict(point) for point in (discarded_points or [])]
@@ -722,6 +791,7 @@ def build_npv_figure(
                 curve,
                 lang=lang,
                 figure_title=figure_title,
+                display_metric_key=resolved_display_metric,
                 payback_label=resolved_payback_label,
                 best_row=best_row,
                 selected_row=selected_row,
@@ -747,7 +817,7 @@ def build_npv_figure(
             hovermode="x unified",
             margin={"t": 108 if horizon_years is not None else 88},
         )
-        figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", secondary_y=False)
+        figure.update_yaxes(title=_financial_axis_label(resolved_display_metric, lang=lang), tickformat=",.0f", secondary_y=False)
         figure.update_yaxes(title=resolved_payback_label, secondary_y=True)
         figure.update_xaxes(title=tr("common.chart.installed_kwp", lang))
         _apply_panel_count_axis(figure, curve, module_power_w, lang=lang, axis_name="xaxis2", overlay_axis="x")
@@ -776,6 +846,7 @@ def build_npv_figure(
             curve,
             lang=lang,
             figure_title=figure_title,
+            display_metric_key=resolved_display_metric,
             payback_label=resolved_payback_label,
             best_row=best_row,
             selected_row=selected_row,
@@ -824,7 +895,7 @@ def build_npv_figure(
         hovermode="x unified",
         margin={"t": 108 if horizon_years is not None else 88},
     )
-    figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", row=1, col=1, secondary_y=False)
+    figure.update_yaxes(title=_financial_axis_label(resolved_display_metric, lang=lang), tickformat=",.0f", row=1, col=1, secondary_y=False)
     figure.update_yaxes(title=resolved_payback_label, row=1, col=1, secondary_y=True)
     figure.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, range=[0, 1], row=2, col=1)
     figure.update_xaxes(title=tr("common.chart.installed_kwp", lang), row=2, col=1)

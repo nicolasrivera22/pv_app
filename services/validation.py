@@ -74,6 +74,9 @@ _ECON_HARDWARE_PRICE_MISSING_RE = re.compile(
 _ECON_HARDWARE_UNRESOLVED_RE = re.compile(
     r"(Economics_Cost_Items) fila (\d+): no se pudo resolver el hardware seleccionado para '([^']+)'\."
 )
+_ECON_BATTERY_ENERGY_MISSING_RE = re.compile(
+    r"(Economics_Cost_Items) fila (\d+): la batería seleccionada tiene campos de potencia pero no una energía válida \('nom_kWh' o alias soportado\); la cantidad energética quedará en 0 kWh\."
+)
 _ECON_DUPLICATES_RE = re.compile(r"(Economics_(?:Cost|Price)_Items): nombres habilitados duplicados: (.+)\.")
 _ECON_MISSING_LAYER_RE = re.compile(r"(Economics_(?:Cost|Price)_Items): no hay filas habilitadas en '([^']+)'\.")
 _ECON_MIGRATED_DISABLED_RE = re.compile(r"(Economics_(?:Cost|Price)_Items): (\d+) filas migradas desde schema rico siguen deshabilitadas\.")
@@ -415,6 +418,18 @@ def localize_validation_message(issue: ValidationIssue, *, lang: str = "es") -> 
         if lang == "en":
             return f"Row {row} in {table_label} could not resolve the selected {binding_label.lower()}."
         return f"Fila {row} en {table_label}: no se pudo resolver el {binding_label.lower()} seleccionado."
+    if match := _ECON_BATTERY_ENERGY_MISSING_RE.fullmatch(message):
+        table_name, row = match.groups()
+        table_label = _economics_table_label(table_name, lang)
+        if lang == "en":
+            return (
+                f"Row {row} in {table_label} resolved battery power fields, but no valid energy field. "
+                f"Battery energy quantities will stay at 0 kWh."
+            )
+        return (
+            f"Fila {row} en {table_label}: la batería seleccionada tiene potencia, pero no una energía válida. "
+            f"La cantidad energética quedará en 0 kWh."
+        )
     if match := _ECON_DUPLICATES_RE.fullmatch(message):
         table_name, duplicates = match.groups()
         table_label = _economics_table_label(table_name, lang)

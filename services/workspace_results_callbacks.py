@@ -28,6 +28,7 @@ from .result_views import (
     format_horizon_year_value,
     resolve_selected_candidate_key_for_scenario,
     summarize_candidates_for_horizon,
+    visible_financial_metric_key,
 )
 from .runtime_paths import internal_results_root, project_exports_root
 from .schematic import (
@@ -40,9 +41,9 @@ from .schematic import (
 )
 from .session_state import commit_client_session, resolve_scenario_session
 from .workspace_status import resolve_results_status_digest
-from .scenario_session import update_selected_candidate
+from .scenario_session import select_candidate_and_sync_runtime_price
 from components import render_kpi_cards, render_schematic_inspector, render_schematic_legend
-from .ui_schema import build_display_columns, format_metric
+from .ui_schema import build_display_columns, format_metric, metric_help
 
 
 def _lang(value: str | None) -> str:
@@ -113,15 +114,19 @@ def _selected_candidate_banner(detail: dict | None, *, lang: str = "es") -> list
     battery_name = format_metric("selected_battery", detail.get("battery_name", "None"), lang) if detail.get("battery_name") is not None else fallback
     visible_summary = detail.get("visible_horizon_summary") or {}
     project_summary = detail.get("project_summary") or detail.get("summary") or {}
-    npv_value = visible_summary.get("NPV_COP")
-    if npv_value is None:
-        npv_value = project_summary.get("cum_disc_final")
+    financial_metric_key = str(visible_summary.get("display_metric_key") or "NPV_COP")
+    financial_value = visible_summary.get("display_value_COP")
+    if financial_value is None:
+        financial_value = project_summary.get("capex_client") if financial_metric_key == "capex_client" else project_summary.get("cum_disc_final")
     kwp_value = detail.get("kWp")
     banner_values = [
         (tr("workbench.selected_design.banner.kwp", lang), f"{float(kwp_value):.3f} kWp" if kwp_value is not None else fallback),
         (tr("workbench.selected_design.banner.battery", lang), battery_name or fallback),
         (tr("workbench.selected_design.banner.inverter", lang), str(inverter_name)),
-        (tr("workbench.selected_design.banner.npv", lang), format_metric("NPV_COP", npv_value, lang) if npv_value is not None else fallback),
+        (
+            tr("workbench.project_price.label", lang) if financial_metric_key == "capex_client" else tr("workbench.selected_design.banner.npv", lang),
+            format_metric(financial_metric_key, financial_value, lang) if financial_value is not None else fallback,
+        ),
     ]
     return [
         html.Div(
@@ -155,16 +160,16 @@ def _resolved_candidate_horizon(active, slider_value) -> int:
         requested_years = int(float(slider_value))
     except (TypeError, ValueError):
         requested_years = max_years
-    return max(1, min(requested_years, max_years))
+    return max(0, min(requested_years, max_years))
 
 
 def _candidate_horizon_marks(max_years: int) -> dict[int, str]:
     if max_years <= 6:
-        marks = list(range(1, max_years + 1))
+        marks = list(range(0, max_years + 1))
     elif max_years <= 10:
-        marks = sorted({1, *range(2, max_years, 2), max_years})
+        marks = sorted({0, 1, *range(2, max_years, 2), max_years})
     else:
-        marks = sorted({1, max(2, round(max_years / 2)), max_years})
+        marks = sorted({0, 1, max(2, round(max_years / 2)), max_years})
     return {int(year): str(int(year)) for year in marks}
 
 
@@ -184,11 +189,23 @@ def _payback_note_for_presentation(detail: dict | None, *, lang: str = "es") -> 
     return {"payback_years": tr(str(message_key), lang)}
 
 
-def _apply_workbench_table_text(columns: list[dict], tooltip_header: dict[str, str], *, lang: str = "es") -> tuple[list[dict], dict[str, str]]:
+def _apply_workbench_table_text(
+    columns: list[dict],
+    tooltip_header: dict[str, str],
+    *,
+    horizon_years: int,
+    lang: str = "es",
+) -> tuple[list[dict], dict[str, str]]:
     next_columns = [dict(column) for column in columns]
     next_tooltips = dict(tooltip_header)
+    if horizon_years == 0:
+        next_tooltips["NPV_COP"] = metric_help("capex_client", lang)
+    financial_label = tr("workbench.project_price.axis_label", lang) if horizon_years == 0 else None
     next_tooltips["payback_years"] = tr("workbench.horizon.helper", lang)
     for column in next_columns:
+        if column.get("id") == "NPV_COP" and financial_label is not None:
+            column["name"] = financial_label
+            continue
         if column.get("id") == "payback_years":
             column["name"] = tr("workbench.payback.project_axis_label", lang)
             break
@@ -367,7 +384,7 @@ def sync_candidate_horizon_slider(session_payload, language_value, current_value
     _, state, active = _session_with_scan(session_payload, lang)
     hidden_style = {"display": "none"}
     if active is None or active.scan_result is None or not _has_viable_scan_result(active.scan_result):
-        return 1, 1, {1: "1"}, 1, True, hidden_style, "", {}
+        return 0, 0, {0: "0"}, 0, True, hidden_style, "", {}
 
     max_years = _scenario_horizon_years(active)
     next_context = {
@@ -382,9 +399,9 @@ def sync_candidate_horizon_slider(session_payload, language_value, current_value
             resolved_value = int(float(current_value))
         except (TypeError, ValueError):
             resolved_value = max_years
-        value = max(1, min(resolved_value, max_years))
+        value = max(0, min(resolved_value, max_years))
     return (
-        1,
+        0,
         max_years,
         _candidate_horizon_marks(max_years),
         value,
@@ -416,7 +433,7 @@ def persist_selected_candidate(selected_rows, click_data, table_rows, session_pa
     )
     if selected_key == active.selected_candidate_key:
         raise PreventUpdate
-    state = update_selected_candidate(state, active.scenario_id, selected_key)
+    state, _prepared = select_candidate_and_sync_runtime_price(state, active.scenario_id, selected_key)
     client_state = commit_client_session(client_state, state)
     return client_state.to_payload()
 
@@ -451,6 +468,7 @@ def populate_results(session_payload, language_value, horizon_slider_value):
 
     scan = active.scan_result
     horizon_years = _resolved_candidate_horizon(active, horizon_slider_value)
+    financial_metric_key = visible_financial_metric_key(horizon_years)
     summary_strip = _scan_summary_strip(
         scan,
         panel_technology_mode=active.config_bundle.config.get("panel_technology_mode"),
@@ -466,15 +484,16 @@ def populate_results(session_payload, language_value, horizon_slider_value):
         "battery",
         "NPV_COP",
         "payback_years",
-        "capex_client",
         "self_consumption_ratio",
         "self_sufficiency_ratio",
         "annual_import_kwh",
         "annual_export_kwh",
         "peak_ratio",
     ]
+    if horizon_years != 0:
+        visible_columns.insert(4, "capex_client")
     columns, tooltip_header = build_display_columns(visible_columns, lang)
-    columns, tooltip_header = _apply_workbench_table_text(columns, tooltip_header, lang=lang)
+    columns, tooltip_header = _apply_workbench_table_text(columns, tooltip_header, horizon_years=horizon_years, lang=lang)
     columns.extend(
         [
             {"name": "candidate_key", "id": "candidate_key"},
@@ -483,8 +502,9 @@ def populate_results(session_payload, language_value, horizon_slider_value):
         ]
     )
     selected_index = table.index[table["candidate_key"] == selected_key].tolist() if selected_key else []
+    value_ascending = financial_metric_key == "capex_client"
     best_key = None if table.empty else str(
-        table.sort_values(by=["NPV_COP", "scan_order"], ascending=[False, True], kind="mergesort").iloc[0]["candidate_key"]
+        table.sort_values(by=["NPV_COP", "scan_order"], ascending=[value_ascending, True], kind="mergesort").iloc[0]["candidate_key"]
     )
     styles = _candidate_table_styles(selected_key, best_key)
     module_power_w = float(active.config_bundle.config.get("P_mod_W", 0.0) or 0.0)
@@ -493,6 +513,7 @@ def populate_results(session_payload, language_value, horizon_slider_value):
         selected_key=selected_key,
         lang=lang,
         horizon_years=horizon_years,
+        display_metric_key=financial_metric_key,
         payback_label=tr("workbench.payback.project_axis_label", lang),
         module_power_w=module_power_w,
         discarded_points=scan.discarded_points,
@@ -521,6 +542,9 @@ def populate_results(session_payload, language_value, horizon_slider_value):
     detail = scan.candidate_details[selected_key]
     presentation_detail = _visible_horizon_candidate_presentation(detail, horizon_years)
     kpis = build_kpis(presentation_detail)
+    kpi_label_overrides = {"payback_years": tr("workbench.payback.project_label", lang)}
+    if kpis.get("financial_metric_key") == "capex_client":
+        kpi_label_overrides["NPV"] = tr("workbench.project_price.axis_label", lang)
     monthly_balance = build_monthly_balance(detail["monthly"], lang=lang)
     cash_flow = build_cash_flow(detail["monthly"])
     return (
@@ -530,7 +554,7 @@ def populate_results(session_payload, language_value, horizon_slider_value):
         render_kpi_cards(
             kpis,
             lang,
-            label_overrides={"payback_years": tr("workbench.payback.project_label", lang)},
+            label_overrides=kpi_label_overrides,
             notes=_payback_note_for_presentation(presentation_detail, lang=lang),
         ),
         npv_figure,

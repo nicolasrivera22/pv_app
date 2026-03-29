@@ -5,6 +5,7 @@ from io import BytesIO
 
 import pandas.testing as pdt
 from openpyxl import load_workbook
+import pytest
 
 from services import (
     ScenarioSessionState,
@@ -18,12 +19,16 @@ from services import (
     export_scenario_workbook,
     load_example_config,
     normalize_inverter_catalog_rows,
+    prepare_economics_runtime_price_bridge,
     rename_scenario,
     run_scenario_scan,
+    select_candidate_and_sync_runtime_price,
     set_comparison_scenarios,
     update_scenario_bundle,
     update_selected_candidate,
 )
+from services.economics_engine import EconomicsPreviewResult
+from services.scenario_session import hydrate_scenario_scan, resolve_runtime_price_bridge_state
 
 
 def _fast_bundle():
@@ -103,6 +108,97 @@ def test_update_bundle_preserves_scan_for_economics_only_changes() -> None:
     assert state.project_dirty is True
 
 
+def test_run_scenario_scan_auto_bridges_effective_candidate_price() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Auto bridge", _fast_bundle()))
+
+    state = run_scenario_scan(state, state.active_scenario_id)
+    active = state.get_scenario()
+
+    assert active is not None
+    assert active.scan_result is not None
+    assert active.runtime_price_bridge is not None
+    prepared = prepare_economics_runtime_price_bridge(active)
+    assert prepared.applied is True
+    assert active.runtime_price_bridge.candidate_key == prepared.candidate_key
+    assert active.config_bundle.config["pricing_mode"] == "total"
+    assert float(active.config_bundle.config["price_total_COP"]) == pytest.approx(float(prepared.final_price_COP))
+    assert active.config_bundle.config["include_hw_in_price"] is False
+    assert float(active.config_bundle.config["price_others_total"]) == pytest.approx(0.0)
+
+
+def test_update_selected_candidate_remains_selection_only() -> None:
+    state = _run_named_scenario("Selection primitive")
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+    assert active.runtime_price_bridge is not None
+    non_best_key = next(
+        key for key in active.scan_result.candidate_details if key != active.scan_result.best_candidate_key
+    )
+    original_price_total = float(active.config_bundle.config["price_total_COP"])
+    original_bridge = active.runtime_price_bridge
+
+    state = update_selected_candidate(state, active.scenario_id, non_best_key)
+    updated = state.get_scenario()
+
+    assert updated is not None
+    assert updated.selected_candidate_key == non_best_key
+    assert float(updated.config_bundle.config["price_total_COP"]) == pytest.approx(original_price_total)
+    assert updated.runtime_price_bridge == original_bridge
+
+
+def test_select_candidate_and_sync_runtime_price_updates_runtime_fields() -> None:
+    state = _run_named_scenario("Selection sync")
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+    non_best_key = None
+    expected = None
+    for candidate_key in active.scan_result.candidate_details:
+        if candidate_key == active.runtime_price_bridge.candidate_key:
+            continue
+        prepared = prepare_economics_runtime_price_bridge(replace(active, selected_candidate_key=candidate_key))
+        if prepared.applied:
+            non_best_key = candidate_key
+            expected = prepared
+            break
+    assert non_best_key is not None
+    assert expected is not None
+    assert expected.applied is True
+
+    state, prepared = select_candidate_and_sync_runtime_price(state, active.scenario_id, non_best_key)
+    updated = state.get_scenario()
+
+    assert prepared.applied is True
+    assert updated is not None
+    assert updated.selected_candidate_key == non_best_key
+    assert updated.config_bundle.config["pricing_mode"] == "total"
+    assert float(updated.config_bundle.config["price_total_COP"]) == pytest.approx(float(expected.final_price_COP))
+    assert updated.config_bundle.config["include_hw_in_price"] is False
+    assert float(updated.config_bundle.config["price_others_total"]) == pytest.approx(0.0)
+    assert updated.runtime_price_bridge is not None
+    assert updated.runtime_price_bridge.candidate_key == non_best_key
+    assert updated.runtime_price_bridge.applied_economics_signature is not None
+
+
+def test_hydrate_scenario_scan_does_not_auto_bridge() -> None:
+    state = _run_named_scenario("Hydrate only")
+    active = state.get_scenario()
+    assert active is not None
+    stripped = replace(active, scan_result=None, runtime_price_bridge=None)
+    state = replace(
+        state,
+        scenarios=tuple(stripped if item.scenario_id == stripped.scenario_id else item for item in state.scenarios),
+    )
+
+    hydrated = hydrate_scenario_scan(state, active.scenario_id)
+    hydrated_active = hydrated.get_scenario()
+
+    assert hydrated_active is not None
+    assert hydrated_active.scan_result is not None
+    assert hydrated_active.runtime_price_bridge is None
+
+
 def test_selected_candidate_resets_after_scenario_change_and_rerun() -> None:
     state = _run_named_scenario("Selection test")
     active = state.get_scenario()
@@ -127,6 +223,67 @@ def test_selected_candidate_resets_after_scenario_change_and_rerun() -> None:
 
     assert rerun.selected_candidate_key == rerun.scan_result.best_candidate_key
     assert non_best_key not in rerun.scan_result.candidate_details
+
+
+def test_blocked_selection_sync_keeps_same_candidate_bridge_active(monkeypatch) -> None:
+    state = _run_named_scenario("Blocked same candidate")
+    active = state.get_scenario()
+    assert active is not None
+    assert active.runtime_price_bridge is not None
+
+    def _blocked_preview(_scenario, *, economics_cost_items, economics_price_items):
+        _ = economics_cost_items, economics_price_items
+        return EconomicsPreviewResult(
+            state="rerun_required",
+            message_key="workspace.admin.economics.preview.state.rerun_required",
+        )
+
+    monkeypatch.setattr("services.scenario_session.resolve_economics_preview", _blocked_preview)
+
+    next_state, prepared = select_candidate_and_sync_runtime_price(
+        state,
+        active.scenario_id,
+        active.selected_candidate_key,
+    )
+    next_active = next_state.get_scenario()
+
+    assert prepared.applied is False
+    assert next_active is not None
+    assert next_active.runtime_price_bridge is not None
+    assert next_active.runtime_price_bridge.stale is False
+    assert resolve_runtime_price_bridge_state(next_active) == "active"
+
+
+def test_blocked_selection_sync_stales_bridge_when_governing_design_changes(monkeypatch) -> None:
+    state = _run_named_scenario("Blocked other candidate")
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+    assert active.runtime_price_bridge is not None
+    original_price_total = float(active.config_bundle.config["price_total_COP"])
+    non_best_key = next(
+        key for key in active.scan_result.candidate_details if key != active.scan_result.best_candidate_key
+    )
+
+    def _blocked_preview(_scenario, *, economics_cost_items, economics_price_items):
+        _ = economics_cost_items, economics_price_items
+        return EconomicsPreviewResult(
+            state="rerun_required",
+            message_key="workspace.admin.economics.preview.state.rerun_required",
+        )
+
+    monkeypatch.setattr("services.scenario_session.resolve_economics_preview", _blocked_preview)
+
+    next_state, prepared = select_candidate_and_sync_runtime_price(state, active.scenario_id, non_best_key)
+    next_active = next_state.get_scenario()
+
+    assert prepared.applied is False
+    assert next_active is not None
+    assert next_active.selected_candidate_key == non_best_key
+    assert float(next_active.config_bundle.config["price_total_COP"]) == pytest.approx(original_price_total)
+    assert next_active.runtime_price_bridge is not None
+    assert next_active.runtime_price_bridge.stale is True
+    assert resolve_runtime_price_bridge_state(next_active) == "stale"
 
 
 def test_catalog_row_validation_reports_duplicate_names_and_nonnumeric_values() -> None:
