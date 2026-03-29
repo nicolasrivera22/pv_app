@@ -2,18 +2,19 @@
   "format_version": 1,
   "name": "Demo",
   "slug": "demo",
-  "active_scenario_id": "scenario-f55fda33",
+  "active_scenario_id": "scenario-98d784b1",
   "comparison_scenario_ids": [],
   "design_comparison_candidate_keys": {},
   "scenarios": [
     {
-      "scenario_id": "scenario-f55fda33",
+      "scenario_id": "scenario-98d784b1",
       "name": "Base",
       "source_name": "PV_inputs.xlsx",
       "selected_candidate_key": null,
       "dirty": true,
       "last_run_at": null,
-      "scan_fingerprint": null
+      "scan_fingerprint": null,
+      "runtime_price_bridge": null
     }
   ],
   "ui_prefs": {

@@ -9,7 +9,7 @@ from .config_metadata import update_config_table_values
 from .cache import fingerprint_deterministic_input
 from .economics_engine import economics_preview_warning_messages, resolve_economics_preview
 from .scenario_runner import resolve_deterministic_scan
-from .types import LoadedConfigBundle, ScenarioRecord, ScenarioSessionState, ValidationIssue
+from .types import LoadedConfigBundle, RuntimePriceBridgeRecord, ScenarioRecord, ScenarioSessionState, ValidationIssue
 from .validation import refresh_bundle_issues
 
 
@@ -29,6 +29,7 @@ def create_scenario_record(name: str, bundle: LoadedConfigBundle, source_name: s
         selected_candidate_key=None,
         dirty=True,
         last_run_at=None,
+        runtime_price_bridge=None,
     )
 
 
@@ -47,6 +48,89 @@ def _replace_scenario(state: ScenarioSessionState, updated: ScenarioRecord) -> S
 
 def _mark_project_dirty(state: ScenarioSessionState, *, dirty: bool = True) -> ScenarioSessionState:
     return replace(state, project_dirty=dirty)
+
+
+def _normalize_bridge_compare_value(value: object) -> object:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = float(value)
+        return int(number) if number.is_integer() else round(number, 10)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped == "":
+            return ""
+        lowered = stripped.lower()
+        if lowered in {"true", "false"}:
+            return lowered == "true"
+        numeric_text = stripped.replace(",", "")
+        try:
+            number = float(numeric_text)
+        except ValueError:
+            return stripped
+        return int(number) if number.is_integer() else round(number, 10)
+    return value
+
+
+def runtime_price_bridge_matches_config(record: RuntimePriceBridgeRecord | None, config: dict[str, object]) -> bool:
+    if record is None:
+        return False
+    return all(
+        (
+            _normalize_bridge_compare_value(config.get("pricing_mode"))
+            == _normalize_bridge_compare_value(record.applied_pricing_mode),
+            _normalize_bridge_compare_value(config.get("price_total_COP"))
+            == _normalize_bridge_compare_value(record.applied_price_total_COP),
+            _normalize_bridge_compare_value(config.get("include_hw_in_price"))
+            == _normalize_bridge_compare_value(record.applied_include_hw_in_price),
+            _normalize_bridge_compare_value(config.get("price_others_total"))
+            == _normalize_bridge_compare_value(record.applied_price_others_total),
+        )
+    )
+
+
+def invalidate_runtime_price_bridge_if_needed(
+    record: RuntimePriceBridgeRecord | None,
+    config: dict[str, object],
+) -> RuntimePriceBridgeRecord | None:
+    if record is None or record.stale:
+        return record
+    if runtime_price_bridge_matches_config(record, config):
+        return record
+    return replace(record, stale=True)
+
+
+def resolve_runtime_price_bridge_state(scenario: ScenarioRecord) -> str:
+    record = scenario.runtime_price_bridge
+    if record is None:
+        return "none"
+    if record.stale or not runtime_price_bridge_matches_config(record, scenario.config_bundle.config):
+        return "stale"
+    return "active"
+
+
+def build_runtime_price_bridge_record(
+    *,
+    candidate_key: str,
+    final_price_COP: float,
+    resolved_preview_state: str,
+    applied_at: str | None = None,
+) -> RuntimePriceBridgeRecord:
+    resolved_total = float(final_price_COP)
+    return RuntimePriceBridgeRecord(
+        source="economics_preview",
+        candidate_key=str(candidate_key),
+        final_price_COP=resolved_total,
+        resolved_preview_state=str(resolved_preview_state),
+        applied_at=applied_at or datetime.now().isoformat(timespec="seconds"),
+        applied_pricing_mode="total",
+        applied_price_total_COP=resolved_total,
+        applied_include_hw_in_price=False,
+        applied_price_others_total=0.0,
+        stale=False,
+    )
 
 
 def _sanitize_design_comparison_keys(
@@ -91,6 +175,7 @@ def duplicate_scenario(state: ScenarioSessionState, scenario_id: str, new_name: 
         selected_candidate_key=source.selected_candidate_key,
         dirty=source.dirty,
         last_run_at=source.last_run_at,
+        runtime_price_bridge=source.runtime_price_bridge,
     )
     return add_scenario(state, copied, make_active=True)
 
@@ -188,6 +273,7 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
             for message in economics_preview_warning_messages(preview)
         ]
     refreshed_bundle = refresh_bundle_issues(bundle, extra_issues=tuple(persisted_extra_issues))
+    bridge_record = invalidate_runtime_price_bridge_if_needed(scenario.runtime_price_bridge, refreshed_bundle.config)
     if preserve_scan and scenario.scan_result is not None:
         updated = replace(
             scenario,
@@ -197,6 +283,7 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
             scan_fingerprint=next_fingerprint or scenario.scan_fingerprint,
             selected_candidate_key=selected_candidate_key,
             dirty=False,
+            runtime_price_bridge=bridge_record,
         )
     else:
         updated = replace(
@@ -208,6 +295,7 @@ def update_scenario_bundle(state: ScenarioSessionState, scenario_id: str, bundle
             selected_candidate_key=None,
             dirty=True,
             last_run_at=None,
+            runtime_price_bridge=bridge_record,
         )
     return _mark_project_dirty(_replace_scenario(state, updated))
 
@@ -247,8 +335,23 @@ def update_scenario_risk_config(
         config_bundle=updated_bundle,
         source_name=updated_bundle.source_name,
         scan_fingerprint=updated_fingerprint,
+        runtime_price_bridge=invalidate_runtime_price_bridge_if_needed(scenario.runtime_price_bridge, updated_bundle.config),
     )
     return _mark_project_dirty(_replace_scenario(state, updated))
+
+
+def apply_runtime_price_bridge(
+    state: ScenarioSessionState,
+    scenario_id: str,
+    *,
+    bundle: LoadedConfigBundle,
+    bridge_record: RuntimePriceBridgeRecord,
+) -> ScenarioSessionState:
+    next_state = update_scenario_bundle(state, scenario_id, bundle)
+    updated = next_state.get_scenario(scenario_id)
+    if updated is None:
+        raise KeyError(f"No existe el escenario '{scenario_id}'.")
+    return _replace_scenario(next_state, replace(updated, runtime_price_bridge=bridge_record))
 
 
 def _apply_scan_result(

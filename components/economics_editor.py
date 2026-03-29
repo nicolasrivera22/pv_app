@@ -143,9 +143,24 @@ def economics_editor_section(*, lang: str = "es") -> html.Div:
                         children=[
                             html.Div(
                                 className="section-head",
-                                children=[html.H4(tr("workspace.admin.economics.preview.title", lang), id="economics-preview-title")],
+                                children=[
+                                    html.H4(tr("workspace.admin.economics.preview.title", lang), id="economics-preview-title"),
+                                    html.Div(
+                                        className="profile-table-actions",
+                                        children=[
+                                            html.Button(
+                                                tr("workspace.admin.economics.bridge.button", lang),
+                                                id="economics-bridge-btn",
+                                                n_clicks=0,
+                                                className="action-btn",
+                                            ),
+                                        ],
+                                    ),
+                                ],
                             ),
                             html.P(tr("workspace.admin.economics.preview.copy", lang), id="economics-preview-copy", className="section-copy"),
+                            html.Div(id="economics-bridge-cta-note", className="status-line economics-bridge-cta-note"),
+                            html.Div(id="economics-bridge-status-shell", className="economics-bridge-status-shell"),
                             html.Div(id="economics-preview-content", className="economics-preview-stack"),
                         ],
                     ),

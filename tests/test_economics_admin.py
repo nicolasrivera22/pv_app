@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pandas.testing as pdt
 import pytest
+from pv_product.simulator import calculate_capex_client
 
 from components.economics_editor import economics_editor_section
 import services.workspace_admin_callbacks as admin_callbacks
@@ -40,13 +41,17 @@ from services.economics_tables import (
     economics_price_items_rows_to_editor,
 )
 from services.economics_engine import EconomicsPreviewResult, EconomicsQuantities, EconomicsResult
-from services.project_io import projects_root
+from services.project_io import projects_root, read_project_manifest
+from services.scenario_session import resolve_runtime_price_bridge_state
 from services.ui_schema import build_table_display_columns
 from services.validation import localize_validation_message, validate_economics_tables
 from services.workspace_admin_callbacks import (
+    apply_economics_runtime_price_bridge,
     apply_admin_edits,
     render_economics_preview,
+    render_runtime_price_bridge_ui,
     sync_admin_draft,
+    sync_economics_bridge_cta,
 )
 
 COST_COLUMNS = ["stage", "name", "basis", "amount_COP", "source_mode", "hardware_binding", "enabled", "notes"]
@@ -89,6 +94,35 @@ def _find_component(node, component_id: str):
         return node
     children = getattr(node, "children", None)
     return _find_component(children, component_id)
+
+
+def _bridge_args(
+    active,
+    *,
+    economics_cost_rows=None,
+    economics_price_rows=None,
+    assumption_input_ids=None,
+    assumption_values=None,
+    lang: str = "es",
+):
+    return (
+        [] if assumption_input_ids is None else assumption_input_ids,
+        [] if assumption_values is None else assumption_values,
+        active.config_bundle.inverter_catalog.to_dict("records"),
+        active.config_bundle.battery_catalog.to_dict("records"),
+        active.config_bundle.panel_catalog.to_dict("records"),
+        active.config_bundle.month_profile_table.to_dict("records"),
+        active.config_bundle.sun_profile_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table_others.to_dict("records"),
+        economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang=lang)
+        if economics_cost_rows is None
+        else economics_cost_rows,
+        economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang=lang)
+        if economics_price_rows is None
+        else economics_price_rows,
+        lang,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -1027,3 +1061,368 @@ def test_amount_cop_manual_value_survives_mode_toggles() -> None:
     assert float(manual_rows[0]["amount_COP"]) == pytest.approx(654_321.0)
     assert float(selected_rows[0]["amount_COP"]) == pytest.approx(654_321.0)
     assert float(manual_again_rows[0]["amount_COP"]) == pytest.approx(654_321.0)
+
+
+def test_bridge_cta_is_disabled_until_preview_is_ready(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _admin_payload(monkeypatch, tmp_path)
+
+    disabled, note = sync_economics_bridge_cta(payload, *_bridge_args(active))
+
+    assert disabled is True
+    assert "escaneo determinístico" in note.lower()
+
+
+def test_bridge_cta_blocks_live_hardware_warnings(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    economics_cost_rows = economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang="es")
+    economics_cost_rows[0] = {
+        **economics_cost_rows[0],
+        "source_mode": "Hardware seleccionado",
+        "hardware_binding": "Sin vínculo",
+    }
+
+    disabled, note = sync_economics_bridge_cta(
+        payload,
+        *_bridge_args(active, economics_cost_rows=economics_cost_rows),
+    )
+
+    assert disabled is True
+    assert "warnings live" in note.lower()
+
+
+def test_bridge_cta_blocks_when_non_economics_admin_drafts_exist(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+
+    disabled, note = sync_economics_bridge_cta(
+        payload,
+        *_bridge_args(
+            active,
+            assumption_input_ids=[{"field": "buy_tariff_COP_kWh"}],
+            assumption_values=[float(active.config_bundle.config["buy_tariff_COP_kWh"]) + 10.0],
+        ),
+    )
+
+    assert disabled is True
+    assert "fuera de economics" in note.lower()
+
+
+def test_bridge_callback_reresolves_preview_and_writes_runtime_total(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    captured: dict[str, object] = {}
+
+    def _fake_preview(scenario, *, economics_cost_items, economics_price_items):
+        captured["scenario_id"] = scenario.scenario_id
+        captured["cost_items"] = economics_cost_items
+        captured["price_items"] = economics_price_items
+        return EconomicsPreviewResult(
+            state="ready",
+            candidate_key="bridge::candidate",
+            candidate_source="selected",
+            message_key="workspace.admin.economics.preview.state.ready",
+            result=EconomicsResult(
+                quantities=EconomicsQuantities(
+                    candidate_key="bridge::candidate",
+                    kWp=15.0,
+                    panel_count=30,
+                    inverter_count=1,
+                    battery_kwh=0.0,
+                    battery_name="",
+                    inverter_name="INV-1",
+                    panel_name="PAN-1",
+                ),
+                cost_rows=(),
+                price_rows=(),
+                technical_subtotal_COP=25_000_000.0,
+                installed_subtotal_COP=5_000_000.0,
+                cost_total_COP=30_000_000.0,
+                commercial_adjustment_COP=7_500_000.0,
+                commercial_offer_COP=37_500_000.0,
+                sale_adjustment_COP=1_250_000.0,
+                final_price_COP=38_750_000.0,
+                final_price_per_kwp_COP=2_583_333.33,
+            ),
+        )
+
+    monkeypatch.setattr(admin_callbacks, "resolve_economics_preview", _fake_preview)
+
+    next_payload, status = apply_economics_runtime_price_bridge(
+        1,
+        payload,
+        "",
+        *_bridge_args(active),
+    )
+
+    _, updated_state = resolve_client_session(next_payload, language="es")
+    updated_active = updated_state.get_scenario()
+
+    assert captured["scenario_id"] == active.scenario_id
+    assert isinstance(captured["cost_items"], list)
+    assert isinstance(captured["price_items"], list)
+    assert updated_active is not None
+    assert updated_active.config_bundle.config["pricing_mode"] == "total"
+    assert float(updated_active.config_bundle.config["price_total_COP"]) == pytest.approx(38_750_000.0)
+    assert updated_active.config_bundle.config["include_hw_in_price"] is False
+    assert float(updated_active.config_bundle.config["price_others_total"]) == pytest.approx(0.0)
+    assert updated_active.config_bundle.config["include_var_others"] == active.config_bundle.config["include_var_others"]
+    assert updated_active.runtime_price_bridge is not None
+    assert updated_active.runtime_price_bridge.candidate_key == "bridge::candidate"
+    assert updated_active.runtime_price_bridge.final_price_COP == pytest.approx(38_750_000.0)
+    assert updated_active.runtime_price_bridge.resolved_preview_state == "ready"
+    assert updated_active.runtime_price_bridge.applied_price_total_COP == pytest.approx(38_750_000.0)
+    assert "38" in status
+
+
+def test_bridge_callback_aborts_cleanly_if_preview_becomes_ineligible(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+
+    def _fake_preview(_scenario, *, economics_cost_items, economics_price_items):
+        _ = economics_cost_items, economics_price_items
+        return EconomicsPreviewResult(
+            state="no_scan",
+            message_key="workspace.admin.economics.preview.state.no_scan",
+        )
+
+    monkeypatch.setattr(admin_callbacks, "resolve_economics_preview", _fake_preview)
+
+    next_payload, status = apply_economics_runtime_price_bridge(
+        1,
+        payload,
+        "",
+        *_bridge_args(active),
+    )
+
+    _, unchanged_state = resolve_client_session(next_payload, language="es")
+    unchanged_active = unchanged_state.get_scenario()
+
+    assert unchanged_active is not None
+    assert unchanged_active.runtime_price_bridge is None
+    assert unchanged_active.config_bundle.config["pricing_mode"] == active.config_bundle.config["pricing_mode"]
+    assert float(unchanged_active.config_bundle.config["price_total_COP"]) == pytest.approx(
+        float(active.config_bundle.config["price_total_COP"])
+    )
+    assert "escaneo determinístico" in status.lower()
+
+
+def test_bridge_is_idempotent_for_repeated_clicks_on_same_ready_state(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+
+    first_payload, _first_status = apply_economics_runtime_price_bridge(
+        1,
+        payload,
+        "",
+        *_bridge_args(active),
+    )
+    second_payload, _second_status = apply_economics_runtime_price_bridge(
+        2,
+        payload,
+        "",
+        *_bridge_args(active),
+    )
+
+    _, first_state = resolve_client_session(first_payload, language="es")
+    _, second_state = resolve_client_session(second_payload, language="es")
+    first_active = first_state.get_scenario()
+    second_active = second_state.get_scenario()
+
+    assert first_active is not None
+    assert second_active is not None
+    assert first_active.config_bundle.config["pricing_mode"] == "total"
+    assert second_active.config_bundle.config["pricing_mode"] == "total"
+    assert float(first_active.config_bundle.config["price_total_COP"]) == pytest.approx(
+        float(second_active.config_bundle.config["price_total_COP"])
+    )
+    assert first_active.runtime_price_bridge is not None
+    assert second_active.runtime_price_bridge is not None
+    assert first_active.runtime_price_bridge.candidate_key == second_active.runtime_price_bridge.candidate_key
+    assert first_active.runtime_price_bridge.final_price_COP == pytest.approx(second_active.runtime_price_bridge.final_price_COP)
+    assert first_active.runtime_price_bridge.stale is False
+    assert second_active.runtime_price_bridge.stale is False
+
+
+def test_bridge_persists_active_provenance_and_updates_runtime_note(monkeypatch, tmp_path) -> None:
+    client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    state = save_project(state, project_name="Proyecto Bridge Runtime", language="es")
+    payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+    assert active is not None
+
+    next_payload, _status = apply_economics_runtime_price_bridge(
+        1,
+        payload,
+        "Proyecto Bridge Runtime",
+        *_bridge_args(active),
+    )
+
+    _, updated_state = resolve_client_session(next_payload, language="es")
+    updated_active = updated_state.get_scenario()
+    assert updated_active is not None
+    assert updated_active.runtime_price_bridge is not None
+    assert resolve_runtime_price_bridge_state(updated_active) == "active"
+
+    manifest = read_project_manifest(updated_state.project_slug)
+    manifest_scenario = next(item for item in manifest.scenarios if item.scenario_id == updated_active.scenario_id)
+    assert manifest_scenario.runtime_price_bridge is not None
+    assert manifest_scenario.runtime_price_bridge.final_price_COP == pytest.approx(
+        updated_active.runtime_price_bridge.final_price_COP
+    )
+
+    reopened = open_project(updated_state.project_slug)
+    reopened_active = reopened.get_scenario(updated_active.scenario_id)
+    assert reopened_active is not None
+    assert reopened_active.runtime_price_bridge is not None
+    assert resolve_runtime_price_bridge_state(reopened_active) == "active"
+
+    bridge_status, runtime_note = render_runtime_price_bridge_ui(next_payload, "es")
+
+    assert bridge_status is not None
+    assert "total vigente del runtime proviene de economics".lower() in str(bridge_status).lower()
+    assert "total fijo del proyecto aplicado desde economics".lower() in str(runtime_note).lower()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("pricing_mode", "variable"),
+        ("price_total_COP", 12_345_678.0),
+        ("include_hw_in_price", True),
+        ("price_others_total", 999_000.0),
+    ],
+)
+def test_bridge_goes_stale_when_legacy_runtime_fields_diverge(field, value, monkeypatch, tmp_path) -> None:
+    client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    state = save_project(state, project_name="Proyecto Bridge Stale", language="es")
+    payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+    assert active is not None
+
+    bridged_payload, _status = apply_economics_runtime_price_bridge(
+        1,
+        payload,
+        "Proyecto Bridge Stale",
+        *_bridge_args(active),
+    )
+    bridged_client, bridged_state = resolve_client_session(bridged_payload, language="es")
+    bridged_active = bridged_state.get_scenario()
+    assert bridged_active is not None
+    assert bridged_active.runtime_price_bridge is not None
+
+    changed_bundle = replace(
+        bridged_active.config_bundle,
+        config={**bridged_active.config_bundle.config, field: value},
+    )
+    stale_state = update_scenario_bundle(bridged_state, bridged_active.scenario_id, changed_bundle)
+    stale_payload = commit_client_session(bridged_client, stale_state).to_payload()
+    stale_active = stale_state.get_scenario()
+
+    assert stale_active is not None
+    assert stale_active.runtime_price_bridge is not None
+    assert stale_active.runtime_price_bridge.stale is True
+    assert resolve_runtime_price_bridge_state(stale_active) == "stale"
+
+    bridge_status, runtime_note = render_runtime_price_bridge_ui(stale_payload, "es")
+    assert "histórico" in str(bridge_status).lower()
+    assert "estas bandas siguen alimentando el runtime activo" in str(runtime_note).lower()
+
+
+def test_new_bridge_replaces_previous_provenance_snapshot(monkeypatch, tmp_path) -> None:
+    client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    state = save_project(state, project_name="Proyecto Bridge Replace", language="es")
+    payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+    assert active is not None
+
+    first_price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
+    first_price_rows[0] = {**first_price_rows[0], "value": 5}
+    first_payload, _ = apply_economics_runtime_price_bridge(
+        1,
+        payload,
+        "Proyecto Bridge Replace",
+        *_bridge_args(active, economics_price_rows=first_price_rows),
+    )
+    first_client, first_state = resolve_client_session(first_payload, language="es")
+    first_active = first_state.get_scenario()
+    assert first_active is not None and first_active.runtime_price_bridge is not None
+    first_total = float(first_active.runtime_price_bridge.final_price_COP)
+
+    rerun_state = run_scenario_scan(first_state, first_active.scenario_id)
+    rerun_payload = commit_client_session(first_client, rerun_state).to_payload()
+    rerun_active = rerun_state.get_scenario()
+    assert rerun_active is not None and rerun_active.scan_result is not None
+
+    second_price_rows = economics_price_items_rows_to_editor(rerun_active.config_bundle.economics_price_items_table, lang="es")
+    second_price_rows[0] = {**second_price_rows[0], "value": 25}
+    second_payload, _ = apply_economics_runtime_price_bridge(
+        2,
+        rerun_payload,
+        "Proyecto Bridge Replace",
+        *_bridge_args(rerun_active, economics_price_rows=second_price_rows),
+    )
+    _, second_state = resolve_client_session(second_payload, language="es")
+    second_active = second_state.get_scenario()
+
+    assert second_active is not None
+    assert second_active.runtime_price_bridge is not None
+    assert float(second_active.runtime_price_bridge.final_price_COP) != pytest.approx(first_total)
+
+
+def test_editing_economics_without_bridge_does_not_change_legacy_runtime_fields(monkeypatch, tmp_path) -> None:
+    client_state, state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    economics_price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
+    economics_price_rows[0] = {**economics_price_rows[0], "value": 22}
+
+    _meta = sync_admin_draft(
+        payload,
+        [],
+        [],
+        active.config_bundle.inverter_catalog.to_dict("records"),
+        active.config_bundle.battery_catalog.to_dict("records"),
+        active.config_bundle.panel_catalog.to_dict("records"),
+        active.config_bundle.month_profile_table.to_dict("records"),
+        active.config_bundle.sun_profile_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table.to_dict("records"),
+        active.config_bundle.cop_kwp_table_others.to_dict("records"),
+        active.config_bundle.economics_cost_items_table.to_dict("records"),
+        economics_price_rows,
+    )
+
+    _, current_state = resolve_client_session(payload, language="es")
+    current_active = current_state.get_scenario()
+
+    assert current_active is not None
+    assert current_active.runtime_price_bridge is None
+    assert current_active.config_bundle.config["pricing_mode"] == active.config_bundle.config["pricing_mode"]
+    assert float(current_active.config_bundle.config["price_total_COP"]) == pytest.approx(
+        float(active.config_bundle.config["price_total_COP"])
+    )
+
+
+def test_legacy_runtime_uses_bridged_total_after_rerun(monkeypatch, tmp_path) -> None:
+    _client_state, state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    bridged_payload, _status = apply_economics_runtime_price_bridge(
+        1,
+        payload,
+        "",
+        *_bridge_args(active),
+    )
+    _, bridged_state = resolve_client_session(bridged_payload, language="es")
+    bridged_active = bridged_state.get_scenario()
+
+    assert bridged_active is not None
+    bridged_total = float(bridged_active.config_bundle.config["price_total_COP"])
+
+    rerun_state = run_scenario_scan(bridged_state, bridged_active.scenario_id)
+    rerun_active = rerun_state.get_scenario()
+    assert rerun_active is not None
+    assert rerun_active.scan_result is not None
+
+    best_key = rerun_active.scan_result.best_candidate_key
+    detail = rerun_active.scan_result.candidate_details[best_key]
+
+    assert float(detail["summary"]["capex_client"]) == pytest.approx(bridged_total)
+    assert calculate_capex_client(
+        rerun_active.config_bundle.config,
+        float(detail["kWp"]),
+        detail["inv_sel"],
+        detail["battery"],
+        None,
+    ) == pytest.approx(bridged_total)

@@ -2,18 +2,19 @@
   "format_version": 1,
   "name": "Mi Demo 1",
   "slug": "mi_demo_1",
-  "active_scenario_id": "scenario-07f65af7",
+  "active_scenario_id": "scenario-03c5b6de",
   "comparison_scenario_ids": [],
   "design_comparison_candidate_keys": {},
   "scenarios": [
     {
-      "scenario_id": "scenario-07f65af7",
-      "name": "Escenario 3",
+      "scenario_id": "scenario-03c5b6de",
+      "name": "Escenario 1",
       "source_name": "PV_inputs.xlsx",
-      "selected_candidate_key": null,
-      "dirty": true,
-      "last_run_at": null,
-      "scan_fingerprint": null
+      "selected_candidate_key": "17.400::BAT-32",
+      "dirty": false,
+      "last_run_at": "2026-03-29T12:33:24",
+      "scan_fingerprint": "f24e1de05805dd88715447ded35008db917f7327c5505022ed6401e3fd0f4462",
+      "runtime_price_bridge": null
     }
   ],
   "ui_prefs": {

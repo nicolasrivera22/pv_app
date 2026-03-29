@@ -56,6 +56,49 @@ class ValidationIssue:
 
 
 @dataclass(frozen=True)
+class RuntimePriceBridgeRecord:
+    source: str
+    candidate_key: str
+    final_price_COP: float
+    resolved_preview_state: str
+    applied_at: str
+    applied_pricing_mode: str
+    applied_price_total_COP: float
+    applied_include_hw_in_price: bool
+    applied_price_others_total: float
+    stale: bool = False
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "source": self.source,
+            "candidate_key": self.candidate_key,
+            "final_price_COP": self.final_price_COP,
+            "resolved_preview_state": self.resolved_preview_state,
+            "applied_at": self.applied_at,
+            "applied_pricing_mode": self.applied_pricing_mode,
+            "applied_price_total_COP": self.applied_price_total_COP,
+            "applied_include_hw_in_price": self.applied_include_hw_in_price,
+            "applied_price_others_total": self.applied_price_others_total,
+            "stale": self.stale,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "RuntimePriceBridgeRecord":
+        return cls(
+            source=str(payload["source"]),
+            candidate_key=str(payload["candidate_key"]),
+            final_price_COP=float(payload["final_price_COP"]),
+            resolved_preview_state=str(payload.get("resolved_preview_state", "")),
+            applied_at=str(payload["applied_at"]),
+            applied_pricing_mode=str(payload.get("applied_pricing_mode", "")),
+            applied_price_total_COP=float(payload.get("applied_price_total_COP", payload.get("final_price_COP", 0.0))),
+            applied_include_hw_in_price=bool(payload.get("applied_include_hw_in_price", False)),
+            applied_price_others_total=float(payload.get("applied_price_others_total", 0.0)),
+            stale=bool(payload.get("stale", False)),
+        )
+
+
+@dataclass(frozen=True)
 class LoadedConfigBundle:
     config: dict[str, Any]
     inverter_catalog: pd.DataFrame
@@ -251,6 +294,7 @@ class ScenarioRecord:
     selected_candidate_key: str | None = None
     dirty: bool = True
     last_run_at: str | None = None
+    runtime_price_bridge: RuntimePriceBridgeRecord | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -263,6 +307,7 @@ class ScenarioRecord:
             "selected_candidate_key": self.selected_candidate_key,
             "dirty": self.dirty,
             "last_run_at": self.last_run_at,
+            "runtime_price_bridge": None if self.runtime_price_bridge is None else self.runtime_price_bridge.to_payload(),
         }
 
     @classmethod
@@ -278,6 +323,11 @@ class ScenarioRecord:
             selected_candidate_key=payload.get("selected_candidate_key"),
             dirty=bool(payload.get("dirty", True)),
             last_run_at=payload.get("last_run_at"),
+            runtime_price_bridge=(
+                None
+                if payload.get("runtime_price_bridge") is None
+                else RuntimePriceBridgeRecord.from_payload(payload["runtime_price_bridge"])
+            ),
         )
 
 
@@ -402,6 +452,7 @@ class ProjectScenarioManifest:
     dirty: bool = True
     last_run_at: str | None = None
     scan_fingerprint: str | None = None
+    runtime_price_bridge: RuntimePriceBridgeRecord | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -412,6 +463,7 @@ class ProjectScenarioManifest:
             "dirty": self.dirty,
             "last_run_at": self.last_run_at,
             "scan_fingerprint": self.scan_fingerprint,
+            "runtime_price_bridge": None if self.runtime_price_bridge is None else self.runtime_price_bridge.to_payload(),
         }
 
     @classmethod
@@ -424,6 +476,11 @@ class ProjectScenarioManifest:
             dirty=bool(payload.get("dirty", True)),
             last_run_at=payload.get("last_run_at"),
             scan_fingerprint=payload.get("scan_fingerprint"),
+            runtime_price_bridge=(
+                None
+                if payload.get("runtime_price_bridge") is None
+                else RuntimePriceBridgeRecord.from_payload(payload["runtime_price_bridge"])
+            ),
         )
 
 

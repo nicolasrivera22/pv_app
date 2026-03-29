@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import datetime
 import logging
 import time
 
@@ -11,6 +13,7 @@ import plotly.graph_objects as go
 from components.admin_view import build_admin_access_shell
 from components.assumption_editor import render_assumption_sections
 from components.ui_mode_gate import render_ui_mode_gate
+from .config_metadata import update_config_table_values
 from .admin_access import (
     admin_pin_configured,
     grant_admin_session_access,
@@ -35,6 +38,11 @@ from .economics_engine import (
 from .i18n import tr
 from .profile_charts import build_profile_chart
 from .project_io import save_project
+from .scenario_session import (
+    apply_runtime_price_bridge,
+    build_runtime_price_bridge_record,
+    resolve_runtime_price_bridge_state,
+)
 from .session_state import commit_client_session, resolve_client_session
 from .ui_schema import assumption_context_map, build_assumption_sections, build_table_display_columns, format_metric
 from .validation import (
@@ -44,7 +52,7 @@ from .validation import (
     localize_validation_message,
 )
 from .types import ValidationIssue
-from .workbench_ui import collect_config_updates, workbench_status_message
+from .workbench_ui import collect_config_updates, frame_from_rows, workbench_status_message
 from .workspace_actions import (
     apply_workspace_draft_to_state,
     resolve_workspace_bundle_for_display,
@@ -128,6 +136,7 @@ ADMIN_REQUIRED_TABLE_KEYS = (
     "cop_kwp_table",
     "cop_kwp_table_others",
 )
+ECONOMICS_BRIDGE_TABLE_KEYS = {"economics_cost_items", "economics_price_items"}
 
 
 def _project_is_bound(state) -> bool:
@@ -140,6 +149,182 @@ def _resolved_project_name(project_name_value, state) -> str:
 
 def _join_status_parts(*parts: str) -> str:
     return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def _format_timestamp_text(value: str | None) -> str:
+    return str(value or "").replace("T", " ").strip()
+
+
+def _admin_current_changes(
+    active,
+    *,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    panel_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    price_kwp_rows,
+    price_kwp_others_rows,
+    economics_cost_rows,
+    economics_price_rows,
+):
+    normalized_cost_rows = (
+        active.config_bundle.economics_cost_items_table.to_dict("records")
+        if economics_cost_rows is None
+        else economics_cost_items_rows_from_editor(economics_cost_rows)
+    )
+    normalized_price_rows = (
+        active.config_bundle.economics_price_items_table.to_dict("records")
+        if economics_price_rows is None
+        else economics_price_items_rows_from_editor(economics_price_rows)
+    )
+    table_rows = _admin_table_rows_payload(
+        inverter_rows,
+        battery_rows,
+        panel_rows,
+        month_profile_rows,
+        sun_profile_rows,
+        normalized_cost_rows,
+        normalized_price_rows,
+        price_kwp_rows,
+        price_kwp_others_rows,
+    )
+    unhydrated_tables = _unhydrated_admin_tables(table_rows)
+    current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
+    owned_fields = {
+        str(component_id.get("field", "")).strip()
+        for component_id in (assumption_input_ids or [])
+        if str(component_id.get("field", "")).strip()
+    }
+    overrides = {
+        field: current_config.get(field)
+        for field in owned_fields
+        if _normalize_compare_value(current_config.get(field)) != _normalize_compare_value(active.config_bundle.config.get(field))
+    }
+    rows_payload: dict[str, list[dict[str, object]]] = {}
+    owned_tables: set[str] = set()
+    if not unhydrated_tables:
+        rows_payload, owned_tables = table_draft_rows(
+            base_bundle=active.config_bundle,
+            table_rows=table_rows,
+        )
+    return {
+        "normalized_cost_rows": normalized_cost_rows,
+        "normalized_price_rows": normalized_price_rows,
+        "unhydrated_tables": unhydrated_tables,
+        "overrides": overrides,
+        "owned_fields": owned_fields,
+        "rows_payload": rows_payload,
+        "owned_tables": owned_tables,
+    }
+
+
+def _has_non_economics_pending_changes(changes: dict[str, object]) -> bool:
+    if changes.get("overrides"):
+        return True
+    rows_payload = changes.get("rows_payload") or {}
+    return any(table_key not in ECONOMICS_BRIDGE_TABLE_KEYS for table_key in rows_payload)
+
+
+def _resolve_economics_bridge_context(
+    active,
+    *,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    panel_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    price_kwp_rows,
+    price_kwp_others_rows,
+    economics_cost_rows,
+    economics_price_rows,
+):
+    changes = _admin_current_changes(
+        active,
+        assumption_input_ids=assumption_input_ids,
+        assumption_values=assumption_values,
+        inverter_rows=inverter_rows,
+        battery_rows=battery_rows,
+        panel_rows=panel_rows,
+        month_profile_rows=month_profile_rows,
+        sun_profile_rows=sun_profile_rows,
+        price_kwp_rows=price_kwp_rows,
+        price_kwp_others_rows=price_kwp_others_rows,
+        economics_cost_rows=economics_cost_rows,
+        economics_price_rows=economics_price_rows,
+    )
+    preview = resolve_economics_preview(
+        active,
+        economics_cost_items=changes["normalized_cost_rows"],
+        economics_price_items=changes["normalized_price_rows"],
+    )
+    live_warnings = economics_preview_warning_messages(preview)
+    if changes["unhydrated_tables"]:
+        blocker_key = "workspace.admin.economics.bridge.cta.loading"
+    elif _has_non_economics_pending_changes(changes):
+        blocker_key = "workspace.admin.economics.bridge.cta.blocked_non_economics"
+    elif preview.state != PREVIEW_STATE_READY or preview.result is None:
+        blocker_key = f"workspace.admin.economics.bridge.cta.state.{preview.state}"
+    elif live_warnings:
+        blocker_key = "workspace.admin.economics.bridge.cta.blocked_warnings"
+    else:
+        blocker_key = None
+    return {
+        **changes,
+        "preview": preview,
+        "live_warnings": live_warnings,
+        "eligible": blocker_key is None,
+        "blocker_key": blocker_key,
+    }
+
+
+def _economics_bridge_cta_text(bridge_context: dict[str, object], *, lang: str) -> str:
+    blocker_key = bridge_context.get("blocker_key")
+    if blocker_key:
+        return tr(str(blocker_key), lang)
+    preview = bridge_context.get("preview")
+    if not isinstance(preview, EconomicsPreviewResult) or preview.result is None:
+        return tr("workspace.admin.economics.bridge.cta.loading", lang)
+    return tr(
+        "workspace.admin.economics.bridge.cta.ready",
+        lang,
+        final_price=_format_cop(preview.result.final_price_COP, lang),
+    )
+
+
+def _build_runtime_price_bridge_bundle(
+    active,
+    *,
+    final_price_COP: float,
+    normalized_cost_rows: list[dict[str, object]],
+    normalized_price_rows: list[dict[str, object]],
+):
+    next_config = dict(active.config_bundle.config)
+    next_config.update(
+        {
+            "pricing_mode": "total",
+            "price_total_COP": float(final_price_COP),
+            "include_hw_in_price": False,
+            "price_others_total": 0.0,
+        }
+    )
+    return replace(
+        active.config_bundle,
+        config=next_config,
+        config_table=update_config_table_values(active.config_bundle.config_table, next_config),
+        economics_cost_items_table=frame_from_rows(
+            normalized_cost_rows,
+            list(active.config_bundle.economics_cost_items_table.columns),
+        ),
+        economics_price_items_table=frame_from_rows(
+            normalized_price_rows,
+            list(active.config_bundle.economics_price_items_table.columns),
+        ),
+    )
 
 
 def _admin_table_rows_payload(
@@ -786,6 +971,50 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
     ]
 
 
+def _render_runtime_price_bridge_status(scenario, *, lang: str):
+    state_key = resolve_runtime_price_bridge_state(scenario)
+    record = scenario.runtime_price_bridge
+    if state_key == "none" or record is None:
+        return []
+    applied_at = _format_timestamp_text(record.applied_at)
+    final_price = _format_cop(record.applied_price_total_COP, lang)
+    body = tr(
+        f"workspace.admin.economics.bridge.status.{state_key}",
+        lang,
+        candidate_key=record.candidate_key,
+        final_price=final_price,
+        applied_at=applied_at,
+    )
+    detail_key = (
+        "workspace.admin.economics.bridge.status.active.detail_rerun"
+        if state_key == "active" and scenario.dirty
+        else f"workspace.admin.economics.bridge.status.{state_key}.detail"
+    )
+    return html.Div(
+        id="economics-bridge-status-card",
+        className=f"subpanel economics-bridge-status-card economics-bridge-status-{state_key}",
+        children=[
+            html.H5(tr(f"workspace.admin.economics.bridge.status.{state_key}.title", lang), id="economics-bridge-status-title"),
+            html.Div(body, id="economics-bridge-status-body", className="status-line"),
+            html.P(tr(detail_key, lang), id="economics-bridge-status-detail", className="section-copy"),
+        ],
+    )
+
+
+def _runtime_pricing_note_text(scenario, *, lang: str) -> str:
+    state_key = resolve_runtime_price_bridge_state(scenario)
+    record = scenario.runtime_price_bridge
+    if state_key != "active" or record is None:
+        return tr("workspace.admin.runtime_pricing.note", lang)
+    return tr(
+        "workspace.admin.runtime_pricing.note.bridge_active",
+        lang,
+        candidate_key=record.candidate_key,
+        final_price=_format_cop(record.applied_price_total_COP, lang),
+        applied_at=_format_timestamp_text(record.applied_at),
+    )
+
+
 ADMIN_EXCLUDED_FIELDS = {"use_excel_profile", "alpha_mix", "E_month_kWh"}
 
 
@@ -1115,6 +1344,191 @@ def render_economics_preview(session_payload, economics_cost_rows, economics_pri
         economics_price_items=normalized_price_rows,
     )
     return _render_economics_preview(preview, live_warnings=economics_preview_warning_messages(preview), lang=lang)
+
+
+@callback(
+    Output("economics-bridge-btn", "disabled"),
+    Output("economics-bridge-cta-note", "children"),
+    Input("scenario-session-store", "data"),
+    Input({"type": "admin-assumption-input", "field": ALL}, "id"),
+    Input({"type": "admin-assumption-input", "field": ALL}, "value"),
+    Input("inverter-table-editor", "data", allow_optional=True),
+    Input("battery-table-editor", "data", allow_optional=True),
+    Input("panel-table-editor", "data", allow_optional=True),
+    Input("month-profile-editor", "data", allow_optional=True),
+    Input("sun-profile-editor", "data", allow_optional=True),
+    Input("price-kwp-editor", "data", allow_optional=True),
+    Input("price-kwp-others-editor", "data", allow_optional=True),
+    Input("economics-cost-items-editor", "data", allow_optional=True),
+    Input("economics-price-items-editor", "data", allow_optional=True),
+    Input("language-selector", "value"),
+)
+def sync_economics_bridge_cta(
+    session_payload,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    panel_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    price_kwp_rows,
+    price_kwp_others_rows,
+    economics_cost_rows,
+    economics_price_rows,
+    language_value,
+):
+    lang = _lang(language_value)
+    if not _admin_page_access(session_payload).allowed:
+        return True, ""
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        return True, ""
+    active = state.get_scenario()
+    if active is None:
+        return True, ""
+    bridge_context = _resolve_economics_bridge_context(
+        active,
+        assumption_input_ids=assumption_input_ids,
+        assumption_values=assumption_values,
+        inverter_rows=inverter_rows,
+        battery_rows=battery_rows,
+        panel_rows=panel_rows,
+        month_profile_rows=month_profile_rows,
+        sun_profile_rows=sun_profile_rows,
+        price_kwp_rows=price_kwp_rows,
+        price_kwp_others_rows=price_kwp_others_rows,
+        economics_cost_rows=economics_cost_rows,
+        economics_price_rows=economics_price_rows,
+    )
+    return (not bool(bridge_context["eligible"])), _economics_bridge_cta_text(bridge_context, lang=lang)
+
+
+@callback(
+    Output("economics-bridge-status-shell", "children"),
+    Output("runtime-pricing-editor-note", "children"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+)
+def render_runtime_price_bridge_ui(session_payload, language_value):
+    lang = _lang(language_value)
+    if not _admin_page_access(session_payload).allowed:
+        return [], tr("workspace.admin.runtime_pricing.note", lang)
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        return [], tr("workspace.admin.runtime_pricing.note", lang)
+    active = state.get_scenario()
+    if active is None:
+        return [], tr("workspace.admin.runtime_pricing.note", lang)
+    return _render_runtime_price_bridge_status(active, lang=lang), _runtime_pricing_note_text(active, lang=lang)
+
+
+@callback(
+    Output("scenario-session-store", "data", allow_duplicate=True),
+    Output("workbench-status", "children", allow_duplicate=True),
+    Input("economics-bridge-btn", "n_clicks", allow_optional=True),
+    State("scenario-session-store", "data"),
+    State("project-name-input", "value"),
+    State({"type": "admin-assumption-input", "field": ALL}, "id"),
+    State({"type": "admin-assumption-input", "field": ALL}, "value"),
+    State("inverter-table-editor", "data", allow_optional=True),
+    State("battery-table-editor", "data", allow_optional=True),
+    State("panel-table-editor", "data", allow_optional=True),
+    State("month-profile-editor", "data", allow_optional=True),
+    State("sun-profile-editor", "data", allow_optional=True),
+    State("price-kwp-editor", "data", allow_optional=True),
+    State("price-kwp-others-editor", "data", allow_optional=True),
+    State("economics-cost-items-editor", "data", allow_optional=True),
+    State("economics-price-items-editor", "data", allow_optional=True),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def apply_economics_runtime_price_bridge(
+    _bridge_clicks,
+    session_payload,
+    project_name_value,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    panel_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    price_kwp_rows,
+    price_kwp_others_rows,
+    economics_cost_rows,
+    economics_price_rows,
+    language_value,
+):
+    lang = _lang(language_value)
+    if not _admin_page_access(session_payload).allowed:
+        raise PreventUpdate
+    client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        raise PreventUpdate
+    try:
+        active = state.get_scenario()
+        if active is None:
+            raise PreventUpdate
+        bridge_context = _resolve_economics_bridge_context(
+            active,
+            assumption_input_ids=assumption_input_ids,
+            assumption_values=assumption_values,
+            inverter_rows=inverter_rows,
+            battery_rows=battery_rows,
+            panel_rows=panel_rows,
+            month_profile_rows=month_profile_rows,
+            sun_profile_rows=sun_profile_rows,
+            price_kwp_rows=price_kwp_rows,
+            price_kwp_others_rows=price_kwp_others_rows,
+            economics_cost_rows=economics_cost_rows,
+            economics_price_rows=economics_price_rows,
+        )
+        if not bridge_context["eligible"]:
+            client_state = commit_client_session(client_state, state, bump_revision=False)
+            return client_state.to_payload(), _economics_bridge_cta_text(bridge_context, lang=lang)
+        preview = bridge_context["preview"]
+        assert isinstance(preview, EconomicsPreviewResult)
+        assert preview.result is not None
+        bridge_bundle = _build_runtime_price_bridge_bundle(
+            active,
+            final_price_COP=preview.result.final_price_COP,
+            normalized_cost_rows=bridge_context["normalized_cost_rows"],
+            normalized_price_rows=bridge_context["normalized_price_rows"],
+        )
+        bridge_record = build_runtime_price_bridge_record(
+            candidate_key=preview.candidate_key or preview.result.quantities.candidate_key,
+            final_price_COP=preview.result.final_price_COP,
+            resolved_preview_state=preview.state,
+            applied_at=datetime.now().isoformat(timespec="seconds"),
+        )
+        state = apply_runtime_price_bridge(
+            state,
+            active.scenario_id,
+            bundle=bridge_bundle,
+            bridge_record=bridge_record,
+        )
+        saved = False
+        if _project_is_bound(state):
+            state = save_project(state, project_name=_resolved_project_name(project_name_value, state), language=lang)
+            saved = True
+        client_state = commit_client_session(client_state, state)
+        status = _join_status_parts(
+            tr(
+                "workspace.admin.economics.bridge.applied",
+                lang,
+                final_price=_format_cop(bridge_record.applied_price_total_COP, lang),
+                candidate_key=bridge_record.candidate_key,
+            ),
+            tr("workbench.run_flow.saved", lang) if saved else "",
+            tr("workbench.run_flow.needs_rerun", lang),
+        )
+        return client_state.to_payload(), status
+    except PreventUpdate:
+        raise
+    except Exception as exc:
+        client_state = commit_client_session(client_state, state, bump_revision=False)
+        return client_state.to_payload(), workbench_status_message("common.action_failed", lang, error=exc)
 
 
 @callback(

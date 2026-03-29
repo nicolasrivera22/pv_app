@@ -90,6 +90,7 @@ def _build_manifest(state: ScenarioSessionState, *, project_name: str, slug: str
             dirty=scenario.dirty,
             last_run_at=scenario.last_run_at,
             scan_fingerprint=scenario.scan_fingerprint,
+            runtime_price_bridge=scenario.runtime_price_bridge,
         )
         for scenario in state.scenarios
     )
@@ -171,6 +172,7 @@ def open_project(slug: str) -> ScenarioSessionState:
                 dirty=item.dirty,
                 last_run_at=item.last_run_at,
                 scan_fingerprint=item.scan_fingerprint,
+                runtime_price_bridge=item.runtime_price_bridge,
             )
         )
     scenario_ids = {scenario.scenario_id for scenario in scenarios}
