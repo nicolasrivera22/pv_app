@@ -428,13 +428,10 @@ def test_catalog_editor_stacks_inverter_then_battery_tables() -> None:
     assert _find_component(third_panel, "battery-table-editor") is None
 
 
-def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_controls() -> None:
+def test_profile_editor_uses_main_row_layout_title_tooltips_and_only_resource_profile_controls() -> None:
     section = profile_editor_section()
     main_grid = _find_component(section, "profile-main-grid")
     main_chart = _find_component(section, "profile-main-chart-panel")
-    secondary_grid = _find_component(section, "profile-secondary-grid")
-    secondary_chart = _find_component(section, "profile-secondary-chart-panel")
-    relocation_card = _find_component(section, "profile-demand-relocated-card")
     activators = _find_components(
         section,
         lambda node: isinstance(getattr(node, "id", None), dict) and node.id.get("type") == "profile-table-activate",
@@ -442,53 +439,33 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_pricing_row_cont
 
     assert main_grid is not None
     assert main_chart is not None
-    assert secondary_grid is not None
-    assert secondary_chart is not None
-    assert relocation_card is not None
+    assert _find_component(section, "profile-secondary-grid") is None
+    assert _find_component(section, "profile-secondary-chart-panel") is None
+    assert _find_component(section, "profile-demand-relocated-card") is None
     assert _find_component(section, "profile-demand-legacy-shell") is None
     assert _find_component(workbench_page.layout, "active-profile-table-state") is not None
     assert len(main_grid.children) == 2
-    assert len(secondary_grid.children) == 2
-    assert [getattr(child, "id", None) for child in section.children[2:7]] == [
+    assert [getattr(child, "id", None) for child in section.children[2:4]] == [
         "profile-main-grid",
         "profile-main-chart-panel",
-        "profile-secondary-grid",
-        "profile-demand-relocated-card",
-        "profile-secondary-chart-panel",
     ]
-    assert len(activators) == 4
+    assert len(activators) == 2
     assert {component.id["table"] for component in activators} == {
         "month-profile-editor",
         "sun-profile-editor",
-        "price-kwp-editor",
-        "price-kwp-others-editor",
     }
     assert _find_component(section, "month-profile-card") is not None
     assert _find_component(section, "sun-profile-card") is not None
-    assert _find_component(section, "price-kwp-card") is not None
-    assert _find_component(section, "price-kwp-others-card") is not None
+    assert _find_component(section, "price-kwp-card") is None
+    assert _find_component(section, "price-kwp-others-card") is None
     assert _find_component(main_grid, "demand-profile-weights-card") is None
-    assert _find_component(secondary_grid, "demand-profile-card") is None
-    assert _find_component(secondary_grid, "demand-profile-general-card") is None
     assert _find_component(main_grid.children[0], "month-profile-title").children == tr("workbench.profiles.month", "es")
     assert _find_component(main_grid.children[1], "sun-profile-title").children == tr("workbench.profiles.sun", "es")
-    assert _find_component(relocation_card, "profile-demand-relocated-title").children == tr("workspace.assumptions.demand.title", "es")
     assert _find_component(section, "month-profile-editor").page_size == 12
     assert _find_component(section, "sun-profile-editor").page_size == 12
-    assert _find_component(section, "price-kwp-editor").page_size == 8
-    assert _find_component(section, "price-kwp-others-editor").page_size == 8
-    assert _find_component(section, "price-kwp-editor").row_deletable is True
-    assert _find_component(section, "price-kwp-others-editor").row_deletable is True
     assert _find_component(section, "month-profile-editor").row_deletable is False
     assert _find_component(section, "month-profile-tooltip").children == tr("workbench.profiles.tooltip.month", "es")
     assert _find_component(section, "sun-profile-tooltip").children == tr("workbench.profiles.tooltip.sun", "es")
-    assert _find_component(section, "price-kwp-tooltip").children == tr("workbench.profiles.tooltip.price", "es")
-    assert _find_component(section, "price-kwp-others-tooltip").children == tr("workbench.profiles.tooltip.price_others", "es")
-    assert _find_component(relocation_card, "profile-demand-relocated-copy").children == tr("workspace.admin.demand_moved.copy", "es")
-    assert _find_component(section, "add-price-kwp-row-btn").children == tr("workbench.profiles.add_row", "es")
-    assert _find_component(section, "add-price-kwp-others-row-btn").children == tr("workbench.profiles.add_row", "es")
-    assert "profile-secondary-pricing-panel" in str(_find_component(section, "price-kwp-panel").className)
-    assert "profile-secondary-pricing-panel" in str(_find_component(section, "price-kwp-others-panel").className)
     assert _find_component(workbench_page.layout, "run-scan-choice-dialog") is not None
     assert _find_component(workbench_page.layout, "run-scan-save-and-run-btn") is not None
     assert _find_component(workbench_page.layout, "run-scan-run-unsaved-btn") is not None
@@ -1137,19 +1114,6 @@ def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
 
     assert float(rebuilt.month_profile_table.loc[0, "Demand_month"]) == 1.15
     assert float(rebuilt.demand_month_factor[0]) == 1.15
-
-
-def test_profile_pricing_add_row_callbacks_use_current_column_ids() -> None:
-    columns = [{"id": "MIN"}, {"id": "MAX"}, {"id": "PRECIO_POR_KWP"}]
-    rows = [{"MIN": 1.0, "MAX": 5.0, "PRECIO_POR_KWP": 5_500_000}]
-
-    price_rows = workbench_page.add_price_kwp_row(1, rows, columns)
-    other_rows = workbench_page.add_price_kwp_others_row(1, rows, columns)
-
-    assert price_rows[-1] == {"MIN": "", "MAX": "", "PRECIO_POR_KWP": ""}
-    assert other_rows[-1] == {"MIN": "", "MAX": "", "PRECIO_POR_KWP": ""}
-
-
 def test_run_scan_choice_dialog_disables_save_until_project_name_exists() -> None:
     style, title, copy, save_label, disabled, unsaved_label, cancel_label = workbench_page.sync_run_scan_choice_dialog({"open": True}, "", "en")
     named = workbench_page.sync_run_scan_choice_dialog({"open": True}, "Demo", "es")
@@ -1167,8 +1131,8 @@ def test_run_scan_choice_dialog_disables_save_until_project_name_exists() -> Non
 
 
 def test_profile_table_activator_translation_uses_current_language() -> None:
-    assert workbench_page.translate_profile_table_activators("en") == ["Preview chart"] * 4
-    assert workbench_page.translate_profile_table_activators("es") == ["Ver gráfica"] * 4
+    assert workbench_page.translate_profile_table_activators("en") == ["Preview chart"] * 2
+    assert workbench_page.translate_profile_table_activators("es") == ["Ver gráfica"] * 2
 
 
 def test_profile_table_header_click_toggles_the_active_chart(monkeypatch) -> None:
@@ -1178,9 +1142,9 @@ def test_profile_table_header_click_toggles_the_active_chart(monkeypatch) -> Non
         SimpleNamespace(triggered_id={"type": "profile-table-activate", "table": "sun-profile-editor"}),
     )
 
-    clicks = [0, 1, 0, 0]
-    activated = workbench_page.sync_active_profile_table(clicks, None, None, None, None, {"table_id": None})
-    cleared = workbench_page.sync_active_profile_table(clicks, None, None, None, None, {"table_id": "sun-profile-editor"})
+    clicks = [0, 1]
+    activated = workbench_page.sync_active_profile_table(clicks, None, None, {"table_id": None})
+    cleared = workbench_page.sync_active_profile_table(clicks, None, None, {"table_id": "sun-profile-editor"})
 
     assert activated == {"table_id": "sun-profile-editor"}
     assert cleared == {"table_id": None}
@@ -1194,7 +1158,7 @@ def test_profile_table_header_mount_with_zero_clicks_does_not_auto_activate(monk
     )
 
     with pytest.raises(PreventUpdate):
-        workbench_page.sync_active_profile_table([0, 0, 0, 0], None, None, None, None, {"table_id": None})
+        workbench_page.sync_active_profile_table([0, 0], None, None, {"table_id": None})
 
 
 def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -> None:
@@ -1204,8 +1168,6 @@ def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -
         [],
         None,
         {"row": 2, "column": 1},
-        None,
-        None,
         {"table_id": None},
     )
 
@@ -1216,28 +1178,14 @@ def test_profile_table_active_cell_activates_without_toggling_off(monkeypatch) -
             [],
             None,
             {"row": 2, "column": 1},
-            None,
-            None,
             {"table_id": "sun-profile-editor"},
         )
 
 
-def test_hidden_profile_table_sanitization_clears_active_chart() -> None:
-    cleared = workbench_page.sanitize_active_profile_table(
-        {"table_id": "price-kwp-others-editor"},
-        {"display": "block"},
-        {"display": "none"},
-    )
-
-    assert cleared == {"table_id": None}
-
-
-def test_profile_chart_render_routes_main_and_secondary_tables_and_marks_one_active_card() -> None:
+def test_profile_chart_render_marks_one_active_resource_card() -> None:
     bundle = load_example_config()
     month_columns, _ = build_table_display_columns("month_profile", list(bundle.month_profile_table.columns), "en")
     sun_columns, _ = build_table_display_columns("sun_profile", list(bundle.sun_profile_table.columns), "en")
-    price_columns, _ = build_table_display_columns("cop_kwp", list(bundle.cop_kwp_table.columns), "en")
-    price_others_columns, _ = build_table_display_columns("cop_kwp_others", list(bundle.cop_kwp_table_others.columns), "en")
 
     main = workbench_page.render_active_profile_chart(
         {"table_id": "sun-profile-editor"},
@@ -1245,65 +1193,30 @@ def test_profile_chart_render_routes_main_and_secondary_tables_and_marks_one_act
         month_columns,
         bundle.sun_profile_table.to_dict("records"),
         sun_columns,
-        bundle.cop_kwp_table.to_dict("records"),
-        price_columns,
-        bundle.cop_kwp_table_others.to_dict("records"),
-        price_others_columns,
         "en",
-        {"display": "block"},
-        {"display": "block"},
-    )
-    secondary = workbench_page.render_active_profile_chart(
-        {"table_id": "price-kwp-editor"},
-        bundle.month_profile_table.to_dict("records"),
-        month_columns,
-        bundle.sun_profile_table.to_dict("records"),
-        sun_columns,
-        bundle.cop_kwp_table.to_dict("records"),
-        price_columns,
-        bundle.cop_kwp_table_others.to_dict("records"),
-        price_others_columns,
-        "en",
-        {"display": "block"},
-        {"display": "block"},
     )
 
     assert main[0]["display"] == "grid"
     assert main[1] == tr("workbench.profiles.sun", "en")
-    assert main[4]["display"] == "none"
-    assert sum("profile-table-card-active" in class_name for class_name in main[8:]) == 1
-
-    assert secondary[0]["display"] == "none"
-    assert secondary[4]["display"] == "grid"
-    assert secondary[5] == tr("workbench.profiles.price", "en")
-    assert sum("profile-table-card-active" in class_name for class_name in secondary[8:]) == 1
+    assert sum("profile-table-card-active" in class_name for class_name in main[4:]) == 1
 
 
-def test_hidden_active_profile_table_hides_chart_shells_and_active_classes() -> None:
+def test_inactive_profile_chart_hides_chart_shell_and_active_classes() -> None:
     bundle = load_example_config()
     month_columns, _ = build_table_display_columns("month_profile", list(bundle.month_profile_table.columns), "es")
     sun_columns, _ = build_table_display_columns("sun_profile", list(bundle.sun_profile_table.columns), "es")
-    price_columns, _ = build_table_display_columns("cop_kwp", list(bundle.cop_kwp_table.columns), "es")
-    price_others_columns, _ = build_table_display_columns("cop_kwp_others", list(bundle.cop_kwp_table_others.columns), "es")
 
     rendered = workbench_page.render_active_profile_chart(
-        {"table_id": "price-kwp-editor"},
+        {"table_id": None},
         bundle.month_profile_table.to_dict("records"),
         month_columns,
         bundle.sun_profile_table.to_dict("records"),
         sun_columns,
-        bundle.cop_kwp_table.to_dict("records"),
-        price_columns,
-        bundle.cop_kwp_table_others.to_dict("records"),
-        price_others_columns,
         "es",
-        {"display": "none"},
-        {"display": "block"},
     )
 
     assert rendered[0]["display"] == "none"
-    assert rendered[4]["display"] == "none"
-    assert all("profile-table-card-active" not in class_name for class_name in rendered[8:])
+    assert all("profile-table-card-active" not in class_name for class_name in rendered[4:])
 
 
 def test_apply_button_auto_saves_bound_project_after_rebuild(monkeypatch) -> None:

@@ -137,32 +137,19 @@ def test_general_demand_chart_derives_total_when_needed() -> None:
     assert any("total" in str(trace.name).lower() for trace in render.figure.data)
 
 
-def test_price_band_charts_generate_band_labels_and_ignore_dirty_rows() -> None:
+def test_unknown_profile_chart_ids_return_localized_empty_figure() -> None:
     bundle = load_example_config()
-    rows = [
-        {"MIN": "1", "MAX": "5", "PRECIO_POR_KWP": "5500000"},
-        {"MIN": "", "MAX": "", "PRECIO_POR_KWP": ""},
-        {"MIN": "8", "MAX": "10", "PRECIO_POR_KWP": "oops"},
-    ]
 
-    price_render = build_profile_chart(
+    render = build_profile_chart(
         "price-kwp-editor",
-        rows,
+        bundle.cop_kwp_table.to_dict("records"),
         _columns("cop_kwp", bundle.cop_kwp_table, lang="en"),
         "en",
     )
-    others_render = build_profile_chart(
-        "price-kwp-others-editor",
-        bundle.cop_kwp_table_others.to_dict("records"),
-        _columns("cop_kwp_others", bundle.cop_kwp_table_others, lang="en"),
-        "en",
-    )
 
-    assert price_render.row_target == "secondary"
-    assert price_render.figure.data[0].type == "bar"
-    assert list(price_render.figure.data[0].x) == ["1-5"]
-    assert "Min kWp" in price_render.figure.data[0].hovertemplate
-    assert others_render.figure.data[0].type == "bar"
+    assert render.row_target == "main"
+    assert render.title == ""
+    assert not render.figure.data
 
 
 def test_empty_or_partial_rows_return_a_localized_empty_figure() -> None:

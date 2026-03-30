@@ -4,7 +4,7 @@ from .candidate_explorer import candidate_explorer_section
 from .catalog_editor import catalog_editor_section
 from .economics_editor import economics_editor_section
 from .kpi_cards import render_kpi_cards
-from .profile_editor import demand_profile_module, profile_editor_section, resource_profile_editor_section, runtime_pricing_editor_section
+from .profile_editor import demand_profile_module, profile_editor_section, resource_profile_editor_section
 from .selected_candidate_deep_dive import selected_candidate_deep_dive_section
 from .risk_charts import (
     build_ecdf_figure,
@@ -48,7 +48,6 @@ __all__ = [
     "risk_charts_section",
     "risk_controls_section",
     "risk_tables_section",
-    "runtime_pricing_editor_section",
     "scenario_sidebar",
     "selected_candidate_deep_dive_section",
     "unifilar_diagram_section",

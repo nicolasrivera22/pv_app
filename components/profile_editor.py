@@ -504,65 +504,6 @@ def _resource_profile_editor_children(*, lang: str = "es") -> list:
     ]
 
 
-def _runtime_pricing_editor_children(*, lang: str = "es") -> list:
-    return [
-        html.Div(
-            id="profile-secondary-grid",
-            className="profile-secondary-grid",
-            children=[
-                _profile_panel(
-                    "price-kwp-card",
-                    "workbench.profiles.price",
-                    "price-kwp-title",
-                    "workbench.profiles.tooltip.price",
-                    "price-kwp-tooltip",
-                    "price-kwp-editor",
-                    panel_id="price-kwp-panel",
-                    panel_class_name="profile-secondary-pricing-panel",
-                    add_row_button_id="add-price-kwp-row-btn",
-                    placeholder_id="price-kwp-placeholder",
-                    row_deletable=True,
-                    lang=lang,
-                ),
-                _profile_panel(
-                    "price-kwp-others-card",
-                    "workbench.profiles.price_others",
-                    "price-kwp-others-title",
-                    "workbench.profiles.tooltip.price_others",
-                    "price-kwp-others-tooltip",
-                    "price-kwp-others-editor",
-                    panel_id="price-kwp-others-panel",
-                    panel_class_name="profile-secondary-pricing-panel",
-                    add_row_button_id="add-price-kwp-others-row-btn",
-                    placeholder_id="price-kwp-others-placeholder",
-                    row_deletable=True,
-                    lang=lang,
-                ),
-            ],
-        ),
-        html.Div(
-                id="profile-demand-relocated-card",
-                className="subpanel demand-relocated-card",
-                children=[
-                    html.H4(tr("workspace.assumptions.demand.title", lang), id="profile-demand-relocated-title"),
-                    html.P(tr("workspace.admin.demand_moved.copy", lang), id="profile-demand-relocated-copy", className="section-copy"),
-                    dcc.Link(
-                        tr("workspace.admin.demand_moved.link", lang),
-                        id="profile-demand-relocated-link",
-                        href="/assumptions",
-                        className="action-btn tertiary",
-                ),
-            ],
-        ),
-        _profile_chart_panel(
-            panel_id="profile-secondary-chart-panel",
-            title_id="profile-secondary-chart-title",
-            subtitle_id="profile-secondary-chart-subtitle",
-            graph_id="profile-secondary-chart-graph",
-        ),
-    ]
-
-
 def resource_profile_editor_section(*, lang: str = "es") -> html.Div:
     return html.Div(
         className="panel secondary-panel",
@@ -572,19 +513,6 @@ def resource_profile_editor_section(*, lang: str = "es") -> html.Div:
             *_resource_profile_editor_children(lang=lang),
         ],
     )
-
-
-def runtime_pricing_editor_section(*, lang: str = "es") -> html.Div:
-    return html.Div(
-        className="panel secondary-panel",
-        children=[
-            html.Div(className="section-head", children=[html.H3(tr("workspace.admin.runtime_pricing.title", lang), id="runtime-pricing-editor-title")]),
-            html.Div(tr("workspace.admin.runtime_pricing.note", lang), id="runtime-pricing-editor-note", className="section-copy section-copy-wide"),
-            *_runtime_pricing_editor_children(lang=lang),
-        ],
-    )
-
-
 def profile_editor_section(*, lang: str = "es") -> html.Div:
     return html.Div(
         className="panel secondary-panel",
@@ -592,6 +520,5 @@ def profile_editor_section(*, lang: str = "es") -> html.Div:
             html.Div(className="section-head", children=[html.H3(tr("workbench.profiles", lang), id="profile-editor-title")]),
             html.Div(tr("workbench.profiles.note", lang), id="profile-editor-note", className="section-copy section-copy-wide"),
             *_resource_profile_editor_children(lang=lang),
-            *_runtime_pricing_editor_children(lang=lang),
         ],
     )

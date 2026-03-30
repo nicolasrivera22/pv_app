@@ -108,21 +108,8 @@ PROFILE_MAIN_TABLE_IDS = (
     "month-profile-editor",
     "sun-profile-editor",
 )
-PROFILE_SECONDARY_TABLE_IDS = (
-    "price-kwp-editor",
-    "price-kwp-others-editor",
-)
-PROFILE_TABLE_IDS = (*PROFILE_MAIN_TABLE_IDS, *PROFILE_SECONDARY_TABLE_IDS)
-PROFILE_ACTIVATOR_TABLE_IDS = (
-    "month-profile-editor",
-    "sun-profile-editor",
-    "price-kwp-editor",
-    "price-kwp-others-editor",
-)
-PROFILE_TABLE_VISIBILITY_PANELS = {
-    "price-kwp-editor": "price-kwp-panel",
-    "price-kwp-others-editor": "price-kwp-others-panel",
-}
+PROFILE_TABLE_IDS = PROFILE_MAIN_TABLE_IDS
+PROFILE_ACTIVATOR_TABLE_IDS = PROFILE_MAIN_TABLE_IDS
 PROFILE_CARD_BASE_CLASS = "profile-table-card-shell"
 PROFILE_CARD_ACTIVE_CLASS = f"{PROFILE_CARD_BASE_CLASS} profile-table-card-active"
 ADMIN_REQUIRED_TABLE_KEYS = (
@@ -133,8 +120,6 @@ ADMIN_REQUIRED_TABLE_KEYS = (
     "sun_profile",
     "economics_cost_items",
     "economics_price_items",
-    "cop_kwp_table",
-    "cop_kwp_table_others",
 )
 ECONOMICS_BRIDGE_TABLE_KEYS = {"economics_cost_items", "economics_price_items"}
 
@@ -165,8 +150,6 @@ def _admin_current_changes(
     panel_rows,
     month_profile_rows,
     sun_profile_rows,
-    price_kwp_rows,
-    price_kwp_others_rows,
     economics_cost_rows,
     economics_price_rows,
 ):
@@ -188,8 +171,6 @@ def _admin_current_changes(
         sun_profile_rows,
         normalized_cost_rows,
         normalized_price_rows,
-        price_kwp_rows,
-        price_kwp_others_rows,
     )
     unhydrated_tables = _unhydrated_admin_tables(table_rows)
     current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
@@ -238,8 +219,6 @@ def _resolve_economics_bridge_context(
     panel_rows,
     month_profile_rows,
     sun_profile_rows,
-    price_kwp_rows,
-    price_kwp_others_rows,
     economics_cost_rows,
     economics_price_rows,
     applied_at: str | None = None,
@@ -253,8 +232,6 @@ def _resolve_economics_bridge_context(
         panel_rows=panel_rows,
         month_profile_rows=month_profile_rows,
         sun_profile_rows=sun_profile_rows,
-        price_kwp_rows=price_kwp_rows,
-        price_kwp_others_rows=price_kwp_others_rows,
         economics_cost_rows=economics_cost_rows,
         economics_price_rows=economics_price_rows,
     )
@@ -305,8 +282,6 @@ def _admin_table_rows_payload(
     sun_profile_rows,
     economics_cost_rows,
     economics_price_rows,
-    price_kwp_rows,
-    price_kwp_others_rows,
 ) -> dict[str, list[dict[str, object]] | None]:
     return {
         "inverter_catalog": inverter_rows,
@@ -316,8 +291,6 @@ def _admin_table_rows_payload(
         "sun_profile": sun_profile_rows,
         "economics_cost_items": economics_cost_rows,
         "economics_price_items": economics_price_rows,
-        "cop_kwp_table": price_kwp_rows,
-        "cop_kwp_table_others": price_kwp_others_rows,
     }
 
 
@@ -338,8 +311,6 @@ def _assumption_note_style(message: str) -> dict[str, str]:
 
 def _assumption_card_class(field_key: str, *, disabled: bool = False, emphasize: bool = False) -> str:
     classes = ["field-card"]
-    if field_key in {"pricing_mode", "include_hw_in_price", "include_var_others", "price_total_COP", "price_others_total"}:
-        classes.append("precios-card")
     if disabled:
         classes.append("field-card-disabled")
     if emphasize and not disabled:
@@ -347,44 +318,12 @@ def _assumption_card_class(field_key: str, *, disabled: bool = False, emphasize:
     return " ".join(dict.fromkeys(classes))
 
 
-def _is_hidden_style(style: dict | None) -> bool:
-    return str((style or {}).get("display", "block")).strip().lower() == "none"
-
-
-def _hidden_profile_tables(
-    price_kwp_style: dict | None,
-    price_kwp_others_style: dict | None,
-) -> set[str]:
-    panel_styles = {
-        "price-kwp-panel": price_kwp_style,
-        "price-kwp-others-panel": price_kwp_others_style,
-    }
-    return {
-        table_id
-        for table_id, panel_id in PROFILE_TABLE_VISIBILITY_PANELS.items()
-        if _is_hidden_style(panel_styles.get(panel_id))
-    }
-
-
-def _profile_card_class_names(active_table_id: str | None, hidden_tables: set[str] | None = None) -> tuple[str, ...]:
-    hidden = hidden_tables or set()
+def _profile_card_class_names(active_table_id: str | None) -> tuple[str, ...]:
     classes: list[str] = []
     for table_id in PROFILE_TABLE_IDS:
-        is_active = table_id == active_table_id and table_id not in hidden
+        is_active = table_id == active_table_id
         classes.append(PROFILE_CARD_ACTIVE_CLASS if is_active else PROFILE_CARD_BASE_CLASS)
     return tuple(classes)
-
-
-def _resolve_pricing_inputs(assumption_input_ids, assumption_values, cfg):
-    pricing_mode = str(cfg.get("pricing_mode", "variable")).strip().lower()
-    include_others = cfg.get("include_var_others", False)
-    for input_id, value in zip(assumption_input_ids or [], assumption_values or []):
-        field = (input_id or {}).get("field", "") if isinstance(input_id, dict) else ""
-        if field == "pricing_mode" and value is not None:
-            pricing_mode = str(value).strip().lower()
-        elif field == "include_var_others" and value is not None:
-            include_others = value
-    return pricing_mode, include_others
 
 
 def _blank_table_row(table_columns, table_rows=None) -> dict[str, str]:
@@ -983,23 +922,16 @@ def _render_runtime_price_bridge_status(scenario, *, lang: str):
             html.P(tr(detail_key, lang), id="economics-bridge-status-detail", className="section-copy"),
         ],
     )
-
-
-def _runtime_pricing_note_text(scenario, *, lang: str) -> str:
-    state_key = resolve_runtime_price_bridge_state(scenario)
-    record = scenario.runtime_price_bridge
-    if state_key != "active" or record is None:
-        return tr("workspace.admin.runtime_pricing.note", lang)
-    return tr(
-        "workspace.admin.runtime_pricing.note.bridge_active",
-        lang,
-        candidate_key=record.candidate_key,
-        final_price=_format_cop(record.applied_price_total_COP, lang),
-        applied_at=_format_timestamp_text(record.applied_at),
-    )
-
-
-ADMIN_EXCLUDED_FIELDS = {"use_excel_profile", "alpha_mix", "E_month_kWh"}
+ADMIN_EXCLUDED_FIELDS = {
+    "use_excel_profile",
+    "alpha_mix",
+    "E_month_kWh",
+    "pricing_mode",
+    "price_total_COP",
+    "include_hw_in_price",
+    "include_var_others",
+    "price_others_total",
+}
 
 
 @callback(
@@ -1085,8 +1017,6 @@ def translate_admin_page_header(language_value):
 @callback(
     Output("admin-show-all", "options"),
     Output("apply-admin-btn", "children"),
-    Output("add-price-kwp-row-btn", "children"),
-    Output("add-price-kwp-others-row-btn", "children"),
     Output("add-economics-cost-row-btn", "children"),
     Output("add-economics-price-row-btn", "children"),
     Output("add-inverter-row-btn", "children"),
@@ -1099,8 +1029,6 @@ def translate_admin_secure_content(language_value):
     return (
         [{"label": tr("workbench.assumptions.show_all", lang), "value": "all"}],
         tr("workbench.assumptions.apply", lang),
-        tr("workbench.profiles.add_row", lang),
-        tr("workbench.profiles.add_row", lang),
         tr("workbench.profiles.add_row", lang),
         tr("workbench.profiles.add_row", lang),
         tr("workbench.add_row", lang),
@@ -1138,12 +1066,6 @@ def translate_profile_table_activators(language_value, activator_ids=None):
     Output("sun-profile-editor", "data"),
     Output("sun-profile-editor", "columns"),
     Output("sun-profile-editor", "tooltip_header"),
-    Output("price-kwp-editor", "data"),
-    Output("price-kwp-editor", "columns"),
-    Output("price-kwp-editor", "tooltip_header"),
-    Output("price-kwp-others-editor", "data"),
-    Output("price-kwp-others-editor", "columns"),
-    Output("price-kwp-others-editor", "tooltip_header"),
     Output("economics-cost-items-editor", "data"),
     Output("economics-cost-items-editor", "columns"),
     Output("economics-cost-items-editor", "tooltip_header"),
@@ -1178,8 +1100,6 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
             *empty,
             *empty,
             *empty,
-            *empty,
-            *empty,
         )
     client_state, state, unlocked = _admin_session(session_payload, lang)
     empty = ([], [], {})
@@ -1195,8 +1115,6 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
                 context_note_type="admin-assumption-context-note",
             ),
             True,
-            *empty,
-            *empty,
             *empty,
             *empty,
             *empty,
@@ -1225,8 +1143,6 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
             *empty,
             *empty,
             *empty,
-            *empty,
-            *empty,
         )
 
     display_bundle = resolve_workspace_bundle_for_display(client_state.session_id, active.scenario_id, active.config_bundle)
@@ -1242,8 +1158,6 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
     panel_columns, panel_tooltips = build_table_display_columns("panel_catalog", list(display_bundle.panel_catalog.columns), lang)
     month_columns, month_tooltips = build_table_display_columns("month_profile", list(display_bundle.month_profile_table.columns), lang)
     sun_columns, sun_tooltips = build_table_display_columns("sun_profile", list(display_bundle.sun_profile_table.columns), lang)
-    kwp_columns, kwp_tooltips = build_table_display_columns("cop_kwp", list(display_bundle.cop_kwp_table.columns), lang)
-    kwp_other_columns, kwp_other_tooltips = build_table_display_columns("cop_kwp_others", list(display_bundle.cop_kwp_table_others.columns), lang)
     economics_cost_columns, economics_cost_tooltips = build_table_display_columns(
         "economics_cost_items",
         list(display_bundle.economics_cost_items_table.columns),
@@ -1280,12 +1194,6 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
         display_bundle.sun_profile_table.to_dict("records"),
         sun_columns,
         sun_tooltips,
-        display_bundle.cop_kwp_table.to_dict("records"),
-        kwp_columns,
-        kwp_tooltips,
-        display_bundle.cop_kwp_table_others.to_dict("records"),
-        kwp_other_columns,
-        kwp_other_tooltips,
         economics_cost_items_rows_to_editor(display_bundle.economics_cost_items_table, lang=lang),
         economics_cost_columns,
         economics_cost_tooltips,
@@ -1341,8 +1249,6 @@ def render_economics_preview(session_payload, economics_cost_rows, economics_pri
     Input("panel-table-editor", "data", allow_optional=True),
     Input("month-profile-editor", "data", allow_optional=True),
     Input("sun-profile-editor", "data", allow_optional=True),
-    Input("price-kwp-editor", "data", allow_optional=True),
-    Input("price-kwp-others-editor", "data", allow_optional=True),
     Input("economics-cost-items-editor", "data", allow_optional=True),
     Input("economics-price-items-editor", "data", allow_optional=True),
     Input("language-selector", "value"),
@@ -1356,8 +1262,6 @@ def sync_economics_bridge_cta(
     panel_rows,
     month_profile_rows,
     sun_profile_rows,
-    price_kwp_rows,
-    price_kwp_others_rows,
     economics_cost_rows,
     economics_price_rows,
     language_value,
@@ -1380,8 +1284,6 @@ def sync_economics_bridge_cta(
         panel_rows=panel_rows,
         month_profile_rows=month_profile_rows,
         sun_profile_rows=sun_profile_rows,
-        price_kwp_rows=price_kwp_rows,
-        price_kwp_others_rows=price_kwp_others_rows,
         economics_cost_rows=economics_cost_rows,
         economics_price_rows=economics_price_rows,
         applied_at=None,
@@ -1391,21 +1293,20 @@ def sync_economics_bridge_cta(
 
 @callback(
     Output("economics-bridge-status-shell", "children"),
-    Output("runtime-pricing-editor-note", "children"),
     Input("scenario-session-store", "data"),
     Input("language-selector", "value"),
 )
 def render_runtime_price_bridge_ui(session_payload, language_value):
     lang = _lang(language_value)
     if not _admin_page_access(session_payload).allowed:
-        return [], tr("workspace.admin.runtime_pricing.note", lang)
+        return []
     _client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
-        return [], tr("workspace.admin.runtime_pricing.note", lang)
+        return []
     active = state.get_scenario()
     if active is None:
-        return [], tr("workspace.admin.runtime_pricing.note", lang)
-    return _render_runtime_price_bridge_status(active, lang=lang), _runtime_pricing_note_text(active, lang=lang)
+        return []
+    return _render_runtime_price_bridge_status(active, lang=lang)
 
 
 @callback(
@@ -1421,8 +1322,6 @@ def render_runtime_price_bridge_ui(session_payload, language_value):
     State("panel-table-editor", "data", allow_optional=True),
     State("month-profile-editor", "data", allow_optional=True),
     State("sun-profile-editor", "data", allow_optional=True),
-    State("price-kwp-editor", "data", allow_optional=True),
-    State("price-kwp-others-editor", "data", allow_optional=True),
     State("economics-cost-items-editor", "data", allow_optional=True),
     State("economics-price-items-editor", "data", allow_optional=True),
     State("language-selector", "value"),
@@ -1439,8 +1338,6 @@ def apply_economics_runtime_price_bridge(
     panel_rows,
     month_profile_rows,
     sun_profile_rows,
-    price_kwp_rows,
-    price_kwp_others_rows,
     economics_cost_rows,
     economics_price_rows,
     language_value,
@@ -1464,8 +1361,6 @@ def apply_economics_runtime_price_bridge(
             panel_rows=panel_rows,
             month_profile_rows=month_profile_rows,
             sun_profile_rows=sun_profile_rows,
-            price_kwp_rows=price_kwp_rows,
-            price_kwp_others_rows=price_kwp_others_rows,
             economics_cost_rows=economics_cost_rows,
             economics_price_rows=economics_price_rows,
             applied_at=datetime.now().isoformat(timespec="seconds"),
@@ -1561,66 +1456,6 @@ def sync_admin_assumption_context_ui(
     ]
     note_styles = [_assumption_note_style(message) for message in note_children]
     return disabled_values, card_classes, note_children, note_styles
-
-
-@callback(
-    Output("price-kwp-panel", "style"),
-    Output("price-kwp-others-panel", "style"),
-    Output("price-kwp-placeholder", "children"),
-    Output("price-kwp-placeholder", "style"),
-    Output("price-kwp-others-placeholder", "children"),
-    Output("price-kwp-others-placeholder", "style"),
-    Input("scenario-session-store", "data"),
-    Input({"type": "admin-assumption-input", "field": ALL}, "id"),
-    Input({"type": "admin-assumption-input", "field": ALL}, "value"),
-    Input("language-selector", "value"),
-)
-def toggle_pricing_table_visibility(session_payload, assumption_input_ids, assumption_values, language_value):
-    lang = _lang(language_value)
-    if not _admin_page_access(session_payload).allowed:
-        hidden = {"display": "none"}
-        placeholder_hidden = {"display": "none"}
-        return hidden, hidden, "", placeholder_hidden, "", placeholder_hidden
-    client_state, state, unlocked = _admin_session(session_payload, lang)
-    if not unlocked:
-        hidden = {"display": "none"}
-        placeholder_hidden = {"display": "none"}
-        return hidden, hidden, "", placeholder_hidden, "", placeholder_hidden
-    active = state.get_scenario()
-    if active is None:
-        hidden = {"display": "none"}
-        placeholder_hidden = {"display": "none"}
-        return hidden, hidden, "", placeholder_hidden, "", placeholder_hidden
-
-    display_bundle = resolve_workspace_bundle_for_display(client_state.session_id, active.scenario_id, active.config_bundle)
-    pricing_mode, include_others = _resolve_pricing_inputs(assumption_input_ids, assumption_values, display_bundle.config)
-
-    price_kwp_style = {"display": "block"}
-    kwp_placeholder_children = ""
-    kwp_placeholder_style = {"display": "none"}
-    if pricing_mode == "total":
-        price_kwp_style = {"display": "none"}
-        kwp_placeholder_children = tr("workbench.profiles.placeholder.price_hidden", lang)
-        kwp_placeholder_style = {"display": "block"}
-
-    price_others_style = {"display": "block"}
-    others_placeholder_children = ""
-    others_placeholder_style = {"display": "none"}
-    if not include_others:
-        price_others_style = {"display": "none"}
-        others_placeholder_children = tr("workbench.profiles.placeholder.price_others_hidden", lang)
-        others_placeholder_style = {"display": "block"}
-
-    return (
-        price_kwp_style,
-        price_others_style,
-        kwp_placeholder_children,
-        kwp_placeholder_style,
-        others_placeholder_children,
-        others_placeholder_style,
-    )
-
-
 @callback(
     Output("admin-draft-meta", "data"),
     Input("scenario-session-store", "data"),
@@ -1631,8 +1466,6 @@ def toggle_pricing_table_visibility(session_payload, assumption_input_ids, assum
     Input("panel-table-editor", "data", allow_optional=True),
     Input("month-profile-editor", "data", allow_optional=True),
     Input("sun-profile-editor", "data", allow_optional=True),
-    Input("price-kwp-editor", "data", allow_optional=True),
-    Input("price-kwp-others-editor", "data", allow_optional=True),
     Input("economics-cost-items-editor", "data", allow_optional=True),
     Input("economics-price-items-editor", "data", allow_optional=True),
     prevent_initial_call=True,
@@ -1646,8 +1479,6 @@ def sync_admin_draft(
     panel_rows,
     month_profile_rows,
     sun_profile_rows,
-    price_kwp_rows,
-    price_kwp_others_rows,
     economics_cost_rows,
     economics_price_rows,
 ):
@@ -1667,8 +1498,6 @@ def sync_admin_draft(
         sun_profile_rows,
         None if economics_cost_rows is None else economics_cost_items_rows_from_editor(economics_cost_rows),
         None if economics_price_rows is None else economics_price_items_rows_from_editor(economics_price_rows),
-        price_kwp_rows,
-        price_kwp_others_rows,
     )
     unhydrated_tables = _unhydrated_admin_tables(table_rows)
     if unhydrated_tables:
@@ -1714,8 +1543,6 @@ def sync_admin_draft(
     Input({"type": "profile-table-activate", "table": ALL}, "n_clicks"),
     Input("month-profile-editor", "active_cell", allow_optional=True),
     Input("sun-profile-editor", "active_cell", allow_optional=True),
-    Input("price-kwp-editor", "active_cell", allow_optional=True),
-    Input("price-kwp-others-editor", "active_cell", allow_optional=True),
     State({"type": "profile-table-activate", "table": ALL}, "id"),
     State("active-profile-table-state", "data"),
     prevent_initial_call=True,
@@ -1724,8 +1551,6 @@ def sync_active_profile_table(
     _activator_clicks,
     month_active_cell,
     sun_active_cell,
-    price_active_cell,
-    price_others_active_cell,
     activator_ids,
     active_state,
 ):
@@ -1739,8 +1564,6 @@ def sync_active_profile_table(
     active_cells = {
         "month-profile-editor": month_active_cell,
         "sun-profile-editor": sun_active_cell,
-        "price-kwp-editor": price_active_cell,
-        "price-kwp-others-editor": price_others_active_cell,
     }
     if isinstance(trigger, dict) and trigger.get("type") == "profile-table-activate":
         table_id = str(trigger.get("table", "")).strip() or None
@@ -1759,54 +1582,18 @@ def sync_active_profile_table(
 
 
 @callback(
-    Output("active-profile-table-state", "data", allow_duplicate=True),
-    Input("active-profile-table-state", "data"),
-    Input("price-kwp-panel", "style", allow_optional=True),
-    Input("price-kwp-others-panel", "style", allow_optional=True),
-    prevent_initial_call=True,
-)
-def sanitize_active_profile_table(
-    active_state,
-    price_kwp_style,
-    price_kwp_others_style,
-):
-    active_table_id = str((active_state or {}).get("table_id") or "").strip() or None
-    if active_table_id is None:
-        raise PreventUpdate
-    hidden_tables = _hidden_profile_tables(
-        price_kwp_style,
-        price_kwp_others_style,
-    )
-    if active_table_id in hidden_tables:
-        return _active_profile_table_state()
-    raise PreventUpdate
-
-
-@callback(
     Output("profile-main-chart-panel", "style"),
     Output("profile-main-chart-title", "children"),
     Output("profile-main-chart-subtitle", "children"),
     Output("profile-main-chart-graph", "figure"),
-    Output("profile-secondary-chart-panel", "style"),
-    Output("profile-secondary-chart-title", "children"),
-    Output("profile-secondary-chart-subtitle", "children"),
-    Output("profile-secondary-chart-graph", "figure"),
     Output("month-profile-card", "className"),
     Output("sun-profile-card", "className"),
-    Output("price-kwp-card", "className"),
-    Output("price-kwp-others-card", "className"),
     Input("active-profile-table-state", "data"),
     Input("month-profile-editor", "data", allow_optional=True),
     Input("month-profile-editor", "columns", allow_optional=True),
     Input("sun-profile-editor", "data", allow_optional=True),
     Input("sun-profile-editor", "columns", allow_optional=True),
-    Input("price-kwp-editor", "data", allow_optional=True),
-    Input("price-kwp-editor", "columns", allow_optional=True),
-    Input("price-kwp-others-editor", "data", allow_optional=True),
-    Input("price-kwp-others-editor", "columns", allow_optional=True),
     Input("language-selector", "value"),
-    Input("price-kwp-panel", "style", allow_optional=True),
-    Input("price-kwp-others-panel", "style", allow_optional=True),
 )
 def render_active_profile_chart(
     active_state,
@@ -1814,31 +1601,15 @@ def render_active_profile_chart(
     month_columns,
     sun_rows,
     sun_columns,
-    price_rows,
-    price_columns,
-    price_others_rows,
-    price_others_columns,
     language_value,
-    price_kwp_style,
-    price_kwp_others_style,
 ):
     lang = _lang(language_value)
-    hidden_tables = _hidden_profile_tables(
-        price_kwp_style,
-        price_kwp_others_style,
-    )
     active_table_id = str((active_state or {}).get("table_id") or "").strip() or None
-    if active_table_id in hidden_tables:
-        active_table_id = None
-    card_classes = _profile_card_class_names(active_table_id, hidden_tables)
+    card_classes = _profile_card_class_names(active_table_id)
     hidden_style = {"display": "none"}
     empty_figure = go.Figure()
     if active_table_id is None:
         return (
-            hidden_style,
-            "",
-            "",
-            empty_figure,
             hidden_style,
             "",
             "",
@@ -1848,34 +1619,14 @@ def render_active_profile_chart(
     table_rows = {
         "month-profile-editor": month_rows,
         "sun-profile-editor": sun_rows,
-        "price-kwp-editor": price_rows,
-        "price-kwp-others-editor": price_others_rows,
     }
     table_columns = {
         "month-profile-editor": month_columns,
         "sun-profile-editor": sun_columns,
-        "price-kwp-editor": price_columns,
-        "price-kwp-others-editor": price_others_columns,
     }
     render = build_profile_chart(active_table_id, table_rows.get(active_table_id), table_columns.get(active_table_id), lang)
     visible_style = {"display": "grid"}
-    if render.row_target == "main":
-        return (
-            visible_style,
-            render.title,
-            render.subtitle,
-            render.figure,
-            hidden_style,
-            "",
-            "",
-            empty_figure,
-            *card_classes,
-        )
     return (
-        hidden_style,
-        "",
-        "",
-        empty_figure,
         visible_style,
         render.title,
         render.subtitle,
@@ -1923,42 +1674,6 @@ def add_panel_row(n_clicks, table_rows):
         raise PreventUpdate
     rows = list(table_rows or [])
     rows.append({column: "" for column in PANEL_REQUIRED_COLUMNS})
-    return rows
-
-
-@callback(
-    Output("price-kwp-editor", "data", allow_duplicate=True),
-    Input("add-price-kwp-row-btn", "n_clicks", allow_optional=True),
-    State("price-kwp-editor", "data", allow_optional=True),
-    State("price-kwp-editor", "columns", allow_optional=True),
-    prevent_initial_call=True,
-)
-def add_price_kwp_row(n_clicks, table_rows, table_columns):
-    if not n_clicks:
-        raise PreventUpdate
-    blank_row = _blank_table_row(table_columns, table_rows)
-    if not blank_row:
-        raise PreventUpdate
-    rows = list(table_rows or [])
-    rows.append(blank_row)
-    return rows
-
-
-@callback(
-    Output("price-kwp-others-editor", "data", allow_duplicate=True),
-    Input("add-price-kwp-others-row-btn", "n_clicks", allow_optional=True),
-    State("price-kwp-others-editor", "data", allow_optional=True),
-    State("price-kwp-others-editor", "columns", allow_optional=True),
-    prevent_initial_call=True,
-)
-def add_price_kwp_others_row(n_clicks, table_rows, table_columns):
-    if not n_clicks:
-        raise PreventUpdate
-    blank_row = _blank_table_row(table_columns, table_rows)
-    if not blank_row:
-        raise PreventUpdate
-    rows = list(table_rows or [])
-    rows.append(blank_row)
     return rows
 
 
@@ -2011,8 +1726,6 @@ def add_economics_price_row(n_clicks, table_rows, table_columns):
     State("panel-table-editor", "data", allow_optional=True),
     State("month-profile-editor", "data", allow_optional=True),
     State("sun-profile-editor", "data", allow_optional=True),
-    State("price-kwp-editor", "data", allow_optional=True),
-    State("price-kwp-others-editor", "data", allow_optional=True),
     State("economics-cost-items-editor", "data", allow_optional=True),
     State("economics-price-items-editor", "data", allow_optional=True),
     State("language-selector", "value"),
@@ -2029,8 +1742,6 @@ def apply_admin_edits(
     panel_rows,
     month_profile_rows,
     sun_profile_rows,
-    price_kwp_rows,
-    price_kwp_others_rows,
     economics_cost_rows,
     economics_price_rows,
     language_value,
@@ -2053,8 +1764,6 @@ def apply_admin_edits(
             sun_profile_rows,
             None if economics_cost_rows is None else economics_cost_items_rows_from_editor(economics_cost_rows),
             None if economics_price_rows is None else economics_price_items_rows_from_editor(economics_price_rows),
-            price_kwp_rows,
-            price_kwp_others_rows,
         )
         unhydrated_tables = _unhydrated_admin_tables(table_rows)
         if unhydrated_tables:

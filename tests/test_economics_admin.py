@@ -119,8 +119,6 @@ def _bridge_args(
         active.config_bundle.panel_catalog.to_dict("records"),
         active.config_bundle.month_profile_table.to_dict("records"),
         active.config_bundle.sun_profile_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table_others.to_dict("records"),
         economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang=lang)
         if economics_cost_rows is None
         else economics_cost_rows,
@@ -363,10 +361,10 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     price_table = _find_component(section, "economics-price-items-editor")
 
     assert note is not None
-    assert "costeo interno" in str(note.children)
-    assert "nueva capa interna" not in str(note.children).lower()
+    assert "flujo principal de pricing" in str(note.children).lower()
+    assert "compatibilidad" in str(note.children).lower()
     assert preview_copy is not None
-    assert "runtime pricing" not in str(preview_copy.children).lower()
+    assert "acción manual de compatibilidad" in str(preview_copy.children).lower()
     assert cost_table is not None
     assert price_table is not None
     assert "Costo técnico" in {option["label"] for option in cost_table.dropdown["stage"]["options"]}
@@ -392,8 +390,6 @@ def test_sync_admin_draft_tracks_economics_tables_with_simple_schema(monkeypatch
         active.config_bundle.panel_catalog.to_dict("records"),
         active.config_bundle.month_profile_table.to_dict("records"),
         active.config_bundle.sun_profile_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table_others.to_dict("records"),
         economics_cost_rows,
         economics_price_rows,
     )
@@ -429,8 +425,6 @@ def test_apply_admin_edits_persists_economics_tables_and_normalizes_markup_perce
         active.config_bundle.panel_catalog.to_dict("records"),
         active.config_bundle.month_profile_table.to_dict("records"),
         active.config_bundle.sun_profile_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table_others.to_dict("records"),
         economics_cost_rows,
         economics_price_rows,
         "es",
@@ -711,8 +705,6 @@ def test_apply_admin_edits_preserves_invalid_economics_rows_and_warnings_after_r
         active.config_bundle.panel_catalog.to_dict("records"),
         active.config_bundle.month_profile_table.to_dict("records"),
         active.config_bundle.sun_profile_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table_others.to_dict("records"),
         economics_cost_rows,
         economics_price_rows,
         "es",
@@ -967,8 +959,6 @@ def test_apply_admin_edits_preserves_scan_for_economics_only_changes_and_preview
         active.config_bundle.panel_catalog.to_dict("records"),
         active.config_bundle.month_profile_table.to_dict("records"),
         active.config_bundle.sun_profile_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table_others.to_dict("records"),
         economics_cost_rows,
         economics_price_rows,
         "es",
@@ -1195,8 +1185,6 @@ def test_apply_persists_hardware_resolution_warning_when_scan_is_preserved(monke
         active.config_bundle.panel_catalog.to_dict("records"),
         active.config_bundle.month_profile_table.to_dict("records"),
         active.config_bundle.sun_profile_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table_others.to_dict("records"),
         economics_cost_rows,
         economics_price_rows,
         "es",
@@ -1251,8 +1239,6 @@ def test_apply_persists_battery_energy_warning_when_scan_is_preserved(monkeypatc
         active.config_bundle.panel_catalog.to_dict("records"),
         active.config_bundle.month_profile_table.to_dict("records"),
         active.config_bundle.sun_profile_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table_others.to_dict("records"),
         economics_cost_rows,
         economics_price_rows,
         "es",
@@ -1516,11 +1502,10 @@ def test_bridge_persists_active_provenance_and_updates_runtime_note(monkeypatch,
     assert reopened_active.runtime_price_bridge is not None
     assert resolve_runtime_price_bridge_state(reopened_active) == "active"
 
-    bridge_status, runtime_note = render_runtime_price_bridge_ui(next_payload, "es")
+    bridge_status = render_runtime_price_bridge_ui(next_payload, "es")
 
     assert bridge_status is not None
     assert "total vigente del runtime proviene de economics".lower() in str(bridge_status).lower()
-    assert "total fijo del proyecto aplicado desde economics".lower() in str(runtime_note).lower()
 
 
 @pytest.mark.parametrize(
@@ -1563,9 +1548,8 @@ def test_bridge_goes_stale_when_legacy_runtime_fields_diverge(field, value, monk
     assert stale_active.runtime_price_bridge.stale is True
     assert resolve_runtime_price_bridge_state(stale_active) == "stale"
 
-    bridge_status, runtime_note = render_runtime_price_bridge_ui(stale_payload, "es")
+    bridge_status = render_runtime_price_bridge_ui(stale_payload, "es")
     assert "histórico" in str(bridge_status).lower()
-    assert "estas bandas siguen alimentando el runtime activo" in str(runtime_note).lower()
 
 
 def test_bridge_goes_stale_when_economics_signature_changes_for_same_design(monkeypatch, tmp_path) -> None:
@@ -1692,8 +1676,6 @@ def test_editing_economics_without_bridge_does_not_change_legacy_runtime_fields(
         active.config_bundle.panel_catalog.to_dict("records"),
         active.config_bundle.month_profile_table.to_dict("records"),
         active.config_bundle.sun_profile_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table.to_dict("records"),
-        active.config_bundle.cop_kwp_table_others.to_dict("records"),
         active.config_bundle.economics_cost_items_table.to_dict("records"),
         economics_price_rows,
     )

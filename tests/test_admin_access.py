@@ -215,7 +215,9 @@ def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypa
     assert _find_component(rendered, "admin-assumption-sections") is not None
     assert _find_component(rendered, "resource-profile-editor-title") is not None
     assert _find_component(rendered, "economics-editor-title") is not None
-    assert _find_component(rendered, "runtime-pricing-editor-title") is not None
+    assert _find_component(rendered, "runtime-pricing-editor-title") is None
+    assert _find_component(rendered, "price-kwp-editor") is None
+    assert _find_component(rendered, "price-kwp-others-editor") is None
     assert _find_component(rendered, "inverter-table-editor") is not None
     assert _find_component(rendered, "panel-table-editor") is not None
     assert _find_component(rendered, "admin-pin-input") is None
@@ -250,12 +252,10 @@ def test_admin_profile_table_activator_translation_matches_visible_cards() -> No
     activator_ids = [
         {"type": "profile-table-activate", "table": "month-profile-editor"},
         {"type": "profile-table-activate", "table": "sun-profile-editor"},
-        {"type": "profile-table-activate", "table": "price-kwp-editor"},
-        {"type": "profile-table-activate", "table": "price-kwp-others-editor"},
     ]
 
-    assert translate_profile_table_activators("es", activator_ids) == ["Ver gráfica"] * 4
-    assert translate_profile_table_activators("en", activator_ids) == ["Preview chart"] * 4
+    assert translate_profile_table_activators("es", activator_ids) == ["Ver gráfica"] * 2
+    assert translate_profile_table_activators("en", activator_ids) == ["Preview chart"] * 2
 
 
 def test_setup_admin_session_rejects_empty_pin(monkeypatch, tmp_path) -> None:
@@ -417,7 +417,7 @@ def test_populate_admin_page_renders_visible_admin_tables_for_example_bundle(mon
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     payload = commit_client_session(client_state, state).to_payload()
 
-    rendered_sections, disabled, inverter_rows, inverter_columns, _inverter_tooltips, battery_rows, battery_columns, _battery_tooltips, panel_rows, panel_columns, _panel_tooltips, month_rows, month_columns, _month_tooltips, sun_rows, sun_columns, _sun_tooltips, price_rows, price_columns, _price_tooltips, price_other_rows, price_other_columns, _price_other_tooltips, economics_cost_rows, economics_cost_columns, _economics_cost_tooltips, economics_price_rows, economics_price_columns, _economics_price_tooltips = populate_admin_page(payload, [], "es")
+    rendered_sections, disabled, inverter_rows, inverter_columns, _inverter_tooltips, battery_rows, battery_columns, _battery_tooltips, panel_rows, panel_columns, _panel_tooltips, month_rows, month_columns, _month_tooltips, sun_rows, sun_columns, _sun_tooltips, economics_cost_rows, economics_cost_columns, _economics_cost_tooltips, economics_price_rows, economics_price_columns, _economics_price_tooltips = populate_admin_page(payload, [], "es")
 
     assert disabled is False
     assert inverter_rows
@@ -425,8 +425,6 @@ def test_populate_admin_page_renders_visible_admin_tables_for_example_bundle(mon
     assert panel_rows
     assert month_rows
     assert sun_rows
-    assert price_rows
-    assert price_other_rows
     assert economics_cost_rows
     assert economics_price_rows
     assert inverter_columns
@@ -434,8 +432,6 @@ def test_populate_admin_page_renders_visible_admin_tables_for_example_bundle(mon
     assert panel_columns
     assert month_columns
     assert sun_columns
-    assert price_columns
-    assert price_other_columns
     assert economics_cost_columns
     assert economics_price_columns
     assert _find_pattern_component(rendered_sections, "admin-assumption-input") is not None
@@ -472,8 +468,6 @@ def test_populate_admin_page_rehydrates_immediately_after_unlock_with_same_sessi
     assert unlocked_outputs[14]
     assert unlocked_outputs[17]
     assert unlocked_outputs[20]
-    assert unlocked_outputs[23]
-    assert unlocked_outputs[26]
 
 
 def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(monkeypatch, tmp_path) -> None:
@@ -500,8 +494,6 @@ def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(mo
     assert outputs[14]
     assert outputs[17]
     assert outputs[20]
-    assert outputs[23]
-    assert outputs[26]
 
 
 def test_table_draft_rows_skips_unhydrated_admin_tables() -> None:
@@ -553,8 +545,6 @@ def test_sync_admin_draft_waits_for_all_admin_tables_to_hydrate(monkeypatch, tmp
             active.config_bundle.panel_catalog.to_dict("records"),
             active.config_bundle.month_profile_table.to_dict("records"),
             active.config_bundle.sun_profile_table.to_dict("records"),
-            active.config_bundle.cop_kwp_table.to_dict("records"),
-            active.config_bundle.cop_kwp_table_others.to_dict("records"),
             active.config_bundle.economics_cost_items_table.to_dict("records"),
             active.config_bundle.economics_price_items_table.to_dict("records"),
         )
@@ -589,8 +579,6 @@ def test_apply_admin_edits_waits_for_all_admin_tables_to_hydrate(monkeypatch, tm
             active.config_bundle.panel_catalog.to_dict("records"),
             None,
             active.config_bundle.sun_profile_table.to_dict("records"),
-            active.config_bundle.cop_kwp_table.to_dict("records"),
-            active.config_bundle.cop_kwp_table_others.to_dict("records"),
             active.config_bundle.economics_cost_items_table.to_dict("records"),
             active.config_bundle.economics_price_items_table.to_dict("records"),
             "es",
@@ -606,3 +594,32 @@ def test_setup_admin_session_is_blocked_outside_admin_mode(monkeypatch, tmp_path
 
     with pytest.raises(PreventUpdate):
         setup_admin_session(1, bootstrap_client_session("es").to_payload(), "1234", "1234")
+
+
+def test_admin_callback_map_and_live_layout_exclude_forbidden_legacy_pricing_ids(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    forbidden_ids = (
+        "runtime-pricing-editor-title",
+        "runtime-pricing-editor-note",
+        "price-kwp-editor",
+        "price-kwp-others-editor",
+        "add-price-kwp-row-btn",
+        "add-price-kwp-others-row-btn",
+        "price-kwp-panel",
+        "price-kwp-others-panel",
+        "price-kwp-placeholder",
+        "price-kwp-others-placeholder",
+    )
+    callback_map_text = str(_APP.callback_map)
+    for forbidden_id in forbidden_ids:
+        assert forbidden_id not in callback_map_text
+
+    client_state = _admin_client_state("es")
+    set_admin_pin("2468")
+    grant_admin_session_access(client_state.session_id)
+    rendered = render_admin_access_shell(client_state.to_payload(), "es", {"revision": 1})
+    for forbidden_id in forbidden_ids:
+        assert _find_component(rendered, forbidden_id) is None
