@@ -8,10 +8,14 @@ from openpyxl import load_workbook
 import pytest
 
 from services.candidate_financials import (
+    CandidateFinancialSnapshotUnavailableError,
+    attach_candidate_financial_snapshot,
     build_candidate_financial_snapshot,
+    build_snapshot_monthly_frame,
     get_candidate_financial_snapshot_cache,
     resolve_financial_best_candidate_key,
 )
+import services.export_excel as export_excel_service
 from services import (
     ScenarioSessionState,
     add_scenario,
@@ -393,6 +397,24 @@ def test_candidate_financial_snapshot_cache_reuses_key_and_invalidates_on_econom
     assert third.visible_npv_COP != pytest.approx(first.visible_npv_COP)
 
 
+def test_attach_candidate_financial_snapshot_adds_validated_snapshot_and_project_summary() -> None:
+    state = _run_named_scenario("Attach snapshot")
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    candidate_key = scenario.selected_candidate_key
+    assert candidate_key is not None
+
+    attached = attach_candidate_financial_snapshot(scenario, scenario.scan_result.candidate_details[candidate_key], candidate_key)
+    snapshot = attached["financial_snapshot"]
+
+    assert attached["candidate_key"] == candidate_key
+    assert attached["project_summary"]["project_price_year0_COP"] == pytest.approx(snapshot.project_price_year0_COP)
+    assert attached["project_summary"]["capex_client"] == pytest.approx(snapshot.capex_client_COP)
+    assert attached["project_summary"]["cum_disc_final"] == pytest.approx(snapshot.visible_npv_COP)
+    assert attached["project_summary"]["payback_month"] == snapshot.payback_month
+    assert attached["project_summary"]["payback_years"] == snapshot.payback_years
+
+
 def test_export_scenario_workbook_uses_snapshot_finance_contract() -> None:
     state = _run_named_scenario("Export snapshot")
     scenario = state.get_scenario()
@@ -400,6 +422,12 @@ def test_export_scenario_workbook_uses_snapshot_finance_contract() -> None:
     candidate_key = scenario.selected_candidate_key
     assert candidate_key is not None
     snapshot = build_candidate_financial_snapshot(scenario, candidate_key)
+    detail = scenario.scan_result.candidate_details[candidate_key]
+    detail["summary"]["capex_client"] = -999_999.0
+    detail["summary"]["cum_disc_final"] = -888_888.0
+    detail["summary"]["payback_month"] = 999
+    detail["summary"]["payback_years"] = 83.25
+    detail["monthly"]["NPV_COP"] = [-777_777.0] * len(detail["monthly"])
 
     payload = export_scenario_workbook(scenario)
     workbook = load_workbook(BytesIO(payload), data_only=True)
@@ -417,3 +445,32 @@ def test_export_scenario_workbook_uses_snapshot_finance_contract() -> None:
     assert float(summary_values["capex_client_COP"]) == pytest.approx(snapshot.capex_client_COP)
     assert float(summary_values["NPV_COP"]) == pytest.approx(snapshot.visible_npv_COP)
     assert float(last_npv) == pytest.approx(snapshot.visible_npv_COP)
+
+
+def test_export_scenario_workbook_fails_closed_when_snapshot_attachment_fails(monkeypatch) -> None:
+    state = _run_named_scenario("Export fail closed")
+    scenario = state.get_scenario()
+    assert scenario is not None
+
+    def _boom(*_args, **_kwargs):
+        raise CandidateFinancialSnapshotUnavailableError("snapshot roto para export")
+
+    monkeypatch.setattr(export_excel_service, "attach_candidate_financial_snapshot", _boom)
+
+    with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="snapshot roto"):
+        export_scenario_workbook(scenario)
+
+
+def test_build_snapshot_monthly_frame_ignores_poisoned_legacy_monthly_npv() -> None:
+    state = _run_named_scenario("Snapshot monthly frame")
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    candidate_key = scenario.selected_candidate_key
+    assert candidate_key is not None
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key)
+    detail = scenario.scan_result.candidate_details[candidate_key]
+    detail["monthly"]["NPV_COP"] = [42.0] * len(detail["monthly"])
+
+    frame = build_snapshot_monthly_frame(detail["monthly"], snapshot)
+
+    assert list(frame["NPV_COP"]) == list(snapshot.cumulative_discounted_cash_flow_series)

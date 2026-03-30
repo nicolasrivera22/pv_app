@@ -4,7 +4,10 @@ from dataclasses import replace
 from io import BytesIO
 
 from openpyxl import load_workbook
+import pytest
 
+import services.design_compare as design_compare_service
+from services.candidate_financials import CandidateFinancialSnapshotUnavailableError, build_candidate_financial_snapshot
 from services import (
     ScenarioSessionState,
     add_scenario,
@@ -119,6 +122,42 @@ def test_design_rows_include_customer_facing_fields() -> None:
     assert "inverter_name" in rows.columns
     assert "candidate_key" in available.columns
     assert "is_workbench_selected" in available.columns
+
+
+def test_available_design_rows_use_snapshot_finance_even_if_legacy_fields_are_poisoned() -> None:
+    state = _run_ready_state()
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    candidate_key = scenario.selected_candidate_key or scenario.scan_result.best_candidate_key
+    assert candidate_key is not None
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key)
+    detail = scenario.scan_result.candidate_details[candidate_key]
+    detail["summary"]["capex_client"] = -1.0
+    detail["summary"]["cum_disc_final"] = -2.0
+    detail["summary"]["payback_years"] = 999.0
+    detail["summary"]["payback_month"] = 999
+
+    rows = build_available_design_rows(scenario, lang="es")
+    selected_row = rows.loc[rows["candidate_key"] == candidate_key].iloc[0]
+
+    assert float(selected_row["capex_client"]) == pytest.approx(snapshot.capex_client_COP)
+    assert float(selected_row["NPV_COP"]) == pytest.approx(snapshot.visible_npv_COP)
+    assert selected_row["payback_years"] == snapshot.payback_years
+
+
+def test_available_design_rows_fail_closed_when_snapshot_attachment_is_invalid(monkeypatch) -> None:
+    state = _run_ready_state()
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+
+    def _raw_detail_map(_scenario_record):
+        assert scenario.scan_result is not None
+        return scenario.scan_result.candidate_details
+
+    monkeypatch.setattr(design_compare_service, "attach_candidate_financial_snapshots", _raw_detail_map)
+
+    with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="snapshot financiero inválido|CandidateFinancialSnapshot"):
+        build_available_design_rows(scenario, lang="es")
 
 
 def test_selected_design_rows_keep_first_selection_and_sort_remaining_by_kwp_then_battery() -> None:

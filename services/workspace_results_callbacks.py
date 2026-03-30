@@ -10,7 +10,10 @@ import plotly.graph_objects as go
 from pv_product.panel_catalog import MANUAL_PANEL_TOKEN, manual_panel_label, normalize_panel_name
 from pv_product.panel_technology import panel_technology_field_label, panel_technology_mode_label
 
-from .candidate_financials import build_candidate_financial_snapshot, build_candidate_financial_snapshots, resolve_financial_candidate_key
+from .candidate_financials import (
+    attach_candidate_financial_snapshots,
+    resolve_financial_candidate_key,
+)
 from .export_access import open_export_folder, publish_export_artifacts
 from .export_artifacts import export_deterministic_artifacts
 from .export_excel import export_scenario_workbook
@@ -114,7 +117,7 @@ def _selected_candidate_banner(detail: dict | None, *, lang: str = "es") -> list
     inverter_name = (((detail.get("inv_sel") or {}).get("inverter") or {}).get("name")) or fallback
     battery_name = format_metric("selected_battery", detail.get("battery_name", "None"), lang) if detail.get("battery_name") is not None else fallback
     visible_summary = detail.get("visible_horizon_summary") or {}
-    project_summary = detail.get("project_summary") or detail.get("summary") or {}
+    project_summary = detail.get("project_summary") or {}
     financial_metric_key = str(visible_summary.get("display_metric_key") or "NPV_COP")
     financial_value = visible_summary.get("display_value_COP")
     if financial_value is None:
@@ -177,7 +180,7 @@ def _candidate_horizon_marks(max_years: int) -> dict[int, str]:
 def _visible_horizon_candidate_presentation(detail: dict | None, horizon_years: int) -> dict | None:
     if not detail:
         return detail
-    return build_visible_horizon_candidate_summary(detail, horizon_years)
+    return build_visible_horizon_candidate_summary(detail, horizon_years, require_financial_snapshot=True)
 
 
 def _payback_note_for_presentation(detail: dict | None, *, lang: str = "es") -> dict[str, str]:
@@ -477,12 +480,12 @@ def populate_results(session_payload, language_value, horizon_slider_value):
         lang=lang,
     )
     discard_explainer, discard_explainer_style = _scan_discard_explainer(scan, lang=lang)
-    financial_snapshots = build_candidate_financial_snapshots(active)
+    attached_details = attach_candidate_financial_snapshots(active)
     selected_key = resolve_financial_candidate_key(active, active.selected_candidate_key) or resolve_selected_candidate_key_for_scenario(
         scan,
         active.selected_candidate_key,
     )
-    table = summarize_candidates_for_horizon(scan.candidate_details, horizon_years, financial_snapshots=financial_snapshots)
+    table = summarize_candidates_for_horizon(attached_details, horizon_years, require_financial_snapshot=True)
     table["battery"] = table["battery"].replace({"None": tr("common.no_battery", lang)})
     visible_columns = [
         "kWp",
@@ -544,15 +547,18 @@ def populate_results(session_payload, language_value, horizon_slider_value):
             tooltip_header,
         )
 
-    financial_snapshot = build_candidate_financial_snapshot(active, selected_key)
-    detail = {**scan.candidate_details[selected_key], "financial_snapshot": financial_snapshot}
+    detail = attached_details[selected_key]
     presentation_detail = _visible_horizon_candidate_presentation(detail, horizon_years)
-    kpis = build_kpis(presentation_detail)
+    kpis = build_kpis(presentation_detail, require_financial_snapshot=True)
     kpi_label_overrides = {"payback_years": tr("workbench.payback.project_label", lang)}
     if kpis.get("financial_metric_key") == "capex_client":
         kpi_label_overrides["NPV"] = tr("workbench.project_price.axis_label", lang)
     monthly_balance = build_monthly_balance(detail["monthly"], lang=lang)
-    cash_flow = build_cash_flow(detail["monthly"], financial_snapshot=financial_snapshot)
+    cash_flow = build_cash_flow(
+        detail["monthly"],
+        financial_snapshot=detail.get("financial_snapshot"),
+        require_financial_snapshot=True,
+    )
     return (
         summary_strip,
         discard_explainer,

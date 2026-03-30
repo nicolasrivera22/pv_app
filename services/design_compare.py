@@ -10,11 +10,11 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from .candidate_financials import (
-    build_candidate_financial_snapshot,
-    build_candidate_financial_snapshots,
+    attach_candidate_financial_snapshots,
     build_snapshot_monthly_frame,
     resolve_financial_candidate_key,
     resolve_financial_best_candidate_key,
+    validate_candidate_financial_snapshot,
 )
 from .i18n import tr
 from .result_views import abbreviated_month_labels, build_project_timeline
@@ -286,12 +286,12 @@ def build_design_compare_state(
 
 def _base_candidate_frame(scenario_record: ScenarioRecord, *, lang: str = "es") -> pd.DataFrame:
     assert scenario_record.scan_result is not None
-    snapshots = build_candidate_financial_snapshots(scenario_record)
+    attached_details = attach_candidate_financial_snapshots(scenario_record)
     financial_best_candidate_key = resolve_financial_best_candidate_key(scenario_record)
     displayed_selected_candidate_key = resolve_financial_candidate_key(scenario_record)
     rows: list[dict[str, Any]] = []
-    for candidate_key, detail in scenario_record.scan_result.candidate_details.items():
-        snapshot = snapshots[candidate_key]
+    for candidate_key, detail in attached_details.items():
+        snapshot = validate_candidate_financial_snapshot(detail.get("financial_snapshot"), candidate_key=candidate_key)
         first_year = detail["monthly"].iloc[:12]
         rows.append(
             {
@@ -555,12 +555,13 @@ def build_npv_projection_frame(
     if scenario_record.scan_result is None or scenario_record.dirty:
         return pd.DataFrame(columns=["design_label", "candidate_key", "Año_mes", "NPV_COP", "month_index", "calendar_year", "project_year"])
     selected_frame = _selected_lookup_frame(scenario_record, selected_candidate_keys, lang=lang)
+    attached_details = attach_candidate_financial_snapshots(scenario_record)
     rows: list[dict[str, Any]] = []
     for candidate_key in _ordered_display_candidate_keys(scenario_record, selected_candidate_keys):
         if candidate_key not in selected_frame.index:
             continue
-        detail = scenario_record.scan_result.candidate_details[candidate_key]
-        snapshot = build_candidate_financial_snapshot(scenario_record, candidate_key)
+        detail = attached_details[candidate_key]
+        snapshot = validate_candidate_financial_snapshot(detail.get("financial_snapshot"), candidate_key=candidate_key)
         monthly = build_snapshot_monthly_frame(detail["monthly"], snapshot).reset_index(drop=True)
         timeline = build_project_timeline(len(monthly), base_year=base_year)
         for index, row in monthly.iterrows():

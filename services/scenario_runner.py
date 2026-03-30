@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from .candidate_financials import build_candidate_financial_snapshot
+from .candidate_financials import attach_candidate_financial_snapshot, attach_candidate_financial_snapshots, validate_candidate_financial_snapshot
 from .cache import fingerprint_deterministic_input, get_deterministic_cache
 from .deterministic_executor import run_deterministic_scan_task_results
 from .result_views import (
@@ -168,19 +168,16 @@ def run_scenario(config_bundle: LoadedConfigBundle, candidate_key: str | None = 
         last_run_at=None,
         runtime_price_bridge=None,
     )
-    financial_snapshots = {
-        key: build_candidate_financial_snapshot(ephemeral_scenario, key)
-        for key in scan_result.candidate_details
-    }
-    financial_snapshot = build_candidate_financial_snapshot(ephemeral_scenario, selected_key)
-    presentation_detail = {**detail, "financial_snapshot": financial_snapshot}
+    attached_details = attach_candidate_financial_snapshots(ephemeral_scenario)
+    presentation_detail = attach_candidate_financial_snapshot(ephemeral_scenario, detail, selected_key)
+    financial_snapshot = validate_candidate_financial_snapshot(presentation_detail.get("financial_snapshot"), candidate_key=selected_key)
     return ScenarioRunResult(
         candidate_key=selected_key,
         candidate=presentation_detail,
         monthly=monthly,
-        kpis=build_kpis(presentation_detail),
-        cash_flow=build_cash_flow(monthly, financial_snapshot=financial_snapshot),
+        kpis=build_kpis(presentation_detail, require_financial_snapshot=True),
+        cash_flow=build_cash_flow(monthly, financial_snapshot=financial_snapshot, require_financial_snapshot=True),
         monthly_balance=build_monthly_balance(monthly),
-        npv_curve=build_npv_curve(build_candidate_table(scan_result.candidate_details, financial_snapshots=financial_snapshots)),
+        npv_curve=build_npv_curve(build_candidate_table(attached_details, require_financial_snapshot=True)),
         issues=scan_result.issues,
     )

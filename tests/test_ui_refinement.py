@@ -26,7 +26,7 @@ from components.catalog_editor import catalog_editor_section
 from pages import risk as risk_page
 from pages import workbench as workbench_page
 help_page = importlib.import_module("pages.help")
-from services.candidate_financials import build_candidate_financial_snapshot
+from services.candidate_financials import CandidateFinancialSnapshotUnavailableError, build_candidate_financial_snapshot
 from services import (
     ScenarioSessionState,
     add_scenario,
@@ -1810,6 +1810,68 @@ def test_populate_results_year_zero_shows_project_price_in_main_ui() -> None:
     assert selected_row["NPV_COP"] == pytest.approx(float(selected_snapshot.project_price_year0_COP))
     assert tr("workbench.project_price.label", "es") in str(year_zero[5][3].to_plotly_json())
     assert tr("workbench.project_price.axis_label", "es") in str(year_zero[3][2].to_plotly_json())
+
+
+def test_populate_results_ignores_poisoned_legacy_finance_fields() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    candidate_key = scenario.selected_candidate_key or scenario.scan_result.best_candidate_key
+    assert candidate_key is not None
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key)
+    detail = scenario.scan_result.candidate_details[candidate_key]
+    detail["summary"]["capex_client"] = -111.0
+    detail["summary"]["cum_disc_final"] = -222.0
+    detail["summary"]["payback_month"] = 999
+    detail["summary"]["payback_years"] = 83.25
+    detail["monthly"]["NPV_COP"] = [-333.0] * len(detail["monthly"])
+    payload = _session_payload(state)
+
+    year_zero = workbench_page.populate_results(payload, "es", 0)
+    full_horizon = workbench_page.populate_results(payload, "es", 5)
+
+    year_zero_rows = year_zero[11]
+    year_zero_selected = year_zero_rows[year_zero[13][0]]
+    full_rows = full_horizon[11]
+    full_selected = full_rows[full_horizon[13][0]]
+    cash_flow_figure = full_horizon[7]
+
+    assert year_zero_selected["candidate_key"] == candidate_key
+    assert year_zero_selected["NPV_COP"] == pytest.approx(snapshot.project_price_year0_COP)
+    assert full_selected["candidate_key"] == candidate_key
+    assert full_selected["NPV_COP"] == pytest.approx(snapshot.visible_npv_COP)
+    assert full_selected["payback_years"] == snapshot.payback_years
+    assert list(cash_flow_figure.data[0].y) == list(snapshot.cumulative_discounted_cash_flow_series)
+
+
+def test_populate_results_fails_closed_when_snapshot_attachment_is_missing(monkeypatch) -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    payload = _session_payload(state)
+
+    def _raw_detail_map(active):
+        assert active.scan_result is not None
+        return active.scan_result.candidate_details
+
+    monkeypatch.setattr(results_callbacks, "attach_candidate_financial_snapshots", _raw_detail_map)
+
+    with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="CandidateFinancialSnapshot"):
+        workbench_page.populate_results(payload, "es", 5)
+
+
+def test_populate_results_fails_closed_when_snapshot_attachment_builder_errors(monkeypatch) -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    payload = _session_payload(state)
+
+    def _boom(_active):
+        raise CandidateFinancialSnapshotUnavailableError("fallo forzado del snapshot")
+
+    monkeypatch.setattr(results_callbacks, "attach_candidate_financial_snapshots", _boom)
+
+    with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="fallo forzado"):
+        workbench_page.populate_results(payload, "es", 5)
 
 
 def test_graph_click_selection_updates_store_table_and_selected_marker() -> None:

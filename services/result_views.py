@@ -18,10 +18,14 @@ from pv_product.utils import (
 
 from .candidate_financials import (
     CandidateFinancialSnapshot,
-    build_candidate_financial_snapshot,
+    CandidateFinancialSnapshotUnavailableError,
+    attach_candidate_financial_snapshot,
+    attach_candidate_financial_snapshots,
+    build_snapshot_monthly_frame,
     resolve_financial_candidate_key,
     snapshot_npv_at_horizon,
     snapshot_project_summary,
+    validate_candidate_financial_snapshot,
 )
 from .i18n import tr
 from .types import ScenarioRecord, ScenarioSessionState
@@ -147,10 +151,20 @@ def _snapshot_from_detail(detail: dict[str, Any]) -> CandidateFinancialSnapshot 
     return snapshot if isinstance(snapshot, CandidateFinancialSnapshot) else None
 
 
-def build_candidate_project_summary(detail: dict[str, Any]) -> dict[str, Any]:
+def build_candidate_project_summary(
+    detail: dict[str, Any],
+    *,
+    require_financial_snapshot: bool = False,
+) -> dict[str, Any]:
     snapshot = _snapshot_from_detail(detail)
     if snapshot is not None:
         return snapshot_project_summary(snapshot)
+    if require_financial_snapshot:
+        candidate_key = str(detail.get("candidate_key") or "<missing>")
+        raise CandidateFinancialSnapshotUnavailableError(
+            f"Candidato '{candidate_key}': se requiere CandidateFinancialSnapshot para construir project_summary."
+        )
+    # Compatibility-only fallback for snapshot-less helpers. Live scenario-backed paths must set require_financial_snapshot=True.
     summary = dict(detail.get("summary") or {})
     summary["cum_disc_final"] = _normalize_optional_float(summary.get("cum_disc_final"))
     summary["capex_client"] = _normalize_optional_float(summary.get("capex_client"))
@@ -178,10 +192,15 @@ def _display_metric_prefers_lower_value(metric_key: str) -> bool:
     return metric_key == "capex_client"
 
 
-def summarize_candidate_for_horizon(detail: dict[str, Any], horizon_years: int) -> dict[str, Any]:
+def summarize_candidate_for_horizon(
+    detail: dict[str, Any],
+    horizon_years: int,
+    *,
+    require_financial_snapshot: bool = False,
+) -> dict[str, Any]:
     snapshot = _snapshot_from_detail(detail)
     monthly = detail.get("monthly")
-    project_summary = build_candidate_project_summary(detail)
+    project_summary = build_candidate_project_summary(detail, require_financial_snapshot=require_financial_snapshot)
     display_metric_key = visible_financial_metric_key(horizon_years)
     if display_metric_key == "capex_client":
         return {
@@ -200,6 +219,12 @@ def summarize_candidate_for_horizon(detail: dict[str, Any], horizon_years: int) 
             "display_metric_key": "NPV_COP",
             "display_value_COP": npv_value,
         }
+    if require_financial_snapshot:
+        candidate_key = str(detail.get("candidate_key") or "<missing>")
+        raise CandidateFinancialSnapshotUnavailableError(
+            f"Candidato '{candidate_key}': se requiere CandidateFinancialSnapshot para resumir el horizonte visible."
+        )
+    # Compatibility-only fallback for snapshot-less helpers. Live scenario-backed paths must set require_financial_snapshot=True.
     if not isinstance(monthly, pd.DataFrame) or monthly.empty or "NPV_COP" not in monthly.columns:
         effective_years = _coerce_visible_horizon_years(horizon_years, default=1)
         return {
@@ -261,10 +286,19 @@ def resolve_payback_display_state(
     }
 
 
-def build_visible_horizon_candidate_summary(detail: dict[str, Any], horizon_years: int) -> dict[str, Any]:
+def build_visible_horizon_candidate_summary(
+    detail: dict[str, Any],
+    horizon_years: int,
+    *,
+    require_financial_snapshot: bool = False,
+) -> dict[str, Any]:
     snapshot = _snapshot_from_detail(detail)
-    project_summary = build_candidate_project_summary(detail)
-    visible_horizon_summary = summarize_candidate_for_horizon(detail, horizon_years)
+    project_summary = build_candidate_project_summary(detail, require_financial_snapshot=require_financial_snapshot)
+    visible_horizon_summary = summarize_candidate_for_horizon(
+        detail,
+        horizon_years,
+        require_financial_snapshot=require_financial_snapshot,
+    )
     payback_display_state = resolve_payback_display_state(
         project_summary.get("payback_years"),
         visible_horizon_summary["horizon_years"],
@@ -285,9 +319,10 @@ def _candidate_summary_row(
     npv_cop: float | None = None,
     display_value_cop: float | None = None,
     payback_years: float | None = None,
+    require_financial_snapshot: bool = False,
 ) -> dict[str, Any]:
     energy = summarize_energy_metrics(detail["monthly"])
-    project_summary = build_candidate_project_summary(detail)
+    project_summary = build_candidate_project_summary(detail, require_financial_snapshot=require_financial_snapshot)
     resolved_display_value = display_value_cop if display_value_cop is not None else npv_cop
     if resolved_display_value is None:
         resolved_display_value = project_summary.get("cum_disc_final")
@@ -326,13 +361,11 @@ def _finalize_candidate_table(frame: pd.DataFrame, *, display_metric_key: str = 
 def build_candidate_table(
     detail_map: dict[str, dict],
     *,
-    financial_snapshots: dict[str, CandidateFinancialSnapshot] | None = None,
+    require_financial_snapshot: bool = False,
 ) -> pd.DataFrame:
     frame = pd.DataFrame(
         [
-            _candidate_summary_row(
-                detail if not financial_snapshots or detail["candidate_key"] not in financial_snapshots else {**detail, "financial_snapshot": financial_snapshots[detail["candidate_key"]]},
-            )
+            _candidate_summary_row(detail, require_financial_snapshot=require_financial_snapshot)
             for detail in detail_map.values()
         ]
     )
@@ -343,26 +376,33 @@ def summarize_candidates_for_horizon(
     detail_map: dict[str, dict],
     horizon_years: int,
     *,
-    financial_snapshots: dict[str, CandidateFinancialSnapshot] | None = None,
+    require_financial_snapshot: bool = False,
 ) -> pd.DataFrame:
     display_metric_key = visible_financial_metric_key(horizon_years)
     rows = []
     for detail in detail_map.values():
-        snapshot = None if not financial_snapshots else financial_snapshots.get(detail["candidate_key"])
-        candidate_detail = detail if snapshot is None else {**detail, "financial_snapshot": snapshot}
-        presentation = build_visible_horizon_candidate_summary(candidate_detail, horizon_years)
+        presentation = build_visible_horizon_candidate_summary(
+            detail,
+            horizon_years,
+            require_financial_snapshot=require_financial_snapshot,
+        )
         rows.append(
             _candidate_summary_row(
-                candidate_detail,
+                detail,
                 display_value_cop=presentation["visible_horizon_summary"].get("display_value_COP"),
                 payback_years=presentation["payback_display_state"]["trace_payback_years"],
+                require_financial_snapshot=require_financial_snapshot,
             )
         )
     return _finalize_candidate_table(pd.DataFrame(rows), display_metric_key=display_metric_key)
 
 
-def build_kpis(detail: dict) -> dict[str, float | str | None]:
-    project_summary = detail.get("project_summary") or build_candidate_project_summary(detail)
+def build_kpis(detail: dict, *, require_financial_snapshot: bool = False) -> dict[str, float | str | None]:
+    project_summary = (
+        build_candidate_project_summary(detail, require_financial_snapshot=True)
+        if require_financial_snapshot
+        else (detail.get("project_summary") or build_candidate_project_summary(detail))
+    )
     visible_horizon_summary = detail.get("visible_horizon_summary") or {}
     payback_display_state = detail.get("payback_display_state") or {}
     metrics = summarize_energy_metrics(detail["monthly"])
@@ -535,24 +575,34 @@ def build_cash_flow(
     *,
     base_year: int | None = None,
     financial_snapshot: CandidateFinancialSnapshot | None = None,
+    require_financial_snapshot: bool = False,
 ) -> pd.DataFrame:
     if financial_snapshot is not None:
-        month_count = int(financial_snapshot.financial_horizon_months)
-        labels = (
-            monthly.iloc[:month_count]["Año_mes"].astype(str).tolist()
-            if "Año_mes" in monthly.columns
-            else [str(index + 1) for index in range(month_count)]
+        snapshot_frame = build_snapshot_monthly_frame(monthly, financial_snapshot)
+        frame = snapshot_frame[
+            [
+                "Año_mes",
+                "NPV_COP",
+                "Ahorro_COP",
+                "Cumulative_Cash_Flow_COP",
+                "Cash_Flow_Discounted_COP",
+            ]
+        ].copy()
+        frame.rename(
+            columns={
+                "NPV_COP": "cumulative_npv",
+                "Ahorro_COP": "monthly_savings",
+                "Cumulative_Cash_Flow_COP": "cumulative_cash_flow",
+                "Cash_Flow_Discounted_COP": "monthly_discounted_cash_flow",
+            },
+            inplace=True,
         )
-        frame = pd.DataFrame(
-            {
-                "Año_mes": labels,
-                "cumulative_npv": list(financial_snapshot.cumulative_discounted_cash_flow_series),
-                "monthly_savings": list(financial_snapshot.monthly_cash_flow_series),
-                "cumulative_cash_flow": list(financial_snapshot.cumulative_cash_flow_series),
-                "monthly_discounted_cash_flow": list(financial_snapshot.monthly_discounted_cash_flow_series),
-            }
+    elif require_financial_snapshot:
+        raise CandidateFinancialSnapshotUnavailableError(
+            "Se requiere CandidateFinancialSnapshot para construir el cash flow de una ruta viva."
         )
     else:
+        # Compatibility-only fallback for tests/helpers that operate on legacy snapshot-less monthly frames.
         frame = monthly[["Año_mes", "NPV_COP", "Ahorro_COP"]].copy()
         frame.rename(columns={"NPV_COP": "cumulative_npv", "Ahorro_COP": "monthly_savings"}, inplace=True)
     timeline = build_project_timeline(len(frame), base_year=base_year)
@@ -1387,18 +1437,16 @@ def build_scenario_summary_row(scenario: ScenarioRecord) -> dict[str, Any]:
     candidate_key = resolve_financial_candidate_key(scenario)
     if not candidate_key:
         raise ValueError(f"El escenario '{scenario.name}' no tiene diseños viables en el escaneo determinístico.")
-    detail = {
-        **scenario.scan_result.candidate_details[candidate_key],
-        "financial_snapshot": build_candidate_financial_snapshot(scenario, candidate_key),
-    }
-    kpis = build_kpis(detail)
+    detail = attach_candidate_financial_snapshot(scenario, scenario.scan_result.candidate_details[candidate_key], candidate_key)
+    kpis = build_kpis(detail, require_financial_snapshot=True)
+    snapshot = validate_candidate_financial_snapshot(detail.get("financial_snapshot"), candidate_key=candidate_key)
     return {
         "scenario_id": scenario.scenario_id,
         "scenario": scenario.name,
         "candidate_key": candidate_key,
         "best_kWp": kpis["best_kWp"],
         "battery": kpis["selected_battery"],
-        "capex_client": detail["financial_snapshot"].capex_client_COP,
+        "capex_client": snapshot.capex_client_COP,
         "NPV_COP": kpis["NPV"],
         "payback_years": kpis["payback_years"],
         "self_consumption_ratio": kpis["self_consumption_ratio"],
@@ -1483,12 +1531,8 @@ def build_comparison_figures(scenarios: list[ScenarioRecord], lang: str = "es") 
     npv_overlay = go.Figure()
     for scenario in clean_scenarios:
         assert scenario.scan_result is not None
-        curve = build_npv_curve(
-            build_candidate_table(
-                scenario.scan_result.candidate_details,
-                financial_snapshots={key: build_candidate_financial_snapshot(scenario, key) for key in scenario.scan_result.candidate_details},
-            )
-        )
+        attached_details = attach_candidate_financial_snapshots(scenario)
+        curve = build_npv_curve(build_candidate_table(attached_details, require_financial_snapshot=True))
         curve = curve.copy()
         curve["battery_display"] = curve["battery"].map(lambda value: format_metric("selected_battery", value, lang))
         npv_overlay.add_trace(

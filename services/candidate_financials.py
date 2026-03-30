@@ -26,8 +26,18 @@ from .types import ScenarioRecord
 MAX_CANDIDATE_FINANCIAL_SNAPSHOT_CACHE_ENTRIES = 128
 
 
+class CandidateFinancialSnapshotUnavailableError(RuntimeError):
+    """Raised when live scenario-backed finance cannot attach or validate a snapshot."""
+
+
 @dataclass(frozen=True)
 class CandidateFinancialSnapshot:
+    """Canonical candidate finance contract.
+
+    `project_price_year0_COP` is the canonical year-0 outflow.
+    `capex_client_COP` is a presentation alias over the same value.
+    """
+
     candidate_key: str
     project_price_year0_COP: float
     capex_client_COP: float
@@ -95,6 +105,10 @@ _CANDIDATE_FINANCIAL_SNAPSHOT_CACHE = CandidateFinancialSnapshotCache()
 
 def get_candidate_financial_snapshot_cache() -> CandidateFinancialSnapshotCache:
     return _CANDIDATE_FINANCIAL_SNAPSHOT_CACHE
+
+
+def _raise_snapshot_unavailable(candidate_key: str, message: str) -> None:
+    raise CandidateFinancialSnapshotUnavailableError(f"Candidato '{candidate_key}': {message}")
 
 
 def _coerce_float(value: Any, *, default: float = 0.0) -> float:
@@ -258,6 +272,69 @@ def build_candidate_financial_snapshot(
     return snapshot
 
 
+def validate_candidate_financial_snapshot(snapshot: CandidateFinancialSnapshot, *, candidate_key: str | None = None) -> CandidateFinancialSnapshot:
+    resolved_candidate_key = str(candidate_key or getattr(snapshot, "candidate_key", "<unknown>"))
+    if not isinstance(snapshot, CandidateFinancialSnapshot):
+        _raise_snapshot_unavailable(resolved_candidate_key, "snapshot financiero inválido o ausente.")
+
+    project_price_year0 = _coerce_float(getattr(snapshot, "project_price_year0_COP", None), default=float("nan"))
+    capex_client = _coerce_float(getattr(snapshot, "capex_client_COP", None), default=float("nan"))
+    visible_npv = _coerce_float(getattr(snapshot, "visible_npv_COP", None), default=float("nan"))
+    if not math.isfinite(project_price_year0):
+        _raise_snapshot_unavailable(resolved_candidate_key, "project_price_year0_COP inválido.")
+    if not math.isfinite(capex_client):
+        _raise_snapshot_unavailable(resolved_candidate_key, "capex_client_COP inválido.")
+    if not math.isfinite(visible_npv):
+        _raise_snapshot_unavailable(resolved_candidate_key, "visible_npv_COP inválido.")
+
+    horizon_months = int(getattr(snapshot, "financial_horizon_months", -1))
+    if horizon_months < 0:
+        _raise_snapshot_unavailable(resolved_candidate_key, "financial_horizon_months inválido.")
+
+    monthly_cash_flow_series = tuple(float(value) for value in getattr(snapshot, "monthly_cash_flow_series", ()))
+    monthly_discounted_cash_flow_series = tuple(float(value) for value in getattr(snapshot, "monthly_discounted_cash_flow_series", ()))
+    cumulative_cash_flow_series = tuple(float(value) for value in getattr(snapshot, "cumulative_cash_flow_series", ()))
+    cumulative_discounted_cash_flow_series = tuple(
+        float(value) for value in getattr(snapshot, "cumulative_discounted_cash_flow_series", ())
+    )
+    expected_length = horizon_months
+    actual_lengths = {
+        "monthly_cash_flow_series": len(monthly_cash_flow_series),
+        "monthly_discounted_cash_flow_series": len(monthly_discounted_cash_flow_series),
+        "cumulative_cash_flow_series": len(cumulative_cash_flow_series),
+        "cumulative_discounted_cash_flow_series": len(cumulative_discounted_cash_flow_series),
+    }
+    invalid_lengths = {field: length for field, length in actual_lengths.items() if length != expected_length}
+    if invalid_lengths:
+        _raise_snapshot_unavailable(
+            resolved_candidate_key,
+            f"series financieras inconsistentes para horizon={expected_length}: {invalid_lengths}.",
+        )
+
+    if expected_length > 0:
+        terminal_npv = cumulative_discounted_cash_flow_series[-1]
+    else:
+        terminal_npv = float(-project_price_year0)
+    if not math.isclose(visible_npv, terminal_npv, rel_tol=0.0, abs_tol=1e-6):
+        _raise_snapshot_unavailable(
+            resolved_candidate_key,
+            "visible_npv_COP no coincide con la serie acumulada descontada del snapshot.",
+        )
+
+    payback_month = getattr(snapshot, "payback_month", None)
+    if payback_month is not None and int(payback_month) <= 0:
+        _raise_snapshot_unavailable(resolved_candidate_key, "payback_month inválido.")
+    payback_years = getattr(snapshot, "payback_years", None)
+    if payback_month is not None:
+        expected_payback_years = float(int(payback_month) / 12.0)
+        if payback_years is None or not math.isclose(float(payback_years), expected_payback_years, rel_tol=0.0, abs_tol=1e-9):
+            _raise_snapshot_unavailable(
+                resolved_candidate_key,
+                "payback_years no coincide con payback_month del snapshot.",
+            )
+    return snapshot
+
+
 def build_candidate_financial_snapshots(scenario: ScenarioRecord) -> dict[str, CandidateFinancialSnapshot]:
     if scenario.scan_result is None:
         return {}
@@ -298,42 +375,82 @@ def resolve_financial_candidate_key(
 
 
 def snapshot_project_summary(snapshot: CandidateFinancialSnapshot) -> dict[str, Any]:
+    validated_snapshot = validate_candidate_financial_snapshot(snapshot)
     return {
-        "project_price_year0_COP": float(snapshot.project_price_year0_COP),
-        "capex_client": float(snapshot.capex_client_COP),
-        "cum_disc_final": float(snapshot.visible_npv_COP),
-        "payback_month": snapshot.payback_month,
-        "payback_years": snapshot.payback_years,
-        "financial_horizon_months": int(snapshot.financial_horizon_months),
-        "financial_horizon_years": int(snapshot.financial_horizon_years),
-        "economics_signature": snapshot.economics_signature,
-        "scan_fingerprint": snapshot.scan_fingerprint,
+        "project_price_year0_COP": float(validated_snapshot.project_price_year0_COP),
+        "capex_client": float(validated_snapshot.capex_client_COP),
+        "cum_disc_final": float(validated_snapshot.visible_npv_COP),
+        "payback_month": validated_snapshot.payback_month,
+        "payback_years": validated_snapshot.payback_years,
+        "financial_horizon_months": int(validated_snapshot.financial_horizon_months),
+        "financial_horizon_years": int(validated_snapshot.financial_horizon_years),
+        "economics_signature": validated_snapshot.economics_signature,
+        "scan_fingerprint": validated_snapshot.scan_fingerprint,
     }
 
 
 def snapshot_npv_at_horizon(snapshot: CandidateFinancialSnapshot, horizon_years: int) -> tuple[int, int, float]:
+    validated_snapshot = validate_candidate_financial_snapshot(snapshot)
     if int(horizon_years) <= 0:
-        return 0, 0, float(snapshot.project_price_year0_COP)
-    effective_years = max(1, min(int(horizon_years), int(snapshot.financial_horizon_years)))
-    horizon_months = min(int(snapshot.financial_horizon_months), effective_years * 12)
-    if horizon_months <= 0 or not snapshot.cumulative_discounted_cash_flow_series:
-        return effective_years, 0, float(-snapshot.project_price_year0_COP)
-    return effective_years, horizon_months, float(snapshot.cumulative_discounted_cash_flow_series[horizon_months - 1])
+        return 0, 0, float(validated_snapshot.project_price_year0_COP)
+    effective_years = max(1, min(int(horizon_years), int(validated_snapshot.financial_horizon_years)))
+    horizon_months = min(int(validated_snapshot.financial_horizon_months), effective_years * 12)
+    if horizon_months <= 0 or not validated_snapshot.cumulative_discounted_cash_flow_series:
+        return effective_years, 0, float(-validated_snapshot.project_price_year0_COP)
+    return effective_years, horizon_months, float(validated_snapshot.cumulative_discounted_cash_flow_series[horizon_months - 1])
+
+
+def attach_candidate_financial_snapshot(
+    scenario: ScenarioRecord,
+    candidate_detail: dict[str, Any],
+    candidate_key: str | None = None,
+) -> dict[str, Any]:
+    resolved_candidate_key = str(candidate_key or candidate_detail.get("candidate_key") or "")
+    if not resolved_candidate_key:
+        _raise_snapshot_unavailable("<missing>", "candidate_key ausente al adjuntar snapshot financiero.")
+    try:
+        snapshot = build_candidate_financial_snapshot(scenario, resolved_candidate_key)
+    except Exception as exc:  # pragma: no cover - wrapped for fail-closed clarity
+        raise CandidateFinancialSnapshotUnavailableError(
+            f"Escenario '{scenario.name}', candidato '{resolved_candidate_key}': no se pudo construir CandidateFinancialSnapshot."
+        ) from exc
+    validated_snapshot = validate_candidate_financial_snapshot(snapshot, candidate_key=resolved_candidate_key)
+    return {
+        **candidate_detail,
+        "financial_snapshot": validated_snapshot,
+        "project_summary": snapshot_project_summary(validated_snapshot),
+    }
+
+
+def attach_candidate_financial_snapshots(
+    scenario: ScenarioRecord,
+    detail_map: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    if scenario.scan_result is None:
+        raise CandidateFinancialSnapshotUnavailableError(
+            f"Escenario '{scenario.name}': no hay scan_result para adjuntar snapshots financieros."
+        )
+    source_map = detail_map if detail_map is not None else scenario.scan_result.candidate_details
+    return {
+        str(candidate_key): attach_candidate_financial_snapshot(scenario, detail, candidate_key=str(candidate_key))
+        for candidate_key, detail in source_map.items()
+    }
 
 
 def build_snapshot_monthly_frame(
     monthly: pd.DataFrame | None,
     snapshot: CandidateFinancialSnapshot,
 ) -> pd.DataFrame:
-    horizon_months = int(snapshot.financial_horizon_months)
+    validated_snapshot = validate_candidate_financial_snapshot(snapshot)
+    horizon_months = int(validated_snapshot.financial_horizon_months)
     if isinstance(monthly, pd.DataFrame) and not monthly.empty:
         frame = monthly.iloc[:horizon_months].copy().reset_index(drop=True)
     else:
         frame = pd.DataFrame(index=range(horizon_months))
     if "Año_mes" not in frame.columns:
         frame["Año_mes"] = [f"{((index // 12) + 1):02d}-{((index % 12) + 1):02d}" for index in range(horizon_months)]
-    frame["Ahorro_COP"] = list(snapshot.monthly_cash_flow_series)
-    frame["Cash_Flow_Discounted_COP"] = list(snapshot.monthly_discounted_cash_flow_series)
-    frame["Cumulative_Cash_Flow_COP"] = list(snapshot.cumulative_cash_flow_series)
-    frame["NPV_COP"] = list(snapshot.cumulative_discounted_cash_flow_series)
+    frame["Ahorro_COP"] = list(validated_snapshot.monthly_cash_flow_series)
+    frame["Cash_Flow_Discounted_COP"] = list(validated_snapshot.monthly_discounted_cash_flow_series)
+    frame["Cumulative_Cash_Flow_COP"] = list(validated_snapshot.cumulative_cash_flow_series)
+    frame["NPV_COP"] = list(validated_snapshot.cumulative_discounted_cash_flow_series)
     return frame
