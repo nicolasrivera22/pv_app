@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from .candidate_financials import build_candidate_financial_snapshot
 from .cache import fingerprint_deterministic_input, get_deterministic_cache
 from .deterministic_executor import run_deterministic_scan_task_results
 from .result_views import (
@@ -15,7 +16,7 @@ from .result_views import (
     calculate_self_sufficiency_ratio,
     candidate_key_for,
 )
-from .types import LoadedConfigBundle, ScanRunResult, ScenarioRunResult
+from .types import LoadedConfigBundle, ScanRunResult, ScenarioRecord, ScenarioRunResult
 from .validation import validate_config
 
 
@@ -155,13 +156,31 @@ def run_scenario(config_bundle: LoadedConfigBundle, candidate_key: str | None = 
 
     detail = scan_result.candidate_details[selected_key]
     monthly = detail["monthly"].copy()
+    ephemeral_scenario = ScenarioRecord(
+        scenario_id="scenario-run",
+        name="Scenario",
+        source_name=config_bundle.source_name,
+        config_bundle=config_bundle,
+        scan_result=scan_result,
+        scan_fingerprint=fingerprint_deterministic_input(config_bundle),
+        selected_candidate_key=selected_key,
+        dirty=False,
+        last_run_at=None,
+        runtime_price_bridge=None,
+    )
+    financial_snapshots = {
+        key: build_candidate_financial_snapshot(ephemeral_scenario, key)
+        for key in scan_result.candidate_details
+    }
+    financial_snapshot = build_candidate_financial_snapshot(ephemeral_scenario, selected_key)
+    presentation_detail = {**detail, "financial_snapshot": financial_snapshot}
     return ScenarioRunResult(
         candidate_key=selected_key,
-        candidate=detail,
+        candidate=presentation_detail,
         monthly=monthly,
-        kpis=build_kpis(detail),
-        cash_flow=build_cash_flow(monthly),
+        kpis=build_kpis(presentation_detail),
+        cash_flow=build_cash_flow(monthly, financial_snapshot=financial_snapshot),
         monthly_balance=build_monthly_balance(monthly),
-        npv_curve=build_npv_curve(scan_result.candidates),
+        npv_curve=build_npv_curve(build_candidate_table(scan_result.candidate_details, financial_snapshots=financial_snapshots)),
         issues=scan_result.issues,
     )

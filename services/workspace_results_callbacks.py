@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from pv_product.panel_catalog import MANUAL_PANEL_TOKEN, manual_panel_label, normalize_panel_name
 from pv_product.panel_technology import panel_technology_field_label, panel_technology_mode_label
 
+from .candidate_financials import build_candidate_financial_snapshot, build_candidate_financial_snapshots, resolve_financial_candidate_key
 from .export_access import open_export_folder, publish_export_artifacts
 from .export_artifacts import export_deterministic_artifacts
 from .export_excel import export_scenario_workbook
@@ -41,7 +42,7 @@ from .schematic import (
 )
 from .session_state import commit_client_session, resolve_scenario_session
 from .workspace_status import resolve_results_status_digest
-from .scenario_session import select_candidate_and_sync_runtime_price
+from .scenario_session import update_selected_candidate
 from components import render_kpi_cards, render_schematic_inspector, render_schematic_legend
 from .ui_schema import build_display_columns, format_metric, metric_help
 
@@ -433,7 +434,7 @@ def persist_selected_candidate(selected_rows, click_data, table_rows, session_pa
     )
     if selected_key == active.selected_candidate_key:
         raise PreventUpdate
-    state, _prepared = select_candidate_and_sync_runtime_price(state, active.scenario_id, selected_key)
+    state = update_selected_candidate(state, active.scenario_id, selected_key)
     client_state = commit_client_session(client_state, state)
     return client_state.to_payload()
 
@@ -476,8 +477,12 @@ def populate_results(session_payload, language_value, horizon_slider_value):
         lang=lang,
     )
     discard_explainer, discard_explainer_style = _scan_discard_explainer(scan, lang=lang)
-    selected_key = resolve_selected_candidate_key_for_scenario(scan, active.selected_candidate_key)
-    table = summarize_candidates_for_horizon(scan.candidate_details, horizon_years)
+    financial_snapshots = build_candidate_financial_snapshots(active)
+    selected_key = resolve_financial_candidate_key(active, active.selected_candidate_key) or resolve_selected_candidate_key_for_scenario(
+        scan,
+        active.selected_candidate_key,
+    )
+    table = summarize_candidates_for_horizon(scan.candidate_details, horizon_years, financial_snapshots=financial_snapshots)
     table["battery"] = table["battery"].replace({"None": tr("common.no_battery", lang)})
     visible_columns = [
         "kWp",
@@ -539,14 +544,15 @@ def populate_results(session_payload, language_value, horizon_slider_value):
             tooltip_header,
         )
 
-    detail = scan.candidate_details[selected_key]
+    financial_snapshot = build_candidate_financial_snapshot(active, selected_key)
+    detail = {**scan.candidate_details[selected_key], "financial_snapshot": financial_snapshot}
     presentation_detail = _visible_horizon_candidate_presentation(detail, horizon_years)
     kpis = build_kpis(presentation_detail)
     kpi_label_overrides = {"payback_years": tr("workbench.payback.project_label", lang)}
     if kpis.get("financial_metric_key") == "capex_client":
         kpi_label_overrides["NPV"] = tr("workbench.project_price.axis_label", lang)
     monthly_balance = build_monthly_balance(detail["monthly"], lang=lang)
-    cash_flow = build_cash_flow(detail["monthly"])
+    cash_flow = build_cash_flow(detail["monthly"], financial_snapshot=financial_snapshot)
     return (
         summary_strip,
         discard_explainer,

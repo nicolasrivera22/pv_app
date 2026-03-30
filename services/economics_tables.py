@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 import pandas as pd
@@ -457,7 +459,16 @@ def _normalize_cost_row(record: dict[str, Any], *, row_number: int) -> tuple[dic
     }, issues
 
 
-def _normalize_price_row(record: dict[str, Any], *, row_number: int) -> tuple[dict[str, Any] | None, list[str]]:
+def _value_is_percent_text(value: Any) -> bool:
+    return isinstance(value, str) and value.strip().endswith("%")
+
+
+def _normalize_price_row(
+    record: dict[str, Any],
+    *,
+    row_number: int,
+    percent_values_are_human: bool = False,
+) -> tuple[dict[str, Any] | None, list[str]]:
     issues: list[str] = []
     if _row_is_blank(record):
         return None, issues
@@ -475,7 +486,12 @@ def _normalize_price_row(record: dict[str, Any], *, row_number: int) -> tuple[di
     layer = raw_layer or _RICH_PRICE_LAYER_MAP.get(raw_stage, raw_stage)
     method = raw_method or _RICH_PRICE_METHOD_MAP.get(raw_calculation_method, raw_calculation_method)
     numeric_value = _coerce_numeric(raw_value, allow_percent_text=method in ECONOMICS_PRICE_PERCENT_METHODS)
-    if numeric_value is not None and method in ECONOMICS_PRICE_PERCENT_METHODS and abs(numeric_value) > 1.0:
+    if (
+        numeric_value is not None
+        and method in ECONOMICS_PRICE_PERCENT_METHODS
+        and (percent_values_are_human or _value_is_percent_text(raw_value))
+    ):
+        # The editor shows human percentages like 1 or 20, while the engine stores decimal fractions.
         numeric_value = numeric_value / 100.0
     if not name:
         issues.append(_invalid_name_warning("Economics_Price_Items", row_number))
@@ -537,7 +553,11 @@ def _normalize_cost_like_rows(source: pd.DataFrame | list[dict[str, Any]] | None
     return pd.DataFrame(rows, columns=ECONOMICS_COST_COLUMNS), issues
 
 
-def _normalize_price_like_rows(source: pd.DataFrame | list[dict[str, Any]] | None) -> tuple[pd.DataFrame, list[str]]:
+def _normalize_price_like_rows(
+    source: pd.DataFrame | list[dict[str, Any]] | None,
+    *,
+    percent_values_are_human: bool = False,
+) -> tuple[pd.DataFrame, list[str]]:
     if source is None:
         return empty_economics_price_items_table(), []
     frame = source.copy() if isinstance(source, pd.DataFrame) else pd.DataFrame(source)
@@ -545,7 +565,11 @@ def _normalize_price_like_rows(source: pd.DataFrame | list[dict[str, Any]] | Non
     rows: list[dict[str, Any]] = []
     issues: list[str] = []
     for row_number, record in enumerate(records, start=1):
-        row, row_issues = _normalize_price_row(record, row_number=row_number)
+        row, row_issues = _normalize_price_row(
+            record,
+            row_number=row_number,
+            percent_values_are_human=percent_values_are_human,
+        )
         issues.extend(row_issues)
         if row is not None:
             rows.append(row)
@@ -596,6 +620,42 @@ def normalize_economics_price_items_frame(frame: pd.DataFrame | list[dict[str, A
     return normalized
 
 
+def _signature_json_default(value: Any) -> Any:
+    if hasattr(value, "item"):
+        return value.item()
+    raise TypeError(f"Unsupported value for economics signature serialization: {type(value)!r}")
+
+
+def _frame_signature_payload(frame: pd.DataFrame) -> dict[str, object]:
+    sanitized = frame.copy()
+    sanitized.columns = [str(column) for column in sanitized.columns]
+    sanitized = sanitized.where(pd.notna(sanitized), None)
+    return {
+        "columns": list(sanitized.columns),
+        "records": sanitized.to_dict(orient="records"),
+    }
+
+
+def compute_economics_runtime_signature(
+    economics_cost_items: pd.DataFrame | list[dict[str, Any]] | None,
+    economics_price_items: pd.DataFrame | list[dict[str, Any]] | None,
+) -> str:
+    cost_frame = normalize_economics_cost_items_frame(economics_cost_items)
+    price_frame = normalize_economics_price_items_frame(economics_price_items)
+    payload = {
+        "economics_cost_items": _frame_signature_payload(cost_frame),
+        "economics_price_items": _frame_signature_payload(price_frame),
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=_signature_json_default,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def economics_cost_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None, *, lang: str = "es") -> list[dict[str, Any]]:
     normalized = normalize_economics_cost_items_frame(frame)
     return _map_editor_labels(normalized.to_dict("records"), fields=("stage", "basis", "source_mode", "hardware_binding"), lang=lang)
@@ -618,4 +678,8 @@ def economics_cost_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> 
 
 
 def economics_price_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    return normalize_economics_price_items_frame(_map_editor_raw_values(rows or [], fields=("layer", "method"))).to_dict("records")
+    normalized, _issues = _normalize_price_like_rows(
+        _map_editor_raw_values(rows or [], fields=("layer", "method")),
+        percent_values_are_human=True,
+    )
+    return normalized.to_dict("records")

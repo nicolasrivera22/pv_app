@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
@@ -11,13 +9,18 @@ import pandas as pd
 
 from .config_metadata import update_config_table_values
 from .cache import fingerprint_deterministic_input
+from .candidate_financials import resolve_financial_best_candidate_key
 from .economics_engine import (
     PREVIEW_STATE_CANDIDATE_MISSING,
     PREVIEW_STATE_READY,
     economics_preview_warning_messages,
     resolve_economics_preview,
 )
-from .economics_tables import normalize_economics_cost_items_frame, normalize_economics_price_items_frame
+from .economics_tables import (
+    compute_economics_runtime_signature,
+    normalize_economics_cost_items_frame,
+    normalize_economics_price_items_frame,
+)
 from .scenario_runner import resolve_deterministic_scan
 from .types import LoadedConfigBundle, RuntimePriceBridgeRecord, ScenarioRecord, ScenarioSessionState, ValidationIssue
 from .validation import refresh_bundle_issues
@@ -96,23 +99,6 @@ class PreparedEconomicsRuntimePriceBridge:
     bundle: LoadedConfigBundle | None = None
     bridge_record: RuntimePriceBridgeRecord | None = None
 
-
-def _json_default(value: Any) -> Any:
-    if hasattr(value, "item"):
-        return value.item()
-    raise TypeError(f"Unsupported value for bridge signature serialization: {type(value)!r}")
-
-
-def _frame_signature_payload(frame: pd.DataFrame) -> dict[str, object]:
-    sanitized = frame.copy()
-    sanitized.columns = [str(column) for column in sanitized.columns]
-    sanitized = sanitized.where(pd.notna(sanitized), None)
-    return {
-        "columns": list(sanitized.columns),
-        "records": sanitized.to_dict(orient="records"),
-    }
-
-
 def _normalized_economics_tables(
     scenario: ScenarioRecord,
     *,
@@ -125,26 +111,6 @@ def _normalized_economics_tables(
         normalize_economics_cost_items_frame(cost_source),
         normalize_economics_price_items_frame(price_source),
     )
-
-
-def compute_economics_runtime_signature(
-    economics_cost_items: pd.DataFrame | list[dict[str, Any]] | None,
-    economics_price_items: pd.DataFrame | list[dict[str, Any]] | None,
-) -> str:
-    cost_frame = normalize_economics_cost_items_frame(economics_cost_items)
-    price_frame = normalize_economics_price_items_frame(economics_price_items)
-    payload = {
-        "economics_cost_items": _frame_signature_payload(cost_frame),
-        "economics_price_items": _frame_signature_payload(price_frame),
-    }
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        default=_json_default,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def resolve_runtime_bridge_candidate_key(scenario: ScenarioRecord) -> str | None:
@@ -663,10 +629,15 @@ def _apply_scan_result(
     if scenario is None:
         raise KeyError(f"No existe el escenario '{scenario_id}'.")
     scan_result = resolve_deterministic_scan(scenario.config_bundle)
+    provisional_updated = replace(
+        scenario,
+        scan_result=scan_result,
+        dirty=False,
+    )
     if preserve_selection and scenario.selected_candidate_key in scan_result.candidate_details:
         selected_candidate_key = scenario.selected_candidate_key
     else:
-        selected_candidate_key = scan_result.best_candidate_key
+        selected_candidate_key = resolve_financial_best_candidate_key(provisional_updated) or scan_result.best_candidate_key
     preview = resolve_economics_preview(
         replace(
             scenario,
@@ -703,7 +674,7 @@ def _apply_scan_result(
 
 
 def run_scenario_scan(state: ScenarioSessionState, scenario_id: str) -> ScenarioSessionState:
-    return _apply_scan_result(state, scenario_id, preserve_selection=False, auto_bridge=True)
+    return _apply_scan_result(state, scenario_id, preserve_selection=False, auto_bridge=False)
 
 
 def hydrate_scenario_scan(state: ScenarioSessionState, scenario_id: str) -> ScenarioSessionState:

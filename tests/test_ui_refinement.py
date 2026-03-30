@@ -26,6 +26,7 @@ from components.catalog_editor import catalog_editor_section
 from pages import risk as risk_page
 from pages import workbench as workbench_page
 help_page = importlib.import_module("pages.help")
+from services.candidate_financials import build_candidate_financial_snapshot
 from services import (
     ScenarioSessionState,
     add_scenario,
@@ -1799,13 +1800,14 @@ def test_populate_results_year_zero_shows_project_price_in_main_ui() -> None:
     selected_rows = year_zero[13]
     selected_row = table_rows[selected_rows[0]]
     columns = year_zero[12]
-    selected_detail = state.get_scenario().scan_result.candidate_details[selected_row["candidate_key"]]
+    active = state.get_scenario()
+    selected_snapshot = build_candidate_financial_snapshot(active, selected_row["candidate_key"])
 
     assert year_zero[4].layout.title.text.endswith("Horizonte financiero: 0 años</sup>")
     assert year_zero[4].layout.yaxis.title.text == tr("workbench.project_price.axis_label", "es")
     assert next(column["name"] for column in columns if column["id"] == "NPV_COP") == tr("workbench.project_price.axis_label", "es")
     assert all(column["id"] != "capex_client" for column in columns)
-    assert selected_row["NPV_COP"] == pytest.approx(float(selected_detail["summary"]["capex_client"]))
+    assert selected_row["NPV_COP"] == pytest.approx(float(selected_snapshot.project_price_year0_COP))
     assert tr("workbench.project_price.label", "es") in str(year_zero[5][3].to_plotly_json())
     assert tr("workbench.project_price.axis_label", "es") in str(year_zero[3][2].to_plotly_json())
 
@@ -1850,13 +1852,12 @@ def test_graph_click_selection_updates_store_table_and_selected_marker() -> None
     assert active.selected_candidate_key == curve_key
     expected_bridge = prepare_economics_runtime_price_bridge(active)
     assert expected_bridge.applied is True
-    assert active.runtime_price_bridge is not None
-    assert active.runtime_price_bridge.candidate_key == curve_key
-    assert resolve_runtime_price_bridge_state(active) == "active"
-    assert active.config_bundle.config["pricing_mode"] == "total"
-    assert float(active.config_bundle.config["price_total_COP"]) == pytest.approx(float(expected_bridge.final_price_COP))
-    assert active.config_bundle.config["include_hw_in_price"] is False
-    assert float(active.config_bundle.config["price_others_total"]) == pytest.approx(0.0)
+    assert active.runtime_price_bridge is None
+    assert resolve_runtime_price_bridge_state(active) == "none"
+    assert active.config_bundle.config["pricing_mode"] == scenario.config_bundle.config["pricing_mode"]
+    assert float(active.config_bundle.config["price_total_COP"]) == pytest.approx(float(scenario.config_bundle.config["price_total_COP"]))
+    assert active.config_bundle.config["include_hw_in_price"] == scenario.config_bundle.config["include_hw_in_price"]
+    assert float(active.config_bundle.config["price_others_total"]) == pytest.approx(float(scenario.config_bundle.config["price_others_total"]))
 
     outputs = workbench_page.populate_results(next_payload, "es", 5)
     table_rows = outputs[11]

@@ -4,8 +4,9 @@ from io import BytesIO
 
 import pandas as pd
 
+from .candidate_financials import build_candidate_financial_snapshot, build_snapshot_monthly_frame, resolve_financial_candidate_key
 from .design_compare import build_design_comparison_export_frames
-from .result_views import build_comparison_table, build_kpis
+from .result_views import build_candidate_table, build_comparison_table, build_kpis
 from .types import ScenarioRecord, ScenarioSessionState
 
 
@@ -16,10 +17,11 @@ def _config_frame(config: dict) -> pd.DataFrame:
 def _summary_frame(scenario: ScenarioRecord) -> pd.DataFrame:
     if scenario.scan_result is None:
         raise ValueError(f"El escenario '{scenario.name}' no tiene resultados para exportar.")
-    candidate_key = scenario.selected_candidate_key or scenario.scan_result.best_candidate_key
+    candidate_key = resolve_financial_candidate_key(scenario)
     if not candidate_key:
         raise ValueError(f"El escenario '{scenario.name}' no tiene diseños viables para exportar.")
-    detail = scenario.scan_result.candidate_details[candidate_key]
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key)
+    detail = {**scenario.scan_result.candidate_details[candidate_key], "financial_snapshot": snapshot}
     kpis = build_kpis(detail)
     return pd.DataFrame(
         [
@@ -28,6 +30,7 @@ def _summary_frame(scenario: ScenarioRecord) -> pd.DataFrame:
             {"metric": "candidate_key", "value": candidate_key},
             {"metric": "best_kWp", "value": kpis["best_kWp"]},
             {"metric": "battery", "value": kpis["selected_battery"]},
+            {"metric": "capex_client_COP", "value": snapshot.capex_client_COP},
             {"metric": "NPV_COP", "value": kpis["NPV"]},
             {"metric": "payback_years", "value": kpis["payback_years"]},
             {"metric": "self_consumption_ratio", "value": kpis["self_consumption_ratio"]},
@@ -46,10 +49,17 @@ def _sheet_name(value: str) -> str:
 def export_scenario_workbook(scenario_record: ScenarioRecord) -> bytes:
     if scenario_record.scan_result is None:
         raise ValueError(f"El escenario '{scenario_record.name}' no tiene resultados para exportar.")
-    candidate_key = scenario_record.selected_candidate_key or scenario_record.scan_result.best_candidate_key
+    candidate_key = resolve_financial_candidate_key(scenario_record)
     if not candidate_key:
         raise ValueError(f"El escenario '{scenario_record.name}' no tiene diseños viables para exportar.")
     detail = scenario_record.scan_result.candidate_details[candidate_key]
+    snapshot = build_candidate_financial_snapshot(scenario_record, candidate_key)
+    monthly_selected = build_snapshot_monthly_frame(detail["monthly"], snapshot)
+    financial_snapshots = {
+        key: build_candidate_financial_snapshot(scenario_record, key)
+        for key in scenario_record.scan_result.candidate_details
+    }
+    candidate_table = build_candidate_table(scenario_record.scan_result.candidate_details, financial_snapshots=financial_snapshots)
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -57,8 +67,8 @@ def export_scenario_workbook(scenario_record: ScenarioRecord) -> bytes:
         _config_frame(scenario_record.config_bundle.config).to_excel(writer, sheet_name="Config", index=False)
         scenario_record.config_bundle.inverter_catalog.to_excel(writer, sheet_name="Inverters", index=False)
         scenario_record.config_bundle.battery_catalog.to_excel(writer, sheet_name="Batteries", index=False)
-        scenario_record.scan_result.candidates.to_excel(writer, sheet_name="Candidates", index=False)
-        detail["monthly"].to_excel(writer, sheet_name="Monthly_Selected", index=False)
+        candidate_table.to_excel(writer, sheet_name="Candidates", index=False)
+        monthly_selected.to_excel(writer, sheet_name="Monthly_Selected", index=False)
     return output.getvalue()
 
 
@@ -77,6 +87,7 @@ def export_comparison_workbook(session_state: ScenarioSessionState, scenario_rec
             "scenario",
             "best_kWp",
             "battery",
+            "capex_client",
             "NPV_COP",
             "payback_years",
             "self_consumption_ratio",
@@ -93,7 +104,11 @@ def export_comparison_workbook(session_state: ScenarioSessionState, scenario_rec
         for scenario in clean_records:
             assert scenario.scan_result is not None
             sheet_name = _sheet_name(f"Candidates_{scenario.scenario_id}")
-            scenario.scan_result.candidates.to_excel(writer, sheet_name=sheet_name, index=False)
+            candidate_table = build_candidate_table(
+                scenario.scan_result.candidate_details,
+                financial_snapshots={key: build_candidate_financial_snapshot(scenario, key) for key in scenario.scan_result.candidate_details},
+            )
+            candidate_table.to_excel(writer, sheet_name=sheet_name, index=False)
     return output.getvalue()
 
 

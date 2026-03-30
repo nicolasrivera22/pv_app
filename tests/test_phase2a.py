@@ -7,9 +7,15 @@ import pandas.testing as pdt
 from openpyxl import load_workbook
 import pytest
 
+from services.candidate_financials import (
+    build_candidate_financial_snapshot,
+    get_candidate_financial_snapshot_cache,
+    resolve_financial_best_candidate_key,
+)
 from services import (
     ScenarioSessionState,
     add_scenario,
+    apply_prepared_economics_runtime_price_bridge,
     build_comparison_figures,
     build_comparison_table,
     create_scenario_record,
@@ -47,6 +53,19 @@ def _run_named_scenario(name: str, bundle=None):
     bundle = bundle or _fast_bundle()
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record(name, bundle))
     return run_scenario_scan(state, state.active_scenario_id)
+
+
+def _bridge_selected_candidate(state: ScenarioSessionState) -> ScenarioSessionState:
+    active = state.get_scenario()
+    assert active is not None
+    prepared = prepare_economics_runtime_price_bridge(active)
+    assert prepared.applied is True
+    return apply_prepared_economics_runtime_price_bridge(
+        state,
+        active.scenario_id,
+        prepared,
+        mark_project_dirty=False,
+    )
 
 
 def test_scenario_duplicate_rename_delete_workflow() -> None:
@@ -108,22 +127,23 @@ def test_update_bundle_preserves_scan_for_economics_only_changes() -> None:
     assert state.project_dirty is True
 
 
-def test_run_scenario_scan_auto_bridges_effective_candidate_price() -> None:
-    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Auto bridge", _fast_bundle()))
+def test_run_scenario_scan_keeps_runtime_pricing_unchanged_until_manual_bridge() -> None:
+    bundle = _fast_bundle()
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Auto bridge", bundle))
 
     state = run_scenario_scan(state, state.active_scenario_id)
     active = state.get_scenario()
 
     assert active is not None
     assert active.scan_result is not None
-    assert active.runtime_price_bridge is not None
+    assert active.runtime_price_bridge is None
     prepared = prepare_economics_runtime_price_bridge(active)
     assert prepared.applied is True
-    assert active.runtime_price_bridge.candidate_key == prepared.candidate_key
-    assert active.config_bundle.config["pricing_mode"] == "total"
-    assert float(active.config_bundle.config["price_total_COP"]) == pytest.approx(float(prepared.final_price_COP))
-    assert active.config_bundle.config["include_hw_in_price"] is False
-    assert float(active.config_bundle.config["price_others_total"]) == pytest.approx(0.0)
+    assert active.selected_candidate_key == prepared.candidate_key
+    assert active.config_bundle.config["pricing_mode"] == bundle.config["pricing_mode"]
+    assert float(active.config_bundle.config["price_total_COP"]) == pytest.approx(float(bundle.config["price_total_COP"]))
+    assert active.config_bundle.config["include_hw_in_price"] == bundle.config["include_hw_in_price"]
+    assert float(active.config_bundle.config["price_others_total"]) == pytest.approx(float(bundle.config["price_others_total"]))
 
 
 def test_update_selected_candidate_remains_selection_only() -> None:
@@ -131,9 +151,9 @@ def test_update_selected_candidate_remains_selection_only() -> None:
     active = state.get_scenario()
     assert active is not None
     assert active.scan_result is not None
-    assert active.runtime_price_bridge is not None
+    assert active.runtime_price_bridge is None
     non_best_key = next(
-        key for key in active.scan_result.candidate_details if key != active.scan_result.best_candidate_key
+        key for key in active.scan_result.candidate_details if key != active.selected_candidate_key
     )
     original_price_total = float(active.config_bundle.config["price_total_COP"])
     original_bridge = active.runtime_price_bridge
@@ -155,7 +175,7 @@ def test_select_candidate_and_sync_runtime_price_updates_runtime_fields() -> Non
     non_best_key = None
     expected = None
     for candidate_key in active.scan_result.candidate_details:
-        if candidate_key == active.runtime_price_bridge.candidate_key:
+        if candidate_key == active.selected_candidate_key:
             continue
         prepared = prepare_economics_runtime_price_bridge(replace(active, selected_candidate_key=candidate_key))
         if prepared.applied:
@@ -221,12 +241,13 @@ def test_selected_candidate_resets_after_scenario_change_and_rerun() -> None:
     state = run_scenario_scan(state, active.scenario_id)
     rerun = state.get_scenario()
 
-    assert rerun.selected_candidate_key == rerun.scan_result.best_candidate_key
+    assert rerun.selected_candidate_key == resolve_financial_best_candidate_key(rerun)
     assert non_best_key not in rerun.scan_result.candidate_details
 
 
 def test_blocked_selection_sync_keeps_same_candidate_bridge_active(monkeypatch) -> None:
     state = _run_named_scenario("Blocked same candidate")
+    state = _bridge_selected_candidate(state)
     active = state.get_scenario()
     assert active is not None
     assert active.runtime_price_bridge is not None
@@ -256,6 +277,7 @@ def test_blocked_selection_sync_keeps_same_candidate_bridge_active(monkeypatch) 
 
 def test_blocked_selection_sync_stales_bridge_when_governing_design_changes(monkeypatch) -> None:
     state = _run_named_scenario("Blocked other candidate")
+    state = _bridge_selected_candidate(state)
     active = state.get_scenario()
     assert active is not None
     assert active.scan_result is not None
@@ -344,3 +366,54 @@ def test_export_comparison_workbook_contains_expected_sheets() -> None:
     assert "Comparison_KPIs" in workbook.sheetnames
     candidate_sheets = [name for name in workbook.sheetnames if name.startswith("Candidates_")]
     assert len(candidate_sheets) == 2
+
+
+def test_candidate_financial_snapshot_cache_reuses_key_and_invalidates_on_economics_change() -> None:
+    get_candidate_financial_snapshot_cache().clear()
+    state = _run_named_scenario("Snapshot cache")
+    active = state.get_scenario()
+    assert active is not None
+    candidate_key = active.selected_candidate_key
+    assert candidate_key is not None
+
+    first = build_candidate_financial_snapshot(active, candidate_key)
+    second = build_candidate_financial_snapshot(active, candidate_key)
+    assert first is second
+
+    changed_prices = active.config_bundle.economics_price_items_table.copy()
+    changed_prices.at[0, "value"] = float(changed_prices.at[0, "value"]) + 0.05
+    changed_bundle = replace(active.config_bundle, economics_price_items_table=changed_prices)
+    changed_state = update_scenario_bundle(state, active.scenario_id, changed_bundle)
+    changed_active = changed_state.get_scenario()
+    assert changed_active is not None
+
+    third = build_candidate_financial_snapshot(changed_active, candidate_key)
+    assert third is not first
+    assert third.economics_signature != first.economics_signature
+    assert third.visible_npv_COP != pytest.approx(first.visible_npv_COP)
+
+
+def test_export_scenario_workbook_uses_snapshot_finance_contract() -> None:
+    state = _run_named_scenario("Export snapshot")
+    scenario = state.get_scenario()
+    assert scenario is not None
+    candidate_key = scenario.selected_candidate_key
+    assert candidate_key is not None
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key)
+
+    payload = export_scenario_workbook(scenario)
+    workbook = load_workbook(BytesIO(payload), data_only=True)
+    summary_sheet = workbook["Summary"]
+    summary_values = {
+        summary_sheet.cell(row=row_index, column=1).value: summary_sheet.cell(row=row_index, column=2).value
+        for row_index in range(2, summary_sheet.max_row + 1)
+    }
+    monthly_sheet = workbook["Monthly_Selected"]
+    headers = [monthly_sheet.cell(row=1, column=column_index).value for column_index in range(1, monthly_sheet.max_column + 1)]
+    npv_column = headers.index("NPV_COP") + 1
+    last_npv = monthly_sheet.cell(row=monthly_sheet.max_row, column=npv_column).value
+
+    assert summary_values["candidate_key"] == candidate_key
+    assert float(summary_values["capex_client_COP"]) == pytest.approx(snapshot.capex_client_COP)
+    assert float(summary_values["NPV_COP"]) == pytest.approx(snapshot.visible_npv_COP)
+    assert float(last_npv) == pytest.approx(snapshot.visible_npv_COP)

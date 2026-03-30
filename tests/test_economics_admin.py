@@ -280,6 +280,58 @@ def test_economics_editor_round_trips_friendly_enum_labels_to_raw_values() -> No
     assert round_trip_price[0]["method"] == "markup_pct"
 
 
+@pytest.mark.parametrize(
+    ("editor_value", "expected_internal"),
+    [
+        (1, 0.01),
+        (1.0, 0.01),
+        (1.1, 0.011),
+        (20, 0.20),
+    ],
+)
+def test_economics_price_percent_editor_values_normalize_to_internal_fractions(
+    editor_value: float,
+    expected_internal: float,
+) -> None:
+    rows = [
+        {
+            "layer": "Oferta comercial",
+            "name": "Margen comercial",
+            "method": "Ajuste porcentual",
+            "value": editor_value,
+            "enabled": True,
+            "notes": "",
+        }
+    ]
+
+    normalized = economics_price_items_rows_from_editor(rows)
+
+    assert normalized[0]["layer"] == "commercial"
+    assert normalized[0]["method"] == "markup_pct"
+    assert float(normalized[0]["value"]) == pytest.approx(expected_internal)
+
+
+@pytest.mark.parametrize("editor_value", [1, 1.0, 1.1, 20])
+def test_economics_price_percent_round_trip_preserves_editor_percent_semantics(editor_value: float) -> None:
+    rows = [
+        {
+            "layer": "Oferta comercial",
+            "name": "Margen comercial",
+            "method": "Ajuste porcentual",
+            "value": editor_value,
+            "enabled": True,
+            "notes": "",
+        }
+    ]
+
+    normalized = economics_price_items_rows_from_editor(rows)
+    round_trip_rows = economics_price_items_rows_to_editor(normalized, lang="es")
+
+    assert round_trip_rows[0]["layer"] == "Oferta comercial"
+    assert round_trip_rows[0]["method"] == "Ajuste porcentual"
+    assert float(round_trip_rows[0]["value"]) == pytest.approx(float(editor_value))
+
+
 def test_economics_columns_mark_enum_fields_as_dropdowns() -> None:
     cost_columns, _ = build_table_display_columns(
         "economics_cost_items",
