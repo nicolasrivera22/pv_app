@@ -9,6 +9,7 @@ import pytest
 
 from components.economics_editor import economics_editor_section
 import services.workspace_admin_callbacks as admin_callbacks
+from services.candidate_financials import build_candidate_financial_snapshot
 from services import (
     ScenarioSessionState,
     ValidationIssue,
@@ -854,7 +855,7 @@ def test_render_economics_preview_uses_normalized_editor_rows(monkeypatch, tmp_p
     price_rows[0] = {**price_rows[0], "value": 12}
     captured: dict[str, object] = {}
 
-    def _fake_preview(scenario, *, economics_cost_items, economics_price_items):
+    def _fake_preview(scenario, *, economics_cost_items, economics_price_items, **_kwargs):
         captured["scenario_id"] = scenario.scenario_id
         captured["cost_items"] = economics_cost_items
         captured["price_items"] = economics_price_items
@@ -885,10 +886,21 @@ def test_admin_preview_candidate_selector_is_local_and_does_not_mutate_scenario_
         candidate_key for candidate_key in active.scan_result.candidate_details if candidate_key != global_selected
     )
 
-    synced_state, dropdown_value = admin_callbacks.sync_admin_preview_candidate_state(payload, {})
+    synced_state = admin_callbacks.sync_admin_preview_candidate_state(payload, {})
+    options, dropdown_value, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(
+        payload,
+        synced_state,
+        "es",
+    )
     assert dropdown_value == global_selected
+    assert synced_state["source"] == admin_callbacks.ADMIN_PREVIEW_SOURCE_WORKBENCH
+    assert options
+    assert disabled is False
+    assert helper
+    assert meta != ""
 
     local_preview_state = admin_callbacks.update_admin_preview_candidate_state(local_candidate, payload, synced_state)
+    assert local_preview_state["source"] == admin_callbacks.ADMIN_PREVIEW_SOURCE_LOCAL
     children = render_economics_preview(payload, None, None, "es", local_preview_state)
 
     preview_candidate = _find_component(children, "economics-preview-quantity-candidate")
@@ -905,8 +917,9 @@ def test_admin_preview_candidate_selector_is_local_and_does_not_mutate_scenario_
 def test_admin_preview_candidate_selector_reports_non_ready_states_without_mutating_state(monkeypatch, tmp_path) -> None:
     _client_state, state, active, payload = _admin_payload(monkeypatch, tmp_path)
 
-    options, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(payload, {}, "es")
+    options, dropdown_value, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(payload, {}, "es")
     assert options == []
+    assert dropdown_value is None
     assert disabled is True
     assert "escaneo determinístico" in helper.lower()
     assert meta == ""
@@ -917,8 +930,13 @@ def test_admin_preview_candidate_selector_reports_non_ready_states_without_mutat
     dirty_bundle = replace(scanned_active.config_bundle, config={**scanned_active.config_bundle.config, "PR": 0.85})
     rerun_state = update_scenario_bundle(scanned_state, scanned_active.scenario_id, dirty_bundle)
     rerun_payload = commit_client_session(_client_state, rerun_state).to_payload()
-    options, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(rerun_payload, {}, "es")
+    options, dropdown_value, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(
+        rerun_payload,
+        {},
+        "es",
+    )
     assert options == []
+    assert dropdown_value is None
     assert disabled is True
     assert "desactualizado" in helper.lower()
     assert meta == ""
@@ -940,12 +958,69 @@ def test_admin_preview_candidate_selector_handles_candidate_missing_state(monkey
     )
     payload = commit_client_session(client_state, broken_state).to_payload()
 
-    options, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(payload, {}, "es")
+    options, dropdown_value, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(
+        payload,
+        {},
+        "es",
+    )
 
     assert options == []
+    assert dropdown_value is None
     assert disabled is True
     assert "no hay un diseño determinístico" in helper.lower()
     assert meta == ""
+
+
+def test_admin_preview_local_candidate_invalidates_without_best_fallback_after_rerun(monkeypatch, tmp_path) -> None:
+    client_state, state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    assert active.scan_result is not None
+    local_candidate = next(
+        key
+        for key, detail in active.scan_result.candidate_details.items()
+        if key != active.selected_candidate_key and float(detail["kWp"]) >= 16.0
+    )
+    local_preview_state = admin_callbacks.update_admin_preview_candidate_state(
+        local_candidate,
+        payload,
+        admin_callbacks.sync_admin_preview_candidate_state(payload, {}),
+    )
+
+    narrowed_bundle = replace(
+        active.config_bundle,
+        config={**active.config_bundle.config, "kWp_max": 13.8},
+    )
+    state = update_scenario_bundle(state, active.scenario_id, narrowed_bundle)
+    state = run_scenario_scan(state, active.scenario_id)
+    rerun_active = state.get_scenario()
+    assert rerun_active is not None
+    rerun_payload = commit_client_session(client_state, state).to_payload()
+    rerun_state = admin_callbacks.sync_admin_preview_candidate_state(rerun_payload, local_preview_state)
+    options, dropdown_value, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(
+        rerun_payload,
+        rerun_state,
+        "es",
+    )
+    preview_children = render_economics_preview(rerun_payload, None, None, "es", rerun_state)
+    preview_status = _find_component(preview_children, "economics-preview-status")
+    preview_summary = _find_component(preview_children, "economics-summary-cards")
+    bridge_disabled, bridge_note = sync_economics_bridge_cta(
+        rerun_payload,
+        *_bridge_args(rerun_active),
+        rerun_state,
+    )
+
+    assert rerun_state["candidate_key"] == local_candidate
+    assert rerun_state["source"] == admin_callbacks.ADMIN_PREVIEW_SOURCE_LOCAL
+    assert options
+    assert dropdown_value is None
+    assert disabled is False
+    assert "no hay un diseño determinístico" in helper.lower()
+    assert meta == ""
+    assert preview_status is not None
+    assert "No hay un diseño determinístico disponible" in str(preview_status.children)
+    assert preview_summary is None
+    assert bridge_disabled is True
+    assert "candidato determinístico" in bridge_note.lower()
 
 
 def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypatch, tmp_path) -> None:
@@ -955,6 +1030,13 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     cost_rows[0] = {**cost_rows[0], "amount_COP": 100_000.0}
     price_rows[0] = {**price_rows[0], "value": 10}
     price_rows[2] = {**price_rows[2], "enabled": True, "value": 500_000.0}
+    snapshot = build_candidate_financial_snapshot(
+        active,
+        active.selected_candidate_key or active.scan_result.best_candidate_key,
+        economics_cost_items=cost_rows,
+        economics_price_items=price_rows,
+        use_cache=False,
+    )
 
     children = render_economics_preview(payload, cost_rows, price_rows, "es")
 
@@ -1026,6 +1108,10 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert commercial_table.data[0]["rule"] == "Ajuste porcentual"
     assert "calculation" in technical_table.data[0]
     assert "x" in str(technical_table.data[0]["calculation"])
+    assert float(technical_table.data[0]["line_amount_COP"]) == pytest.approx(snapshot.economics_result.cost_rows[0].line_amount_COP)
+    assert len(technical_table.data) == len([row for row in snapshot.economics_result.cost_rows if row.stage_or_layer == "technical"])
+    assert len(commercial_table.data) == len([row for row in snapshot.economics_result.price_rows if row.stage_or_layer == "commercial"])
+    assert len(sale_table.data) == len([row for row in snapshot.economics_result.price_rows if row.stage_or_layer == "sale"])
 
 
 def test_render_economics_preview_reports_no_scan_after_scan_invalidating_change(monkeypatch, tmp_path) -> None:
@@ -1132,7 +1218,7 @@ def test_apply_admin_edits_preserves_scan_for_economics_only_changes_and_preview
 def test_render_economics_preview_shows_localized_placeholders_from_ui_not_engine(monkeypatch, tmp_path) -> None:
     _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
 
-    def _fake_preview(_scenario, *, economics_cost_items, economics_price_items):
+    def _fake_preview(_scenario, *, economics_cost_items, economics_price_items, **_kwargs):
         _ = economics_cost_items, economics_price_items
         return EconomicsPreviewResult(
             state="ready",
@@ -1486,6 +1572,15 @@ def test_bridge_cta_blocks_when_non_economics_admin_drafts_exist(monkeypatch, tm
 
 def test_bridge_callback_reresolves_preview_and_writes_runtime_total(monkeypatch, tmp_path) -> None:
     _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    assert active.scan_result is not None
+    local_candidate = next(
+        candidate_key for candidate_key in active.scan_result.candidate_details if candidate_key != active.selected_candidate_key
+    )
+    preview_state = admin_callbacks.update_admin_preview_candidate_state(
+        local_candidate,
+        payload,
+        admin_callbacks.sync_admin_preview_candidate_state(payload, {}),
+    )
     captured: dict[str, object] = {}
     real_apply = admin_callbacks.apply_prepared_economics_runtime_price_bridge
 
@@ -1497,7 +1592,7 @@ def test_bridge_callback_reresolves_preview_and_writes_runtime_total(monkeypatch
         captured["candidate_key"] = candidate_key
         return _prepared_bridge_result(
             active,
-            candidate_key="bridge::candidate",
+            candidate_key=str(candidate_key),
             final_price_COP=38_750_000.0,
             normalized_cost_rows=economics_cost_items,
             normalized_price_rows=economics_price_items,
@@ -1517,6 +1612,7 @@ def test_bridge_callback_reresolves_preview_and_writes_runtime_total(monkeypatch
         payload,
         "",
         *_bridge_args(active),
+        preview_state,
     )
 
     _, updated_state = resolve_client_session(next_payload, language="es")
@@ -1525,6 +1621,7 @@ def test_bridge_callback_reresolves_preview_and_writes_runtime_total(monkeypatch
     assert captured["scenario_id"] == active.scenario_id
     assert isinstance(captured["cost_items"], list)
     assert isinstance(captured["price_items"], list)
+    assert captured["candidate_key"] == local_candidate
     assert captured["applied_scenario_id"] == active.scenario_id
     assert captured["applied_mark_project_dirty"] is True
     assert updated_active is not None
@@ -1534,7 +1631,7 @@ def test_bridge_callback_reresolves_preview_and_writes_runtime_total(monkeypatch
     assert float(updated_active.config_bundle.config["price_others_total"]) == pytest.approx(0.0)
     assert updated_active.config_bundle.config["include_var_others"] == active.config_bundle.config["include_var_others"]
     assert updated_active.runtime_price_bridge is not None
-    assert updated_active.runtime_price_bridge.candidate_key == "bridge::candidate"
+    assert updated_active.runtime_price_bridge.candidate_key == local_candidate
     assert updated_active.runtime_price_bridge.final_price_COP == pytest.approx(38_750_000.0)
     assert updated_active.runtime_price_bridge.resolved_preview_state == "ready"
     assert updated_active.runtime_price_bridge.applied_price_total_COP == pytest.approx(38_750_000.0)

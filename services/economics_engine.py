@@ -461,7 +461,12 @@ def resolve_economics_preview(
     *,
     economics_cost_items: pd.DataFrame | list[dict[str, Any]] | None,
     economics_price_items: pd.DataFrame | list[dict[str, Any]] | None,
+    candidate_key: str | None = None,
+    allow_best_fallback: bool = True,
+    candidate_source: str | None = None,
 ) -> EconomicsPreviewResult:
+    from .candidate_financials import CandidateFinancialSnapshotUnavailableError, build_candidate_financial_snapshot
+
     if scenario.scan_result is None:
         return EconomicsPreviewResult(
             state=PREVIEW_STATE_NO_SCAN,
@@ -475,59 +480,58 @@ def resolve_economics_preview(
             message_key="workspace.admin.economics.preview.state.rerun_required",
         )
 
-    candidate_key: str | None = None
-    candidate_source: str | None = None
-    if scenario.selected_candidate_key in scenario.scan_result.candidate_details:
-        candidate_key = str(scenario.selected_candidate_key)
-        candidate_source = "selected"
-    elif scenario.scan_result.best_candidate_key in scenario.scan_result.candidate_details:
-        candidate_key = str(scenario.scan_result.best_candidate_key)
-        candidate_source = "best_fallback"
+    resolved_candidate_key: str | None = None
+    resolved_candidate_source = candidate_source
+    if candidate_key not in (None, ""):
+        resolved_candidate_key = str(candidate_key)
+        if resolved_candidate_source is None:
+            resolved_candidate_source = "selected"
+    elif scenario.selected_candidate_key in scenario.scan_result.candidate_details:
+        resolved_candidate_key = str(scenario.selected_candidate_key)
+        if resolved_candidate_source is None:
+            resolved_candidate_source = "selected"
+    elif allow_best_fallback and scenario.scan_result.best_candidate_key in scenario.scan_result.candidate_details:
+        resolved_candidate_key = str(scenario.scan_result.best_candidate_key)
+        if resolved_candidate_source is None:
+            resolved_candidate_source = "best_fallback"
 
-    if not candidate_key:
+    if not resolved_candidate_key:
         return EconomicsPreviewResult(
             state=PREVIEW_STATE_CANDIDATE_MISSING,
             candidate_source=None,
             message_key="workspace.admin.economics.preview.state.candidate_missing",
         )
 
-    detail = scenario.scan_result.candidate_details.get(candidate_key)
-    if detail is None:
+    if resolved_candidate_key not in scenario.scan_result.candidate_details:
         return EconomicsPreviewResult(
             state=PREVIEW_STATE_CANDIDATE_MISSING,
-            candidate_source=None,
+            candidate_key=resolved_candidate_key,
+            candidate_source=resolved_candidate_source,
             message_key="workspace.admin.economics.preview.state.candidate_missing",
         )
 
-    quantities = resolve_economics_quantities(
-        candidate_key=candidate_key,
-        detail=detail,
-        config=scenario.config_bundle.config,
-        panel_catalog=scenario.config_bundle.panel_catalog,
-    )
-    hardware_prices = {
-        "none": ResolvedHardwarePrice(
-            value_source="unavailable",
-            hardware_binding="none",
-            hardware_name="",
-            unit_rate_COP=0.0,
-        ),
-        "panel": resolve_panel_hardware_price(scenario.config_bundle.config, scenario.config_bundle.panel_catalog),
-        "inverter": resolve_inverter_hardware_price(detail, scenario.config_bundle.inverter_catalog),
-        "battery": resolve_battery_hardware_price(detail, scenario.config_bundle.battery_catalog),
-    }
-    result = calculate_economics_result(
-        economics_cost_items=economics_cost_items,
-        economics_price_items=economics_price_items,
-        quantities=quantities,
-        hardware_prices=hardware_prices,
-    )
+    try:
+        snapshot = build_candidate_financial_snapshot(
+            scenario,
+            resolved_candidate_key,
+            economics_cost_items=economics_cost_items,
+            economics_price_items=economics_price_items,
+            use_cache=False,
+        )
+    except (CandidateFinancialSnapshotUnavailableError, KeyError, ValueError):
+        return EconomicsPreviewResult(
+            state=PREVIEW_STATE_CANDIDATE_MISSING,
+            candidate_key=resolved_candidate_key,
+            candidate_source=resolved_candidate_source,
+            message_key="workspace.admin.economics.preview.state.candidate_missing",
+        )
+
     return EconomicsPreviewResult(
         state=PREVIEW_STATE_READY,
-        candidate_key=candidate_key,
-        candidate_source=candidate_source,
+        candidate_key=resolved_candidate_key,
+        candidate_source=resolved_candidate_source,
         message_key="workspace.admin.economics.preview.state.ready",
-        result=result,
+        result=snapshot.economics_result,
     )
 
 

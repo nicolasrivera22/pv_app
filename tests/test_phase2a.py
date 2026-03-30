@@ -14,6 +14,7 @@ from services.candidate_financials import (
     build_snapshot_monthly_frame,
     get_candidate_financial_snapshot_cache,
     resolve_financial_best_candidate_key,
+    validate_candidate_financial_snapshot,
 )
 import services.export_excel as export_excel_service
 from services import (
@@ -256,7 +257,7 @@ def test_blocked_selection_sync_keeps_same_candidate_bridge_active(monkeypatch) 
     assert active is not None
     assert active.runtime_price_bridge is not None
 
-    def _blocked_preview(_scenario, *, economics_cost_items, economics_price_items):
+    def _blocked_preview(_scenario, *, economics_cost_items, economics_price_items, **_kwargs):
         _ = economics_cost_items, economics_price_items
         return EconomicsPreviewResult(
             state="rerun_required",
@@ -291,7 +292,7 @@ def test_blocked_selection_sync_stales_bridge_when_governing_design_changes(monk
         key for key in active.scan_result.candidate_details if key != active.scan_result.best_candidate_key
     )
 
-    def _blocked_preview(_scenario, *, economics_cost_items, economics_price_items):
+    def _blocked_preview(_scenario, *, economics_cost_items, economics_price_items, **_kwargs):
         _ = economics_cost_items, economics_price_items
         return EconomicsPreviewResult(
             state="rerun_required",
@@ -395,6 +396,76 @@ def test_candidate_financial_snapshot_cache_reuses_key_and_invalidates_on_econom
     assert third is not first
     assert third.economics_signature != first.economics_signature
     assert third.visible_npv_COP != pytest.approx(first.visible_npv_COP)
+
+
+def test_two_candidates_build_distinct_snapshots_and_ignore_poisoned_legacy_finance() -> None:
+    state = _run_named_scenario("Distinct candidate snapshots")
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+
+    pair: tuple[str, str] | None = None
+    baseline_snapshots: dict[str, object] = {}
+    keys = list(scenario.scan_result.candidate_details)
+    for left_key in keys:
+        for right_key in keys:
+            if left_key == right_key:
+                continue
+            left_snapshot = build_candidate_financial_snapshot(scenario, left_key)
+            right_snapshot = build_candidate_financial_snapshot(scenario, right_key)
+            if left_snapshot.project_price_year0_COP != pytest.approx(right_snapshot.project_price_year0_COP):
+                pair = (left_key, right_key)
+                baseline_snapshots = {
+                    left_key: left_snapshot,
+                    right_key: right_snapshot,
+                }
+                break
+        if pair is not None:
+            break
+
+    assert pair is not None
+    left_key, right_key = pair
+    for candidate_key in pair:
+        detail = scenario.scan_result.candidate_details[candidate_key]
+        detail["summary"]["capex_client"] = -123_456.0
+        detail["summary"]["cum_disc_final"] = -654_321.0
+        detail["summary"]["payback_month"] = 999
+        detail["summary"]["payback_years"] = 83.25
+        detail["monthly"]["NPV_COP"] = [-777_777.0] * len(detail["monthly"])
+
+    rebuilt_left = build_candidate_financial_snapshot(scenario, left_key, use_cache=False)
+    rebuilt_right = build_candidate_financial_snapshot(scenario, right_key, use_cache=False)
+    baseline_left = baseline_snapshots[left_key]
+    baseline_right = baseline_snapshots[right_key]
+
+    assert rebuilt_left.project_price_year0_COP == pytest.approx(baseline_left.project_price_year0_COP)
+    assert rebuilt_right.project_price_year0_COP == pytest.approx(baseline_right.project_price_year0_COP)
+    assert rebuilt_left.project_price_year0_COP != pytest.approx(rebuilt_right.project_price_year0_COP)
+    assert rebuilt_left.visible_npv_COP == pytest.approx(baseline_left.visible_npv_COP)
+    assert rebuilt_right.visible_npv_COP == pytest.approx(baseline_right.visible_npv_COP)
+
+
+def test_validate_candidate_financial_snapshot_fails_closed_on_candidate_mismatch() -> None:
+    state = _run_named_scenario("Snapshot mismatch")
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    candidate_key = scenario.selected_candidate_key
+    assert candidate_key is not None
+    other_key = next(key for key in scenario.scan_result.candidate_details if key != candidate_key)
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key)
+
+    with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="candidato solicitado"):
+        validate_candidate_financial_snapshot(snapshot, candidate_key=other_key)
+
+    broken_snapshot = replace(
+        snapshot,
+        economics_result=replace(
+            snapshot.economics_result,
+            quantities=replace(snapshot.economics_result.quantities, candidate_key=other_key),
+        ),
+    )
+
+    with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="economics_result pertenece a"):
+        validate_candidate_financial_snapshot(broken_snapshot, candidate_key=candidate_key)
 
 
 def test_attach_candidate_financial_snapshot_adds_validated_snapshot_and_project_summary() -> None:

@@ -13,6 +13,7 @@ from pv_product.utils import ann_to_month_rate
 
 from .cache import fingerprint_deterministic_input
 from .economics_engine import (
+    EconomicsResult,
     ResolvedHardwarePrice,
     calculate_economics_result,
     resolve_battery_hardware_price,
@@ -52,6 +53,7 @@ class CandidateFinancialSnapshot:
     financial_horizon_years: int
     economics_signature: str
     scan_fingerprint: str
+    economics_result: EconomicsResult
 
 
 @dataclass
@@ -199,6 +201,8 @@ def build_candidate_financial_snapshot(
     scenario: ScenarioRecord,
     candidate_key: str,
     *,
+    economics_cost_items: pd.DataFrame | list[dict[str, Any]] | None = None,
+    economics_price_items: pd.DataFrame | list[dict[str, Any]] | None = None,
     use_cache: bool = True,
 ) -> CandidateFinancialSnapshot:
     if scenario.scan_result is None:
@@ -206,8 +210,10 @@ def build_candidate_financial_snapshot(
     if candidate_key not in scenario.scan_result.candidate_details:
         raise KeyError(f"No existe el candidato '{candidate_key}' en el escenario '{scenario.name}'.")
 
-    normalized_cost_items = normalize_economics_cost_items_frame(scenario.config_bundle.economics_cost_items_table)
-    normalized_price_items = normalize_economics_price_items_frame(scenario.config_bundle.economics_price_items_table)
+    cost_source = scenario.config_bundle.economics_cost_items_table if economics_cost_items is None else economics_cost_items
+    price_source = scenario.config_bundle.economics_price_items_table if economics_price_items is None else economics_price_items
+    normalized_cost_items = normalize_economics_cost_items_frame(cost_source)
+    normalized_price_items = normalize_economics_price_items_frame(price_source)
     economics_signature = compute_economics_runtime_signature(normalized_cost_items, normalized_price_items)
     scan_fingerprint = _scenario_scan_fingerprint(scenario)
     cache_key = (scan_fingerprint, economics_signature, str(candidate_key))
@@ -267,25 +273,56 @@ def build_candidate_financial_snapshot(
         financial_horizon_years=int(horizon_years),
         economics_signature=economics_signature,
         scan_fingerprint=scan_fingerprint,
+        economics_result=economics_result,
     )
     cache.put(cache_key, snapshot)
     return snapshot
 
 
 def validate_candidate_financial_snapshot(snapshot: CandidateFinancialSnapshot, *, candidate_key: str | None = None) -> CandidateFinancialSnapshot:
-    resolved_candidate_key = str(candidate_key or getattr(snapshot, "candidate_key", "<unknown>"))
     if not isinstance(snapshot, CandidateFinancialSnapshot):
+        resolved_candidate_key = str(candidate_key or getattr(snapshot, "candidate_key", "<unknown>"))
         _raise_snapshot_unavailable(resolved_candidate_key, "snapshot financiero inválido o ausente.")
+
+    snapshot_candidate_key = str(getattr(snapshot, "candidate_key", "") or "").strip()
+    requested_candidate_key = None if candidate_key in (None, "") else str(candidate_key).strip()
+    resolved_candidate_key = requested_candidate_key or snapshot_candidate_key or "<unknown>"
+    if not snapshot_candidate_key:
+        _raise_snapshot_unavailable(resolved_candidate_key, "candidate_key ausente en CandidateFinancialSnapshot.")
+    if requested_candidate_key is not None and snapshot_candidate_key != requested_candidate_key:
+        _raise_snapshot_unavailable(
+            resolved_candidate_key,
+            f"snapshot financiero pertenece a '{snapshot_candidate_key}' y no al candidato solicitado.",
+        )
+
+    economics_result = getattr(snapshot, "economics_result", None)
+    if not isinstance(economics_result, EconomicsResult):
+        _raise_snapshot_unavailable(resolved_candidate_key, "economics_result inválido o ausente en CandidateFinancialSnapshot.")
+
+    economics_candidate_key = str(getattr(getattr(economics_result, "quantities", None), "candidate_key", "") or "").strip()
+    if economics_candidate_key != snapshot_candidate_key:
+        _raise_snapshot_unavailable(
+            resolved_candidate_key,
+            f"economics_result pertenece a '{economics_candidate_key or '<missing>'}' y no al snapshot '{snapshot_candidate_key}'.",
+        )
 
     project_price_year0 = _coerce_float(getattr(snapshot, "project_price_year0_COP", None), default=float("nan"))
     capex_client = _coerce_float(getattr(snapshot, "capex_client_COP", None), default=float("nan"))
     visible_npv = _coerce_float(getattr(snapshot, "visible_npv_COP", None), default=float("nan"))
+    economics_final_price = _coerce_float(getattr(economics_result, "final_price_COP", None), default=float("nan"))
     if not math.isfinite(project_price_year0):
         _raise_snapshot_unavailable(resolved_candidate_key, "project_price_year0_COP inválido.")
     if not math.isfinite(capex_client):
         _raise_snapshot_unavailable(resolved_candidate_key, "capex_client_COP inválido.")
     if not math.isfinite(visible_npv):
         _raise_snapshot_unavailable(resolved_candidate_key, "visible_npv_COP inválido.")
+    if not math.isfinite(economics_final_price):
+        _raise_snapshot_unavailable(resolved_candidate_key, "economics_result.final_price_COP inválido.")
+    if not math.isclose(project_price_year0, economics_final_price, rel_tol=0.0, abs_tol=1e-6):
+        _raise_snapshot_unavailable(
+            resolved_candidate_key,
+            "project_price_year0_COP no coincide con economics_result.final_price_COP.",
+        )
 
     horizon_months = int(getattr(snapshot, "financial_horizon_months", -1))
     if horizon_months < 0:

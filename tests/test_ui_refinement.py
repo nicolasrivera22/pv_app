@@ -1725,6 +1725,45 @@ def test_populate_results_year_zero_shows_project_price_in_main_ui() -> None:
     assert tr("workbench.project_price.axis_label", "es") in str(year_zero[3][2].to_plotly_json())
 
 
+def test_populate_results_year_zero_selected_overlay_uses_selected_candidate_snapshot_not_curve_best() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+
+    initial_outputs = workbench_page.populate_results(_session_payload(state), "es", 0)
+    year_zero_table = pd.DataFrame(initial_outputs[11])
+    same_kwp_rows = next(
+        group
+        for _, group in year_zero_table.groupby("kWp", sort=True)
+        if len(group.index) >= 2
+        and group["candidate_key"].map(
+            lambda candidate_key: build_candidate_financial_snapshot(scenario, str(candidate_key)).project_price_year0_COP
+        ).nunique()
+        >= 2
+    )
+    ordered_rows = same_kwp_rows.sort_values(["NPV_COP", "scan_order"], ascending=[True, True], kind="mergesort").reset_index(drop=True)
+    curve_key = str(ordered_rows.iloc[0]["candidate_key"])
+    selected_overlay_key = str(ordered_rows.iloc[1]["candidate_key"])
+    assert curve_key != selected_overlay_key
+
+    state = update_selected_candidate(state, scenario.scenario_id, selected_overlay_key)
+    active = state.get_scenario()
+    assert active is not None
+    outputs = workbench_page.populate_results(_session_payload(state), "es", 0)
+    npv_figure = outputs[4]
+    selected_trace = next(trace for trace in npv_figure.data if list(trace.customdata[0])[2] == "selected_overlay")
+    curve_trace = next(trace for trace in npv_figure.data if list(trace.customdata[0])[2] == "npv_curve")
+    curve_index = next(index for index, point in enumerate(curve_trace.customdata) if list(point)[0] == curve_key)
+    selected_snapshot = build_candidate_financial_snapshot(active, selected_overlay_key)
+    curve_snapshot = build_candidate_financial_snapshot(active, curve_key)
+
+    assert list(selected_trace.customdata[0])[0] == selected_overlay_key
+    assert float(selected_trace.y[0]) == pytest.approx(selected_snapshot.project_price_year0_COP)
+    assert float(curve_trace.y[curve_index]) == pytest.approx(curve_snapshot.project_price_year0_COP)
+    assert float(selected_trace.y[0]) != pytest.approx(float(curve_trace.y[curve_index]))
+
+
 def test_populate_results_ignores_poisoned_legacy_finance_fields() -> None:
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     state = run_scenario_scan(state, state.active_scenario_id)

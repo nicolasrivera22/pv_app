@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime
 import logging
 import time
@@ -114,6 +113,8 @@ PROFILE_TABLE_IDS = PROFILE_MAIN_TABLE_IDS
 PROFILE_ACTIVATOR_TABLE_IDS = PROFILE_MAIN_TABLE_IDS
 PROFILE_CARD_BASE_CLASS = "profile-table-card-shell"
 PROFILE_CARD_ACTIVE_CLASS = f"{PROFILE_CARD_BASE_CLASS} profile-table-card-active"
+ADMIN_PREVIEW_SOURCE_WORKBENCH = "workbench_seeded"
+ADMIN_PREVIEW_SOURCE_LOCAL = "admin_local"
 ADMIN_REQUIRED_TABLE_KEYS = (
     "inverter_catalog",
     "battery_catalog",
@@ -310,36 +311,72 @@ def _active_profile_table_state(table_id: str | None = None) -> dict[str, str | 
 
 
 def _empty_admin_preview_candidate_state() -> dict[str, str | None]:
-    return {"scenario_id": None, "candidate_key": None}
+    return {"scenario_id": None, "candidate_key": None, "source": None}
+
+
+def _seed_admin_preview_candidate_state(active) -> dict[str, str | None]:
+    if active is None:
+        return _empty_admin_preview_candidate_state()
+    scenario_id = str(active.scenario_id)
+    if active.scan_result is None or not active.scan_result.candidate_details:
+        return {"scenario_id": scenario_id, "candidate_key": None, "source": None}
+    if active.selected_candidate_key in active.scan_result.candidate_details:
+        return {
+            "scenario_id": scenario_id,
+            "candidate_key": str(active.selected_candidate_key),
+            "source": ADMIN_PREVIEW_SOURCE_WORKBENCH,
+        }
+    best_candidate_key = active.scan_result.best_candidate_key
+    if best_candidate_key in active.scan_result.candidate_details:
+        return {
+            "scenario_id": scenario_id,
+            "candidate_key": str(best_candidate_key),
+            "source": ADMIN_PREVIEW_SOURCE_WORKBENCH,
+        }
+    return {"scenario_id": scenario_id, "candidate_key": None, "source": None}
+
+
+def _admin_preview_candidate_exists(active, candidate_key: str | None) -> bool:
+    return bool(
+        active is not None
+        and active.scan_result is not None
+        and candidate_key is not None
+        and candidate_key in active.scan_result.candidate_details
+    )
 
 
 def _resolve_admin_preview_candidate_state(active, current_state: dict[str, object] | None = None) -> dict[str, str | None]:
     if active is None:
         return _empty_admin_preview_candidate_state()
 
-    scenario_id = str(active.scenario_id)
-    if active.scan_result is None or not active.scan_result.candidate_details:
-        return {"scenario_id": scenario_id, "candidate_key": None}
-
     stored = current_state or {}
+    scenario_id = str(active.scenario_id)
     stored_scenario_id = str(stored.get("scenario_id") or "").strip() or None
     stored_candidate_key = str(stored.get("candidate_key") or "").strip() or None
-    if stored_scenario_id == scenario_id and stored_candidate_key in active.scan_result.candidate_details:
-        return {"scenario_id": scenario_id, "candidate_key": stored_candidate_key}
+    stored_source = str(stored.get("source") or "").strip() or None
 
-    if active.selected_candidate_key in active.scan_result.candidate_details:
-        return {"scenario_id": scenario_id, "candidate_key": str(active.selected_candidate_key)}
+    if stored_scenario_id == scenario_id and stored_source == ADMIN_PREVIEW_SOURCE_LOCAL:
+        return {
+            "scenario_id": scenario_id,
+            "candidate_key": stored_candidate_key,
+            "source": ADMIN_PREVIEW_SOURCE_LOCAL,
+        }
 
-    best_candidate_key = active.scan_result.best_candidate_key
-    if best_candidate_key in active.scan_result.candidate_details:
-        return {"scenario_id": scenario_id, "candidate_key": str(best_candidate_key)}
-    return {"scenario_id": scenario_id, "candidate_key": None}
+    if active.scan_result is None or not active.scan_result.candidate_details:
+        return {"scenario_id": scenario_id, "candidate_key": None, "source": None}
+
+    return _seed_admin_preview_candidate_state(active)
 
 
-def _resolve_admin_preview_candidate_key(active, current_state: dict[str, object] | None = None) -> str | None:
+def _requested_admin_preview_candidate_key(active, current_state: dict[str, object] | None = None) -> str | None:
     resolved_state = _resolve_admin_preview_candidate_state(active, current_state)
     candidate_key = str(resolved_state.get("candidate_key") or "").strip()
     return candidate_key or None
+
+
+def _resolve_admin_preview_candidate_key(active, current_state: dict[str, object] | None = None) -> str | None:
+    candidate_key = _requested_admin_preview_candidate_key(active, current_state)
+    return candidate_key if _admin_preview_candidate_exists(active, candidate_key) else None
 
 
 def _admin_preview_selector_state_key(active) -> str:
@@ -1413,24 +1450,20 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
 
 @callback(
     Output("admin-preview-candidate-key", "data"),
-    Output("admin-preview-candidate-dropdown", "value"),
     Input("scenario-session-store", "data"),
     State("admin-preview-candidate-key", "data"),
 )
 def sync_admin_preview_candidate_state(session_payload, current_state):
     if not _admin_page_access(session_payload).allowed:
-        empty_state = _empty_admin_preview_candidate_state()
-        return empty_state, empty_state["candidate_key"]
+        return _empty_admin_preview_candidate_state()
     _client_state, state, unlocked = _admin_session(session_payload, None)
     if not unlocked:
-        empty_state = _empty_admin_preview_candidate_state()
-        return empty_state, empty_state["candidate_key"]
+        return _empty_admin_preview_candidate_state()
     active = state.get_scenario()
     if active is None:
-        empty_state = _empty_admin_preview_candidate_state()
-        return empty_state, empty_state["candidate_key"]
+        return _empty_admin_preview_candidate_state()
     resolved_state = _resolve_admin_preview_candidate_state(active, current_state)
-    return resolved_state, resolved_state["candidate_key"]
+    return resolved_state
 
 
 @callback(
@@ -1452,7 +1485,11 @@ def update_admin_preview_candidate_state(dropdown_value, session_payload, curren
     selected_candidate_key = str(dropdown_value or "").strip() or None
     if selected_candidate_key not in active.scan_result.candidate_details:
         raise PreventUpdate
-    next_state = {"scenario_id": active.scenario_id, "candidate_key": selected_candidate_key}
+    next_state = {
+        "scenario_id": active.scenario_id,
+        "candidate_key": selected_candidate_key,
+        "source": ADMIN_PREVIEW_SOURCE_LOCAL,
+    }
     if next_state == (current_state or {}):
         raise PreventUpdate
     return next_state
@@ -1460,6 +1497,7 @@ def update_admin_preview_candidate_state(dropdown_value, session_payload, curren
 
 @callback(
     Output("admin-preview-candidate-dropdown", "options"),
+    Output("admin-preview-candidate-dropdown", "value"),
     Output("admin-preview-candidate-dropdown", "disabled"),
     Output("admin-preview-candidate-helper", "children"),
     Output("admin-preview-candidate-meta", "children"),
@@ -1470,25 +1508,33 @@ def update_admin_preview_candidate_state(dropdown_value, session_payload, curren
 def render_admin_preview_candidate_selector(session_payload, preview_candidate_state, language_value):
     lang = _lang(language_value)
     if not _admin_page_access(session_payload).allowed:
-        return [], True, "", ""
+        return [], None, True, "", ""
     _client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
-        return [], True, "", ""
+        return [], None, True, "", ""
     active = state.get_scenario()
     if active is None:
-        return [], True, "", ""
+        return [], None, True, "", ""
 
     resolved_state = _resolve_admin_preview_candidate_state(active, preview_candidate_state)
-    selected_candidate_key = str(resolved_state.get("candidate_key") or "").strip() or None
+    requested_candidate_key = str(resolved_state.get("candidate_key") or "").strip() or None
+    selected_candidate_key = _resolve_admin_preview_candidate_key(active, preview_candidate_state)
     state_key = _admin_preview_selector_state_key(active)
+    local_candidate_missing = bool(
+        resolved_state.get("source") == ADMIN_PREVIEW_SOURCE_LOCAL
+        and requested_candidate_key is not None
+        and selected_candidate_key is None
+    )
     helper_key = {
         PREVIEW_STATE_READY: "workspace.admin.economics.preview.selector.state.ready",
         PREVIEW_STATE_RERUN_REQUIRED: "workspace.admin.economics.preview.selector.state.rerun_required",
         PREVIEW_STATE_CANDIDATE_MISSING: "workspace.admin.economics.preview.selector.state.candidate_missing",
         PREVIEW_STATE_NO_SCAN: "workspace.admin.economics.preview.selector.state.no_scan",
     }.get(state_key, "workspace.admin.economics.preview.selector.state.no_scan")
+    if local_candidate_missing:
+        helper_key = "workspace.admin.economics.preview.selector.state.candidate_missing"
     if active.scan_result is None:
-        return [], True, tr(helper_key, lang), ""
+        return [], None, True, tr(helper_key, lang), ""
 
     ordered_candidate_keys = [
         str(row["candidate_key"])
@@ -1510,6 +1556,7 @@ def render_admin_preview_candidate_selector(session_payload, preview_candidate_s
     ]
     return (
         options,
+        selected_candidate_key,
         state_key != PREVIEW_STATE_READY,
         tr(helper_key, lang),
         _admin_preview_candidate_meta(active, selected_candidate_key, lang=lang),
@@ -1544,14 +1591,14 @@ def render_economics_preview(session_payload, economics_cost_rows, economics_pri
         if economics_price_rows is None
         else economics_price_items_rows_from_editor(economics_price_rows)
     )
-    preview_candidate_key = _resolve_admin_preview_candidate_key(active, admin_preview_candidate_state)
-    preview_scenario = active
-    if preview_candidate_key is not None and preview_candidate_key != active.selected_candidate_key:
-        preview_scenario = replace(active, selected_candidate_key=preview_candidate_key)
+    preview_candidate_key = _requested_admin_preview_candidate_key(active, admin_preview_candidate_state)
     preview = resolve_economics_preview(
-        preview_scenario,
+        active,
         economics_cost_items=normalized_cost_rows,
         economics_price_items=normalized_price_rows,
+        candidate_key=preview_candidate_key,
+        allow_best_fallback=False,
+        candidate_source="selected" if preview_candidate_key is not None else None,
     )
     return _render_economics_preview(preview, live_warnings=economics_preview_warning_messages(preview), lang=lang)
 
@@ -1595,7 +1642,7 @@ def sync_economics_bridge_cta(
     active = state.get_scenario()
     if active is None:
         return True, ""
-    preview_candidate_key = _resolve_admin_preview_candidate_key(active, admin_preview_candidate_state)
+    preview_candidate_key = _requested_admin_preview_candidate_key(active, admin_preview_candidate_state)
     bridge_context = _resolve_economics_bridge_context(
         active,
         candidate_key=preview_candidate_key,
@@ -1676,7 +1723,7 @@ def apply_economics_runtime_price_bridge(
         active = state.get_scenario()
         if active is None:
             raise PreventUpdate
-        preview_candidate_key = _resolve_admin_preview_candidate_key(active, admin_preview_candidate_state)
+        preview_candidate_key = _requested_admin_preview_candidate_key(active, admin_preview_candidate_state)
         bridge_context = _resolve_economics_bridge_context(
             active,
             candidate_key=preview_candidate_key,

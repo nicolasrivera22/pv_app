@@ -12,7 +12,7 @@
       "source_name": "PV_inputs.xlsx",
       "selected_candidate_key": "14.880::BAT-22",
       "dirty": false,
-      "last_run_at": "2026-03-30T07:49:38",
+      "last_run_at": "2026-03-30T12:58:46",
       "scan_fingerprint": "b755004fa208238ae828fce56e735195f4846eae9ae9762012726719edcd1925",
       "runtime_price_bridge": {
         "source": "economics_preview",

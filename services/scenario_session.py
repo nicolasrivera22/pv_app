@@ -269,14 +269,13 @@ def prepare_economics_runtime_price_bridge(
     else:
         resolved_candidate_key = resolve_runtime_bridge_candidate_key(scenario)
 
-    preview_scenario = scenario
-    if resolved_candidate_key is not None and resolved_candidate_key != scenario.selected_candidate_key:
-        preview_scenario = replace(scenario, selected_candidate_key=resolved_candidate_key)
-
     preview = resolve_economics_preview(
-        preview_scenario,
+        scenario,
         economics_cost_items=normalized_cost_items,
         economics_price_items=normalized_price_items,
+        candidate_key=resolved_candidate_key,
+        allow_best_fallback=False,
+        candidate_source="selected" if resolved_candidate_key is not None else None,
     )
     warning_messages = economics_preview_warning_messages(preview)
     final_price_COP = None if preview.result is None else float(preview.result.final_price_COP)
