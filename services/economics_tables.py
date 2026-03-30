@@ -84,6 +84,14 @@ def _editor_lang(lang: str | None) -> str:
     return "en" if lang == "en" else "es"
 
 
+def _enabled_editor_label(value: Any, *, lang: str = "es") -> str:
+    enabled, _invalid = _parse_enabled(value)
+    active_lang = _editor_lang(lang)
+    if active_lang == "en":
+        return "Yes" if enabled else "No"
+    return "Sí" if enabled else "No"
+
+
 def economics_ui_label(field: str, value: Any, *, lang: str = "es") -> str:
     raw_value = _strip_text(value)
     if not raw_value:
@@ -111,21 +119,29 @@ def _economics_ui_raw_value(field: str, value: Any) -> str:
 
 def economics_editor_dropdowns(table_kind: str, *, lang: str = "es") -> dict[str, dict[str, list[dict[str, str]]]]:
     if table_kind == "economics_cost_items":
-        fields = ("stage", "basis", "source_mode", "hardware_binding")
+        fields = ("stage", "basis", "source_mode", "hardware_binding", "enabled")
     elif table_kind == "economics_price_items":
-        fields = ("layer", "method")
+        fields = ("layer", "method", "enabled")
     else:
         return {}
     active_lang = _editor_lang(lang)
-    return {
-        field: {
-            "options": [
-                {"label": labels.get(active_lang, labels.get("es", raw_value)), "value": labels.get(active_lang, labels.get("es", raw_value))}
+    dropdowns: dict[str, dict[str, list[dict[str, str]]]] = {}
+    for field in fields:
+        if field == "enabled":
+            options = [
+                {"label": _enabled_editor_label(True, lang=lang), "value": _enabled_editor_label(True, lang=lang)},
+                {"label": _enabled_editor_label(False, lang=lang), "value": _enabled_editor_label(False, lang=lang)},
+            ]
+        else:
+            options = [
+                {
+                    "label": labels.get(active_lang, labels.get("es", raw_value)),
+                    "value": labels.get(active_lang, labels.get("es", raw_value)),
+                }
                 for raw_value, labels in _ECONOMICS_UI_LABELS[field].items()
             ]
-        }
-        for field in fields
-    }
+        dropdowns[field] = {"options": options}
+    return dropdowns
 
 
 def _map_editor_labels(rows: list[dict[str, Any]], *, fields: tuple[str, ...], lang: str) -> list[dict[str, Any]]:
@@ -658,7 +674,14 @@ def compute_economics_runtime_signature(
 
 def economics_cost_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None, *, lang: str = "es") -> list[dict[str, Any]]:
     normalized = normalize_economics_cost_items_frame(frame)
-    return _map_editor_labels(normalized.to_dict("records"), fields=("stage", "basis", "source_mode", "hardware_binding"), lang=lang)
+    editor_rows = _map_editor_labels(
+        normalized.to_dict("records"),
+        fields=("stage", "basis", "source_mode", "hardware_binding"),
+        lang=lang,
+    )
+    for row in editor_rows:
+        row["enabled"] = _enabled_editor_label(row.get("enabled"), lang=lang)
+    return editor_rows
 
 
 def economics_price_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, Any]] | None, *, lang: str = "es") -> list[dict[str, Any]]:
@@ -668,7 +691,10 @@ def economics_price_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, An
     editor_frame = normalized.copy()
     mask = editor_frame["method"].astype(str).isin(ECONOMICS_PRICE_PERCENT_METHODS)
     editor_frame.loc[mask, "value"] = editor_frame.loc[mask, "value"].astype(float) * 100.0
-    return _map_editor_labels(editor_frame.to_dict("records"), fields=("layer", "method"), lang=lang)
+    editor_rows = _map_editor_labels(editor_frame.to_dict("records"), fields=("layer", "method"), lang=lang)
+    for row in editor_rows:
+        row["enabled"] = _enabled_editor_label(row.get("enabled"), lang=lang)
+    return editor_rows
 
 
 def economics_cost_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:

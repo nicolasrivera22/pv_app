@@ -28,8 +28,10 @@ from .economics_tables import (
     economics_price_items_rows_to_editor,
 )
 from .economics_engine import (
+    PREVIEW_STATE_CANDIDATE_MISSING,
     PREVIEW_STATE_NO_SCAN,
     PREVIEW_STATE_READY,
+    PREVIEW_STATE_RERUN_REQUIRED,
     EconomicsPreviewResult,
     economics_preview_warning_messages,
     resolve_economics_preview,
@@ -212,6 +214,7 @@ def _has_non_economics_pending_changes(changes: dict[str, object]) -> bool:
 def _resolve_economics_bridge_context(
     active,
     *,
+    candidate_key: str | None = None,
     assumption_input_ids,
     assumption_values,
     inverter_rows,
@@ -237,6 +240,7 @@ def _resolve_economics_bridge_context(
     )
     prepared = prepare_economics_runtime_price_bridge(
         active,
+        candidate_key=candidate_key,
         economics_cost_items=changes["normalized_cost_rows"],
         economics_price_items=changes["normalized_price_rows"],
         applied_at=applied_at,
@@ -303,6 +307,95 @@ def _active_profile_table_state(table_id: str | None = None) -> dict[str, str | 
         return {"table_id": None}
     normalized = str(table_id).strip()
     return {"table_id": normalized or None}
+
+
+def _empty_admin_preview_candidate_state() -> dict[str, str | None]:
+    return {"scenario_id": None, "candidate_key": None}
+
+
+def _resolve_admin_preview_candidate_state(active, current_state: dict[str, object] | None = None) -> dict[str, str | None]:
+    if active is None:
+        return _empty_admin_preview_candidate_state()
+
+    scenario_id = str(active.scenario_id)
+    if active.scan_result is None or not active.scan_result.candidate_details:
+        return {"scenario_id": scenario_id, "candidate_key": None}
+
+    stored = current_state or {}
+    stored_scenario_id = str(stored.get("scenario_id") or "").strip() or None
+    stored_candidate_key = str(stored.get("candidate_key") or "").strip() or None
+    if stored_scenario_id == scenario_id and stored_candidate_key in active.scan_result.candidate_details:
+        return {"scenario_id": scenario_id, "candidate_key": stored_candidate_key}
+
+    if active.selected_candidate_key in active.scan_result.candidate_details:
+        return {"scenario_id": scenario_id, "candidate_key": str(active.selected_candidate_key)}
+
+    best_candidate_key = active.scan_result.best_candidate_key
+    if best_candidate_key in active.scan_result.candidate_details:
+        return {"scenario_id": scenario_id, "candidate_key": str(best_candidate_key)}
+    return {"scenario_id": scenario_id, "candidate_key": None}
+
+
+def _resolve_admin_preview_candidate_key(active, current_state: dict[str, object] | None = None) -> str | None:
+    resolved_state = _resolve_admin_preview_candidate_state(active, current_state)
+    candidate_key = str(resolved_state.get("candidate_key") or "").strip()
+    return candidate_key or None
+
+
+def _admin_preview_selector_state_key(active) -> str:
+    if active is None:
+        return PREVIEW_STATE_NO_SCAN
+    if active.dirty:
+        return PREVIEW_STATE_RERUN_REQUIRED
+    if active.scan_result is None:
+        return PREVIEW_STATE_NO_SCAN
+    if not active.scan_result.candidate_details:
+        return PREVIEW_STATE_CANDIDATE_MISSING
+    return PREVIEW_STATE_READY
+
+
+def _admin_preview_candidate_option_label(candidate_key: str, detail: dict[str, object], *, lang: str) -> str:
+    k_wp = _format_number(detail.get("kWp"), decimals=3)
+    battery_name = str(detail.get("battery_name") or "").strip() or tr("common.no_battery", lang)
+    return tr(
+        "workspace.admin.economics.preview.selector.option",
+        lang,
+        candidate_key=candidate_key,
+        kWp=k_wp,
+        battery_name=battery_name,
+    )
+
+
+def _admin_preview_candidate_meta(active, candidate_key: str | None, *, lang: str):
+    if (
+        active is None
+        or active.scan_result is None
+        or candidate_key not in active.scan_result.candidate_details
+    ):
+        return ""
+    detail = active.scan_result.candidate_details[candidate_key]
+    battery_name = str(detail.get("battery_name") or "").strip() or tr("common.no_battery", lang)
+    return html.Div(
+        id="admin-preview-candidate-meta-cards",
+        className="scan-summary-strip",
+        children=[
+            _economics_quantity_card(
+                tr("workspace.admin.economics.preview.selector.meta.candidate", lang),
+                candidate_key,
+                component_id="admin-preview-candidate-meta-key",
+            ),
+            _economics_quantity_card(
+                tr("workspace.admin.economics.preview.selector.meta.kwp", lang),
+                f"{_format_number(detail.get('kWp'), decimals=3)} kWp",
+                component_id="admin-preview-candidate-meta-kwp",
+            ),
+            _economics_quantity_card(
+                tr("workspace.admin.economics.preview.selector.meta.battery", lang),
+                battery_name,
+                component_id="admin-preview-candidate-meta-battery",
+            ),
+        ],
+    )
 
 
 def _assumption_note_style(message: str) -> dict[str, str]:
@@ -482,27 +575,28 @@ def _economics_breakdown_rows(rows, *, lang: str) -> list[dict[str, object]]:
     ]
 
 
-def _economics_breakdown_table(table_id: str, rows: list[dict[str, object]], *, lang: str):
-    columns, tooltip_header = build_table_display_columns(
-        "economics_breakdown",
-        [
-            "source_table",
-            "source_row",
-            "stage_or_layer",
-            "name",
-            "rule",
-            "value_source",
-            "hardware_binding",
-            "hardware_name",
-            "calculation",
-            "multiplier",
-            "unit_rate_COP",
-            "base_amount_COP",
-            "line_amount_COP",
-            "notes",
-        ],
-        lang,
-    )
+def _economics_breakdown_table(
+    table_id: str,
+    rows: list[dict[str, object]],
+    *,
+    lang: str,
+    include_base_amount: bool = True,
+):
+    column_keys = [
+        "name",
+        "rule",
+        "value_source",
+        "hardware_binding",
+        "hardware_name",
+        "calculation",
+        "multiplier",
+        "unit_rate_COP",
+        "line_amount_COP",
+        "notes",
+    ]
+    if include_base_amount:
+        column_keys.insert(column_keys.index("line_amount_COP"), "base_amount_COP")
+    columns, tooltip_header = build_table_display_columns("economics_breakdown", column_keys, lang)
     return dash_table.DataTable(
         id=table_id,
         data=rows,
@@ -518,6 +612,10 @@ def _economics_breakdown_table(table_id: str, rows: list[dict[str, object]], *, 
             "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
             "fontSize": 12,
             "color": "var(--color-text-primary)",
+            "whiteSpace": "normal",
+            "height": "auto",
+            "minWidth": 110,
+            "maxWidth": 280,
         },
         style_header={
             "backgroundColor": "var(--color-primary-soft)",
@@ -764,41 +862,7 @@ def _economics_preview_flow(result, *, lang: str) -> html.Div:
     )
 
 
-def _economics_breakdown_group(
-    *,
-    group_id: str,
-    title: str,
-    description: str,
-    subtotal_label: str,
-    subtotal_value: float | None,
-    rows,
-    lang: str,
-) -> html.Div:
-    table_rows = _economics_breakdown_rows(rows, lang=lang)
-    children = [
-        html.Div(
-            className="section-head",
-            children=[
-                html.H5(title, id=f"{group_id}-title"),
-                html.Div(f"{subtotal_label}: {_format_cop(subtotal_value, lang)}", id=f"{group_id}-total", className="status-line"),
-            ],
-        )
-    ]
-    children.append(html.P(description, id=f"{group_id}-copy", className="section-copy"))
-    if table_rows:
-        children.append(_economics_breakdown_table(f"{group_id}-table", table_rows, lang=lang))
-    else:
-        children.append(html.Div(tr("workspace.admin.economics.preview.breakdown.empty", lang), className="status-line"))
-    return html.Div(id=f"{group_id}-shell", className="profile-table-subsection economics-breakdown-group-shell", children=children)
-
-
-def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings: tuple[str, ...] = (), lang: str):
-    state_block = _economics_preview_state_block(preview, lang=lang)
-    if preview.state != PREVIEW_STATE_READY or preview.result is None:
-        return [state_block]
-
-    result = preview.result
-    warnings_block = _economics_preview_warning_block(live_warnings, lang=lang)
+def _economics_preview_summary_shell(result, *, lang: str) -> html.Div:
     summary_cards = html.Div(
         id="economics-summary-cards",
         className="kpi-grid",
@@ -841,11 +905,154 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
             ),
         ],
     )
+    return html.Div(
+        id="economics-summary-shell",
+        className="subpanel economics-summary-shell",
+        children=[
+            html.Div(
+                className="section-head",
+                children=[html.H5(tr("workspace.admin.economics.preview.summary_block.title", lang), id="economics-summary-title")],
+            ),
+            html.P(tr("workspace.admin.economics.preview.summary_block.copy", lang), id="economics-summary-copy", className="section-copy"),
+            summary_cards,
+        ],
+    )
+
+
+def _economics_closing_rows(result, *, lang: str) -> list[dict[str, object]]:
+    rows = [
+        {
+            "metric": tr("workspace.admin.economics.preview.summary.technical", lang),
+            "value": _format_cop(result.technical_subtotal_COP, lang),
+        },
+        {
+            "metric": tr("workspace.admin.economics.preview.summary.installed", lang),
+            "value": _format_cop(result.installed_subtotal_COP, lang),
+        },
+        {
+            "metric": tr("workspace.admin.economics.preview.summary.cost_total", lang),
+            "value": _format_cop(result.cost_total_COP, lang),
+        },
+    ]
+    tax_total = getattr(result, "tax_total_COP", None)
+    if tax_total is not None:
+        rows.append({"metric": tr("workspace.admin.economics.preview.summary.tax_total", lang), "value": _format_cop(tax_total, lang)})
+    rows.extend(
+        [
+            {
+                "metric": tr("workspace.admin.economics.preview.summary.commercial_adjustment", lang),
+                "value": _format_cop(result.commercial_adjustment_COP, lang),
+            },
+            {
+                "metric": tr("workspace.admin.economics.preview.summary.sale_adjustment", lang),
+                "value": _format_cop(result.sale_adjustment_COP, lang),
+            },
+            {
+                "metric": tr("workspace.admin.economics.preview.summary.final_price", lang),
+                "value": _format_cop(result.final_price_COP, lang),
+            },
+            {
+                "metric": tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
+                "value": _format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
+            },
+        ]
+    )
+    return rows
+
+
+def _economics_closing_shell(result, *, lang: str) -> html.Div:
+    return html.Div(
+        id="economics-closing-shell",
+        className="subpanel economics-closing-shell",
+        children=[
+            html.Div(
+                className="section-head",
+                children=[html.H5(tr("workspace.admin.economics.preview.closing.title", lang), id="economics-closing-title")],
+            ),
+            html.P(tr("workspace.admin.economics.preview.closing.copy", lang), id="economics-closing-copy", className="section-copy"),
+            dash_table.DataTable(
+                id="economics-closing-table",
+                data=_economics_closing_rows(result, lang=lang),
+                columns=[
+                    {"name": tr("workspace.admin.economics.preview.closing.metric", lang), "id": "metric"},
+                    {"name": tr("workspace.admin.economics.preview.closing.value", lang), "id": "value"},
+                ],
+                editable=False,
+                row_deletable=False,
+                sort_action="none",
+                style_table={"overflowX": "auto"},
+                style_cell={
+                    "padding": "0.45rem 0.55rem",
+                    "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+                    "fontSize": 12,
+                    "color": "var(--color-text-primary)",
+                    "whiteSpace": "normal",
+                    "height": "auto",
+                },
+                style_header={
+                    "backgroundColor": "var(--color-primary-soft)",
+                    "color": "var(--color-text-primary)",
+                    "fontWeight": "bold",
+                },
+            ),
+        ],
+    )
+
+
+def _economics_breakdown_group(
+    *,
+    group_id: str,
+    title: str,
+    description: str,
+    subtotal_label: str,
+    subtotal_value: float | None,
+    rows,
+    lang: str,
+) -> html.Div:
+    table_rows = _economics_breakdown_rows(rows, lang=lang)
+    include_base_amount = any(row.get("base_amount_COP") is not None for row in table_rows)
+    children = [html.Div(className="section-head", children=[html.H5(title, id=f"{group_id}-title")])]
+    children.append(html.P(description, id=f"{group_id}-copy", className="section-copy"))
+    if table_rows:
+        children.append(
+            _economics_breakdown_table(
+                f"{group_id}-table",
+                table_rows,
+                lang=lang,
+                include_base_amount=include_base_amount,
+            )
+        )
+    else:
+        children.append(html.Div(tr("workspace.admin.economics.preview.breakdown.empty", lang), className="status-line"))
+    children.append(
+        html.Div(
+            id=f"{group_id}-subtotal",
+            className="economics-breakdown-subtotal",
+            children=[
+                html.Span(subtotal_label, className="economics-breakdown-subtotal-label"),
+                html.Strong(_format_cop(subtotal_value, lang), className="economics-breakdown-subtotal-value"),
+            ],
+        )
+    )
+    return html.Div(id=f"{group_id}-shell", className="profile-table-subsection economics-breakdown-group-shell", children=children)
+
+
+def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings: tuple[str, ...] = (), lang: str):
+    state_block = _economics_preview_state_block(preview, lang=lang)
+    if preview.state != PREVIEW_STATE_READY or preview.result is None:
+        return [state_block]
+
+    result = preview.result
+    warnings_block = _economics_preview_warning_block(live_warnings, lang=lang)
     breakdown_shell = html.Div(
         id="economics-breakdown-shell",
         className="subpanel economics-breakdown-shell",
         children=[
-            html.H5(tr("workspace.admin.economics.preview.breakdown.title", lang), id="economics-breakdown-title"),
+            html.Div(
+                className="section-head",
+                children=[html.H5(tr("workspace.admin.economics.preview.breakdown.title", lang), id="economics-breakdown-title")],
+            ),
+            html.P(tr("workspace.admin.economics.preview.breakdown.copy", lang), id="economics-breakdown-copy", className="section-copy"),
             _economics_breakdown_group(
                 group_id="economics-breakdown-technical",
                 title=tr("workspace.admin.economics.preview.breakdown.group.technical", lang),
@@ -887,10 +1094,11 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
     return [
         state_block,
         *( [warnings_block] if warnings_block is not None else [] ),
-        _economics_preview_quantities(preview, result, lang=lang),
+        _economics_preview_summary_shell(result, lang=lang),
         _economics_preview_flow(result, lang=lang),
-        summary_cards,
         breakdown_shell,
+        _economics_closing_shell(result, lang=lang),
+        _economics_preview_quantities(preview, result, lang=lang),
     ]
 
 
@@ -1204,13 +1412,119 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
 
 
 @callback(
+    Output("admin-preview-candidate-key", "data"),
+    Output("admin-preview-candidate-dropdown", "value"),
+    Input("scenario-session-store", "data"),
+    State("admin-preview-candidate-key", "data"),
+)
+def sync_admin_preview_candidate_state(session_payload, current_state):
+    if not _admin_page_access(session_payload).allowed:
+        empty_state = _empty_admin_preview_candidate_state()
+        return empty_state, empty_state["candidate_key"]
+    _client_state, state, unlocked = _admin_session(session_payload, None)
+    if not unlocked:
+        empty_state = _empty_admin_preview_candidate_state()
+        return empty_state, empty_state["candidate_key"]
+    active = state.get_scenario()
+    if active is None:
+        empty_state = _empty_admin_preview_candidate_state()
+        return empty_state, empty_state["candidate_key"]
+    resolved_state = _resolve_admin_preview_candidate_state(active, current_state)
+    return resolved_state, resolved_state["candidate_key"]
+
+
+@callback(
+    Output("admin-preview-candidate-key", "data", allow_duplicate=True),
+    Input("admin-preview-candidate-dropdown", "value", allow_optional=True),
+    State("scenario-session-store", "data"),
+    State("admin-preview-candidate-key", "data"),
+    prevent_initial_call=True,
+)
+def update_admin_preview_candidate_state(dropdown_value, session_payload, current_state):
+    if not _admin_page_access(session_payload).allowed:
+        raise PreventUpdate
+    _client_state, state, unlocked = _admin_session(session_payload, None)
+    if not unlocked:
+        raise PreventUpdate
+    active = state.get_scenario()
+    if active is None or active.scan_result is None:
+        raise PreventUpdate
+    selected_candidate_key = str(dropdown_value or "").strip() or None
+    if selected_candidate_key not in active.scan_result.candidate_details:
+        raise PreventUpdate
+    next_state = {"scenario_id": active.scenario_id, "candidate_key": selected_candidate_key}
+    if next_state == (current_state or {}):
+        raise PreventUpdate
+    return next_state
+
+
+@callback(
+    Output("admin-preview-candidate-dropdown", "options"),
+    Output("admin-preview-candidate-dropdown", "disabled"),
+    Output("admin-preview-candidate-helper", "children"),
+    Output("admin-preview-candidate-meta", "children"),
+    Input("scenario-session-store", "data"),
+    Input("admin-preview-candidate-key", "data"),
+    Input("language-selector", "value"),
+)
+def render_admin_preview_candidate_selector(session_payload, preview_candidate_state, language_value):
+    lang = _lang(language_value)
+    if not _admin_page_access(session_payload).allowed:
+        return [], True, "", ""
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        return [], True, "", ""
+    active = state.get_scenario()
+    if active is None:
+        return [], True, "", ""
+
+    resolved_state = _resolve_admin_preview_candidate_state(active, preview_candidate_state)
+    selected_candidate_key = str(resolved_state.get("candidate_key") or "").strip() or None
+    state_key = _admin_preview_selector_state_key(active)
+    helper_key = {
+        PREVIEW_STATE_READY: "workspace.admin.economics.preview.selector.state.ready",
+        PREVIEW_STATE_RERUN_REQUIRED: "workspace.admin.economics.preview.selector.state.rerun_required",
+        PREVIEW_STATE_CANDIDATE_MISSING: "workspace.admin.economics.preview.selector.state.candidate_missing",
+        PREVIEW_STATE_NO_SCAN: "workspace.admin.economics.preview.selector.state.no_scan",
+    }.get(state_key, "workspace.admin.economics.preview.selector.state.no_scan")
+    if active.scan_result is None:
+        return [], True, tr(helper_key, lang), ""
+
+    ordered_candidate_keys = [
+        str(row["candidate_key"])
+        for row in active.scan_result.candidates.to_dict("records")
+        if str(row.get("candidate_key", "")).strip() in active.scan_result.candidate_details
+    ]
+    if not ordered_candidate_keys:
+        ordered_candidate_keys = list(active.scan_result.candidate_details)
+    options = [
+        {
+            "label": _admin_preview_candidate_option_label(
+                candidate_key,
+                active.scan_result.candidate_details[candidate_key],
+                lang=lang,
+            ),
+            "value": candidate_key,
+        }
+        for candidate_key in ordered_candidate_keys
+    ]
+    return (
+        options,
+        state_key != PREVIEW_STATE_READY,
+        tr(helper_key, lang),
+        _admin_preview_candidate_meta(active, selected_candidate_key, lang=lang),
+    )
+
+
+@callback(
     Output("economics-preview-content", "children"),
     Input("scenario-session-store", "data"),
     Input("economics-cost-items-editor", "data", allow_optional=True),
     Input("economics-price-items-editor", "data", allow_optional=True),
     Input("language-selector", "value"),
+    Input("admin-preview-candidate-key", "data"),
 )
-def render_economics_preview(session_payload, economics_cost_rows, economics_price_rows, language_value):
+def render_economics_preview(session_payload, economics_cost_rows, economics_price_rows, language_value, admin_preview_candidate_state=None):
     lang = _lang(language_value)
     if not _admin_page_access(session_payload).allowed:
         return []
@@ -1230,8 +1544,12 @@ def render_economics_preview(session_payload, economics_cost_rows, economics_pri
         if economics_price_rows is None
         else economics_price_items_rows_from_editor(economics_price_rows)
     )
+    preview_candidate_key = _resolve_admin_preview_candidate_key(active, admin_preview_candidate_state)
+    preview_scenario = active
+    if preview_candidate_key is not None and preview_candidate_key != active.selected_candidate_key:
+        preview_scenario = replace(active, selected_candidate_key=preview_candidate_key)
     preview = resolve_economics_preview(
-        active,
+        preview_scenario,
         economics_cost_items=normalized_cost_rows,
         economics_price_items=normalized_price_rows,
     )
@@ -1252,6 +1570,7 @@ def render_economics_preview(session_payload, economics_cost_rows, economics_pri
     Input("economics-cost-items-editor", "data", allow_optional=True),
     Input("economics-price-items-editor", "data", allow_optional=True),
     Input("language-selector", "value"),
+    Input("admin-preview-candidate-key", "data"),
 )
 def sync_economics_bridge_cta(
     session_payload,
@@ -1265,6 +1584,7 @@ def sync_economics_bridge_cta(
     economics_cost_rows,
     economics_price_rows,
     language_value,
+    admin_preview_candidate_state=None,
 ):
     lang = _lang(language_value)
     if not _admin_page_access(session_payload).allowed:
@@ -1275,8 +1595,10 @@ def sync_economics_bridge_cta(
     active = state.get_scenario()
     if active is None:
         return True, ""
+    preview_candidate_key = _resolve_admin_preview_candidate_key(active, admin_preview_candidate_state)
     bridge_context = _resolve_economics_bridge_context(
         active,
+        candidate_key=preview_candidate_key,
         assumption_input_ids=assumption_input_ids,
         assumption_values=assumption_values,
         inverter_rows=inverter_rows,
@@ -1325,6 +1647,7 @@ def render_runtime_price_bridge_ui(session_payload, language_value):
     State("economics-cost-items-editor", "data", allow_optional=True),
     State("economics-price-items-editor", "data", allow_optional=True),
     State("language-selector", "value"),
+    State("admin-preview-candidate-key", "data"),
     prevent_initial_call=True,
 )
 def apply_economics_runtime_price_bridge(
@@ -1341,6 +1664,7 @@ def apply_economics_runtime_price_bridge(
     economics_cost_rows,
     economics_price_rows,
     language_value,
+    admin_preview_candidate_state=None,
 ):
     lang = _lang(language_value)
     if not _admin_page_access(session_payload).allowed:
@@ -1352,8 +1676,10 @@ def apply_economics_runtime_price_bridge(
         active = state.get_scenario()
         if active is None:
             raise PreventUpdate
+        preview_candidate_key = _resolve_admin_preview_candidate_key(active, admin_preview_candidate_state)
         bridge_context = _resolve_economics_bridge_context(
             active,
+            candidate_key=preview_candidate_key,
             assumption_input_ids=assumption_input_ids,
             assumption_values=assumption_values,
             inverter_rows=inverter_rows,
@@ -1682,14 +2008,17 @@ def add_panel_row(n_clicks, table_rows):
     Input("add-economics-cost-row-btn", "n_clicks", allow_optional=True),
     State("economics-cost-items-editor", "data", allow_optional=True),
     State("economics-cost-items-editor", "columns", allow_optional=True),
+    State("language-selector", "value"),
     prevent_initial_call=True,
 )
-def add_economics_cost_row(n_clicks, table_rows, table_columns):
+def add_economics_cost_row(n_clicks, table_rows, table_columns, language_value):
     if not n_clicks:
         raise PreventUpdate
+    lang = _lang(language_value)
     blank_row = _blank_table_row(table_columns, table_rows)
     if not blank_row:
         raise PreventUpdate
+    blank_row["enabled"] = "Yes" if lang == "en" else "Sí"
     rows = list(table_rows or [])
     rows.append(blank_row)
     return rows
@@ -1700,14 +2029,17 @@ def add_economics_cost_row(n_clicks, table_rows, table_columns):
     Input("add-economics-price-row-btn", "n_clicks", allow_optional=True),
     State("economics-price-items-editor", "data", allow_optional=True),
     State("economics-price-items-editor", "columns", allow_optional=True),
+    State("language-selector", "value"),
     prevent_initial_call=True,
 )
-def add_economics_price_row(n_clicks, table_rows, table_columns):
+def add_economics_price_row(n_clicks, table_rows, table_columns, language_value):
     if not n_clicks:
         raise PreventUpdate
+    lang = _lang(language_value)
     blank_row = _blank_table_row(table_columns, table_rows)
     if not blank_row:
         raise PreventUpdate
+    blank_row["enabled"] = "Yes" if lang == "en" else "Sí"
     rows = list(table_rows or [])
     rows.append(blank_row)
     return rows

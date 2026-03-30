@@ -224,6 +224,32 @@ def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypa
     assert _find_component(rendered, "profile-demand-legacy-shell") is None
 
 
+def test_render_admin_access_shell_orders_economics_before_profiles_and_catalogs(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    client_state = _admin_client_state("es")
+    set_admin_pin("2468")
+    grant_admin_session_access(client_state.session_id)
+
+    rendered = render_admin_access_shell(client_state.to_payload(), "es", {"revision": 1})
+    unlocked_shell = _find_component(rendered, "admin-unlocked-shell")
+
+    assert unlocked_shell is not None
+    child_ids = [getattr(child, "id", None) for child in unlocked_shell.children]
+    assert child_ids[2:5] == [None, None, None]
+    economics_editor = _find_component(unlocked_shell.children[2], "economics-editor-title")
+    resource_profiles = _find_component(unlocked_shell.children[3], "resource-profile-editor-title")
+    catalog_editor = _find_component(unlocked_shell.children[4], "catalog-editor-title")
+    candidate_selector = _find_component(unlocked_shell.children[2], "admin-preview-candidate-dropdown")
+
+    assert economics_editor is not None
+    assert resource_profiles is not None
+    assert catalog_editor is not None
+    assert candidate_selector is not None
+
+
 def test_render_admin_access_shell_degrades_in_simple_mode(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()

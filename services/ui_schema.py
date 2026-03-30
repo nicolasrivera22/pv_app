@@ -1451,8 +1451,8 @@ def _prettify_column(column_key: str) -> str:
 
 
 _TABLE_DROPDOWN_COLUMNS: dict[str, set[str]] = {
-    "economics_cost_items": {"stage", "basis", "source_mode", "hardware_binding"},
-    "economics_price_items": {"layer", "method"},
+    "economics_cost_items": {"stage", "basis", "source_mode", "hardware_binding", "enabled"},
+    "economics_price_items": {"layer", "method", "enabled"},
 }
 
 

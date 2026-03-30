@@ -94,8 +94,8 @@ def admin_secure_content(*, lang: str = "es") -> html.Div:
                 ],
             ),
             html.Div(className="panel assumption-editor-panel", children=[html.Div(id="admin-assumption-sections")]),
-            resource_profile_editor_section(lang=lang),
             economics_editor_section(lang=lang),
+            resource_profile_editor_section(lang=lang),
             catalog_editor_section(lang=lang),
         ],
     )

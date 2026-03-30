@@ -16,6 +16,7 @@ def layout():
     return workspace_frame(
         stores=[
             dcc.Store(id="active-profile-table-state", storage_type="memory", data={"table_id": None}),
+            dcc.Store(id="admin-preview-candidate-key", storage_type="memory", data={"scenario_id": None, "candidate_key": None}),
             dcc.Store(id="admin-draft-meta", storage_type="memory", data={}),
             dcc.Store(id="admin-access-meta", storage_type="memory", data={"revision": 0, "message_key": None, "tone": "neutral"}),
         ],

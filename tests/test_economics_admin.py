@@ -264,8 +264,10 @@ def test_economics_editor_round_trips_friendly_enum_labels_to_raw_values() -> No
     assert cost_editor_rows[0]["basis"] == "Por panel"
     assert cost_editor_rows[0]["source_mode"] == "Hardware seleccionado"
     assert cost_editor_rows[0]["hardware_binding"] == "Panel"
+    assert cost_editor_rows[0]["enabled"] == "Sí"
     assert price_editor_rows[0]["layer"] == "Oferta comercial"
     assert price_editor_rows[0]["method"] == "Ajuste porcentual"
+    assert price_editor_rows[0]["enabled"] == "Sí"
 
     round_trip_cost = economics_cost_items_rows_from_editor(cost_editor_rows)
     round_trip_price = economics_price_items_rows_from_editor(price_editor_rows)
@@ -274,8 +276,52 @@ def test_economics_editor_round_trips_friendly_enum_labels_to_raw_values() -> No
     assert round_trip_cost[0]["basis"] == "per_panel"
     assert round_trip_cost[0]["source_mode"] == "selected_hardware"
     assert round_trip_cost[0]["hardware_binding"] == "panel"
+    assert bool(round_trip_cost[0]["enabled"]) is True
     assert round_trip_price[0]["layer"] == "commercial"
     assert round_trip_price[0]["method"] == "markup_pct"
+    assert bool(round_trip_price[0]["enabled"]) is True
+
+
+@pytest.mark.parametrize(
+    ("editor_value", "expected_internal"),
+    [
+        ("Sí", True),
+        ("No", False),
+    ],
+)
+def test_economics_enabled_localized_boolean_round_trip(editor_value: str, expected_internal: bool) -> None:
+    cost_rows = [
+        {
+            "stage": "Costo técnico",
+            "name": "Panel hardware",
+            "basis": "Por panel",
+            "amount_COP": 0.0,
+            "source_mode": "Hardware seleccionado",
+            "hardware_binding": "Panel",
+            "enabled": editor_value,
+            "notes": "",
+        }
+    ]
+    price_rows = [
+        {
+            "layer": "Oferta comercial",
+            "name": "Margen comercial",
+            "method": "Ajuste porcentual",
+            "value": 12,
+            "enabled": editor_value,
+            "notes": "",
+        }
+    ]
+
+    normalized_cost = economics_cost_items_rows_from_editor(cost_rows)
+    normalized_price = economics_price_items_rows_from_editor(price_rows)
+    round_trip_cost = economics_cost_items_rows_to_editor(normalized_cost, lang="es")
+    round_trip_price = economics_price_items_rows_to_editor(normalized_price, lang="es")
+
+    assert bool(normalized_cost[0]["enabled"]) is expected_internal
+    assert bool(normalized_price[0]["enabled"]) is expected_internal
+    assert round_trip_cost[0]["enabled"] == editor_value
+    assert round_trip_price[0]["enabled"] == editor_value
 
 
 @pytest.mark.parametrize(
@@ -333,21 +379,23 @@ def test_economics_price_percent_round_trip_preserves_editor_percent_semantics(e
 def test_economics_columns_mark_enum_fields_as_dropdowns() -> None:
     cost_columns, _ = build_table_display_columns(
         "economics_cost_items",
-        ["stage", "basis", "source_mode", "hardware_binding", "amount_COP"],
+        ["stage", "basis", "source_mode", "hardware_binding", "enabled", "amount_COP"],
         "es",
     )
-    price_columns, _ = build_table_display_columns("economics_price_items", ["layer", "method", "value"], "es")
+    price_columns, _ = build_table_display_columns("economics_price_items", ["layer", "method", "enabled", "value"], "es")
 
     assert {column["id"]: column.get("presentation") for column in cost_columns} == {
         "stage": "dropdown",
         "basis": "dropdown",
         "source_mode": "dropdown",
         "hardware_binding": "dropdown",
+        "enabled": "dropdown",
         "amount_COP": None,
     }
     assert {column["id"]: column.get("presentation") for column in price_columns} == {
         "layer": "dropdown",
         "method": "dropdown",
+        "enabled": "dropdown",
         "value": None,
     }
 
@@ -357,6 +405,10 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
 
     note = _find_component(section, "economics-editor-note")
     preview_copy = _find_component(section, "economics-preview-copy")
+    candidate_shell = _find_component(section, "admin-preview-candidate-shell")
+    cost_details = _find_component(section, "economics-cost-items-details")
+    price_details = _find_component(section, "economics-price-items-details")
+    compatibility_shell = _find_component(section, "economics-compatibility-shell")
     cost_table = _find_component(section, "economics-cost-items-editor")
     price_table = _find_component(section, "economics-price-items-editor")
 
@@ -364,13 +416,19 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     assert "flujo principal de pricing" in str(note.children).lower()
     assert "compatibilidad" in str(note.children).lower()
     assert preview_copy is not None
-    assert "acción manual de compatibilidad" in str(preview_copy.children).lower()
+    assert "no cambia resultados" in str(preview_copy.children).lower()
+    assert candidate_shell is not None
+    assert cost_details is not None
+    assert price_details is not None
+    assert compatibility_shell is not None
     assert cost_table is not None
     assert price_table is not None
     assert "Costo técnico" in {option["label"] for option in cost_table.dropdown["stage"]["options"]}
     assert "Hardware seleccionado" in {option["label"] for option in cost_table.dropdown["source_mode"]["options"]}
     assert "Panel" in {option["label"] for option in cost_table.dropdown["hardware_binding"]["options"]}
+    assert {"Sí", "No"} == {option["label"] for option in cost_table.dropdown["enabled"]["options"]}
     assert "Ajuste porcentual" in {option["label"] for option in price_table.dropdown["method"]["options"]}
+    assert {"Sí", "No"} == {option["label"] for option in price_table.dropdown["enabled"]["options"]}
 
 
 def test_sync_admin_draft_tracks_economics_tables_with_simple_schema(monkeypatch, tmp_path) -> None:
@@ -818,6 +876,78 @@ def test_render_economics_preview_uses_normalized_editor_rows(monkeypatch, tmp_p
     assert normalized_price_rows[0]["value"] == pytest.approx(0.12)
 
 
+def test_admin_preview_candidate_selector_is_local_and_does_not_mutate_scenario_selection(monkeypatch, tmp_path) -> None:
+    _client_state, state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    assert active.scan_result is not None
+    global_selected = active.selected_candidate_key or active.scan_result.best_candidate_key
+    assert global_selected is not None
+    local_candidate = next(
+        candidate_key for candidate_key in active.scan_result.candidate_details if candidate_key != global_selected
+    )
+
+    synced_state, dropdown_value = admin_callbacks.sync_admin_preview_candidate_state(payload, {})
+    assert dropdown_value == global_selected
+
+    local_preview_state = admin_callbacks.update_admin_preview_candidate_state(local_candidate, payload, synced_state)
+    children = render_economics_preview(payload, None, None, "es", local_preview_state)
+
+    preview_candidate = _find_component(children, "economics-preview-quantity-candidate")
+    assert preview_candidate is not None
+    assert local_candidate in str(preview_candidate.children)
+
+    _, unchanged_state = resolve_client_session(payload, language="es")
+    unchanged_active = unchanged_state.get_scenario()
+    assert unchanged_active is not None
+    assert unchanged_active.selected_candidate_key == active.selected_candidate_key
+    assert unchanged_active.dirty is False
+
+
+def test_admin_preview_candidate_selector_reports_non_ready_states_without_mutating_state(monkeypatch, tmp_path) -> None:
+    _client_state, state, active, payload = _admin_payload(monkeypatch, tmp_path)
+
+    options, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(payload, {}, "es")
+    assert options == []
+    assert disabled is True
+    assert "escaneo determinístico" in helper.lower()
+    assert meta == ""
+
+    scanned_state = run_scenario_scan(state, active.scenario_id)
+    scanned_active = scanned_state.get_scenario()
+    assert scanned_active is not None
+    dirty_bundle = replace(scanned_active.config_bundle, config={**scanned_active.config_bundle.config, "PR": 0.85})
+    rerun_state = update_scenario_bundle(scanned_state, scanned_active.scenario_id, dirty_bundle)
+    rerun_payload = commit_client_session(_client_state, rerun_state).to_payload()
+    options, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(rerun_payload, {}, "es")
+    assert options == []
+    assert disabled is True
+    assert "desactualizado" in helper.lower()
+    assert meta == ""
+
+
+def test_admin_preview_candidate_selector_handles_candidate_missing_state(monkeypatch, tmp_path) -> None:
+    client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    assert active.scan_result is not None
+    candidate_missing_scan = replace(
+        active.scan_result,
+        candidates=active.scan_result.candidates.iloc[0:0].copy(),
+        best_candidate_key=None,
+        candidate_details={},
+    )
+    broken_active = replace(active, scan_result=candidate_missing_scan, selected_candidate_key=None)
+    broken_state = replace(
+        state,
+        scenarios=tuple(broken_active if scenario.scenario_id == active.scenario_id else scenario for scenario in state.scenarios),
+    )
+    payload = commit_client_session(client_state, broken_state).to_payload()
+
+    options, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(payload, {}, "es")
+
+    assert options == []
+    assert disabled is True
+    assert "no hay un diseño determinístico" in helper.lower()
+    assert meta == ""
+
+
 def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypatch, tmp_path) -> None:
     _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
     cost_rows = active.config_bundle.economics_cost_items_table.to_dict("records")
@@ -829,10 +959,12 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     children = render_economics_preview(payload, cost_rows, price_rows, "es")
 
     status = _find_component(children, "economics-preview-status")
+    summary_shell = _find_component(children, "economics-summary-shell")
     quantities_shell = _find_component(children, "economics-preview-quantities-shell")
     flow_shell = _find_component(children, "economics-preview-flow-shell")
     summary_cards = _find_component(children, "economics-summary-cards")
     breakdown_title = _find_component(children, "economics-breakdown-title")
+    breakdown_copy = _find_component(children, "economics-breakdown-copy")
     technical_shell = _find_component(children, "economics-breakdown-technical-shell")
     installed_shell = _find_component(children, "economics-breakdown-installed-shell")
     commercial_shell = _find_component(children, "economics-breakdown-commercial-shell")
@@ -840,14 +972,22 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     technical_table = _find_component(children, "economics-breakdown-technical-table")
     commercial_table = _find_component(children, "economics-breakdown-commercial-table")
     sale_table = _find_component(children, "economics-breakdown-sale-table")
+    technical_subtotal = _find_component(children, "economics-breakdown-technical-subtotal")
+    closing_shell = _find_component(children, "economics-closing-shell")
+    closing_table = _find_component(children, "economics-closing-table")
     candidate_source = _find_component(children, "economics-preview-quantity-candidate-source")
     panel_name = _find_component(children, "economics-preview-quantity-panel-name")
     inverter_name = _find_component(children, "economics-preview-quantity-inverter-name")
     battery_name = _find_component(children, "economics-preview-quantity-battery-name")
     technical_copy = _find_component(children, "economics-breakdown-technical-copy")
+    child_ids = [getattr(child, "id", None) for child in children]
 
     assert status is not None
     assert "diseño determinístico vigente" in str(status.children)
+    assert child_ids.index("economics-summary-shell") < child_ids.index("economics-preview-flow-shell")
+    assert child_ids.index("economics-preview-flow-shell") < child_ids.index("economics-breakdown-shell")
+    assert child_ids.index("economics-breakdown-shell") < child_ids.index("economics-closing-shell")
+    assert summary_shell is not None
     assert quantities_shell is not None
     assert flow_shell is not None
     assert "final_price_per_kwp_COP" not in str(flow_shell)
@@ -855,16 +995,20 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert summary_cards is not None
     assert len(summary_cards.children) == 8
     assert breakdown_title is not None
+    assert breakdown_copy is not None
     assert str(breakdown_title.children) == "Desglose del cálculo"
     assert technical_shell is not None
     assert installed_shell is not None
     assert commercial_shell is not None
     assert sale_shell is not None
+    assert technical_subtotal is not None
+    assert closing_shell is not None
+    assert closing_table is not None
     assert technical_table is not None
     assert commercial_table is not None
     assert sale_table is not None
     assert candidate_source is not None
-    assert "Diseño seleccionado" in str(candidate_source.children)
+    assert "Selección local de Admin" in str(candidate_source.children)
     assert panel_name is not None
     assert inverter_name is not None
     assert battery_name is not None
@@ -873,6 +1017,8 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert len(technical_table.data) >= 1
     assert len(commercial_table.data) >= 1
     assert len(sale_table.data) >= 1
+    assert "Base monetaria [COP]" not in {column["name"] for column in technical_table.columns}
+    assert "Base monetaria [COP]" in {column["name"] for column in commercial_table.columns}
     assert technical_table.data[0]["stage_or_layer"] == "Costo técnico"
     assert technical_table.data[0]["rule"] == "Por panel"
     assert technical_table.data[0]["value_source"] in {"Manual", "Catálogo de panel seleccionado"}
