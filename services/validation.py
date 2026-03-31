@@ -221,14 +221,6 @@ def validate_economics_tables(config_bundle: LoadedConfigBundle) -> list[Validat
         table_name="Economics_Cost_Items",
         issues=issues,
     )
-    _add_missing_layer_warning(
-        price_frame,
-        column_name="layer",
-        required_values=("commercial",),
-        issue_field="economics_price_items",
-        table_name="Economics_Price_Items",
-        issues=issues,
-    )
     _add_migrated_disabled_warning(cost_frame, issue_field="economics_cost_items", table_name="Economics_Cost_Items", issues=issues)
     _add_migrated_disabled_warning(price_frame, issue_field="economics_price_items", table_name="Economics_Price_Items", issues=issues)
     return issues

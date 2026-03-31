@@ -23,8 +23,8 @@ from .economics_tables import (
     economics_ui_label,
     economics_cost_items_rows_from_editor,
     economics_cost_items_rows_to_editor,
-    economics_price_items_rows_from_editor,
-    economics_price_items_rows_to_editor,
+    economics_price_items_rows_from_split_editors,
+    economics_price_items_rows_to_section_editor,
 )
 from .economics_engine import (
     PREVIEW_STATE_CANDIDATE_MISSING,
@@ -154,18 +154,18 @@ def _admin_current_changes(
     month_profile_rows,
     sun_profile_rows,
     economics_cost_rows,
-    economics_price_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
 ):
     normalized_cost_rows = (
         active.config_bundle.economics_cost_items_table.to_dict("records")
         if economics_cost_rows is None
         else economics_cost_items_rows_from_editor(economics_cost_rows)
     )
-    normalized_price_rows = (
-        active.config_bundle.economics_price_items_table.to_dict("records")
-        if economics_price_rows is None
-        else economics_price_items_rows_from_editor(economics_price_rows)
-    )
+    if economics_tax_rows is None and economics_adjustment_rows is None:
+        normalized_price_rows = active.config_bundle.economics_price_items_table.to_dict("records")
+    else:
+        normalized_price_rows = _combined_price_editor_rows_or_none(economics_tax_rows, economics_adjustment_rows)
     table_rows = _admin_table_rows_payload(
         inverter_rows,
         battery_rows,
@@ -224,7 +224,8 @@ def _resolve_economics_bridge_context(
     month_profile_rows,
     sun_profile_rows,
     economics_cost_rows,
-    economics_price_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
     applied_at: str | None = None,
 ):
     changes = _admin_current_changes(
@@ -237,7 +238,8 @@ def _resolve_economics_bridge_context(
         month_profile_rows=month_profile_rows,
         sun_profile_rows=sun_profile_rows,
         economics_cost_rows=economics_cost_rows,
-        economics_price_rows=economics_price_rows,
+        economics_tax_rows=economics_tax_rows,
+        economics_adjustment_rows=economics_adjustment_rows,
     )
     prepared = prepare_economics_runtime_price_bridge(
         active,
@@ -297,6 +299,15 @@ def _admin_table_rows_payload(
         "economics_cost_items": economics_cost_rows,
         "economics_price_items": economics_price_rows,
     }
+
+
+def _combined_price_editor_rows_or_none(
+    economics_tax_rows,
+    economics_adjustment_rows,
+) -> list[dict[str, object]] | None:
+    if economics_tax_rows is None or economics_adjustment_rows is None:
+        return None
+    return economics_price_items_rows_from_split_editors(economics_tax_rows, economics_adjustment_rows)
 
 
 def _unhydrated_admin_tables(table_rows: dict[str, list[dict[str, object]] | None]) -> tuple[str, ...]:
@@ -556,7 +567,7 @@ def _economics_breakdown_formula(row: dict[str, object], *, lang: str) -> str:
             "unavailable_battery": "batería",
         },
     }
-    if rule == "markup_pct":
+    if rule in {"markup_pct", "tax_pct"}:
         return f"{_format_percent(unit_rate)} x {_format_cop(None if base_amount is None else float(base_amount), lang)}"
     if rule == "fixed_project":
         return f"1 x {_format_cop(unit_rate, lang)}"
@@ -846,22 +857,22 @@ def _economics_preview_flow(result, *, lang: str) -> html.Div:
             _format_cop(result.cost_total_COP, lang),
         ),
         (
-            "economics-preview-flow-commercial-adjustment",
-            tr("workspace.admin.economics.preview.summary.commercial_adjustment", lang),
-            tr("workspace.admin.economics.preview.flow.formula.commercial_adjustment", lang),
-            _format_cop(result.commercial_adjustment_COP, lang),
+            "economics-preview-flow-tax-total",
+            tr("workspace.admin.economics.preview.summary.tax_total", lang),
+            tr("workspace.admin.economics.preview.flow.formula.tax_total", lang),
+            _format_cop(result.tax_total_COP, lang),
         ),
         (
-            "economics-preview-flow-commercial-offer",
-            tr("workspace.admin.economics.preview.summary.commercial_offer", lang),
-            tr("workspace.admin.economics.preview.flow.formula.commercial_offer", lang),
-            _format_cop(result.commercial_offer_COP, lang),
+            "economics-preview-flow-subtotal-with-tax",
+            tr("workspace.admin.economics.preview.summary.subtotal_with_tax", lang),
+            tr("workspace.admin.economics.preview.flow.formula.subtotal_with_tax", lang),
+            _format_cop(result.subtotal_with_tax_COP, lang),
         ),
         (
-            "economics-preview-flow-sale-adjustment",
-            tr("workspace.admin.economics.preview.summary.sale_adjustment", lang),
-            tr("workspace.admin.economics.preview.flow.formula.sale_adjustment", lang),
-            _format_cop(result.sale_adjustment_COP, lang),
+            "economics-preview-flow-post-tax-adjustments-total",
+            tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
+            tr("workspace.admin.economics.preview.flow.formula.post_tax_adjustments_total", lang),
+            _format_cop(result.post_tax_adjustments_total_COP, lang),
         ),
         (
             "economics-preview-flow-final-price",
@@ -918,17 +929,17 @@ def _economics_preview_summary_shell(result, *, lang: str) -> html.Div:
                 emphasized=True,
             ),
             _economics_summary_card(
-                tr("workspace.admin.economics.preview.summary.commercial_adjustment", lang),
-                _format_cop(result.commercial_adjustment_COP, lang),
+                tr("workspace.admin.economics.preview.summary.tax_total", lang),
+                _format_cop(result.tax_total_COP, lang),
             ),
             _economics_summary_card(
-                tr("workspace.admin.economics.preview.summary.commercial_offer", lang),
-                _format_cop(result.commercial_offer_COP, lang),
+                tr("workspace.admin.economics.preview.summary.subtotal_with_tax", lang),
+                _format_cop(result.subtotal_with_tax_COP, lang),
                 emphasized=True,
             ),
             _economics_summary_card(
-                tr("workspace.admin.economics.preview.summary.sale_adjustment", lang),
-                _format_cop(result.sale_adjustment_COP, lang),
+                tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
+                _format_cop(result.post_tax_adjustments_total_COP, lang),
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.final_price", lang),
@@ -970,30 +981,27 @@ def _economics_closing_rows(result, *, lang: str) -> list[dict[str, object]]:
             "metric": tr("workspace.admin.economics.preview.summary.cost_total", lang),
             "value": _format_cop(result.cost_total_COP, lang),
         },
+        {
+            "metric": tr("workspace.admin.economics.preview.summary.tax_total", lang),
+            "value": _format_cop(result.tax_total_COP, lang),
+        },
+        {
+            "metric": tr("workspace.admin.economics.preview.summary.subtotal_with_tax", lang),
+            "value": _format_cop(result.subtotal_with_tax_COP, lang),
+        },
+        {
+            "metric": tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
+            "value": _format_cop(result.post_tax_adjustments_total_COP, lang),
+        },
+        {
+            "metric": tr("workspace.admin.economics.preview.summary.final_price", lang),
+            "value": _format_cop(result.final_price_COP, lang),
+        },
+        {
+            "metric": tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
+            "value": _format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
+        },
     ]
-    tax_total = getattr(result, "tax_total_COP", None)
-    if tax_total is not None:
-        rows.append({"metric": tr("workspace.admin.economics.preview.summary.tax_total", lang), "value": _format_cop(tax_total, lang)})
-    rows.extend(
-        [
-            {
-                "metric": tr("workspace.admin.economics.preview.summary.commercial_adjustment", lang),
-                "value": _format_cop(result.commercial_adjustment_COP, lang),
-            },
-            {
-                "metric": tr("workspace.admin.economics.preview.summary.sale_adjustment", lang),
-                "value": _format_cop(result.sale_adjustment_COP, lang),
-            },
-            {
-                "metric": tr("workspace.admin.economics.preview.summary.final_price", lang),
-                "value": _format_cop(result.final_price_COP, lang),
-            },
-            {
-                "metric": tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
-                "value": _format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
-            },
-        ]
-    )
     return rows
 
 
@@ -1109,21 +1117,21 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
                 lang=lang,
             ),
             _economics_breakdown_group(
-                group_id="economics-breakdown-commercial",
-                title=tr("workspace.admin.economics.preview.breakdown.group.commercial", lang),
-                description=tr("workspace.admin.economics.preview.breakdown.group.commercial.copy", lang),
-                subtotal_label=tr("workspace.admin.economics.preview.summary.commercial_adjustment", lang),
-                subtotal_value=result.commercial_adjustment_COP,
-                rows=[row for row in result.price_rows if row.stage_or_layer == "commercial"],
+                group_id="economics-breakdown-tax",
+                title=tr("workspace.admin.economics.preview.breakdown.group.tax", lang),
+                description=tr("workspace.admin.economics.preview.breakdown.group.tax.copy", lang),
+                subtotal_label=tr("workspace.admin.economics.preview.summary.tax_total", lang),
+                subtotal_value=result.tax_total_COP,
+                rows=[row for row in result.price_rows if row.stage_or_layer == "tax"],
                 lang=lang,
             ),
             _economics_breakdown_group(
-                group_id="economics-breakdown-sale",
-                title=tr("workspace.admin.economics.preview.breakdown.group.sale", lang),
-                description=tr("workspace.admin.economics.preview.breakdown.group.sale.copy", lang),
-                subtotal_label=tr("workspace.admin.economics.preview.summary.sale_adjustment", lang),
-                subtotal_value=result.sale_adjustment_COP,
-                rows=[row for row in result.price_rows if row.stage_or_layer == "sale"],
+                group_id="economics-breakdown-adjustments",
+                title=tr("workspace.admin.economics.preview.breakdown.group.adjustments", lang),
+                description=tr("workspace.admin.economics.preview.breakdown.group.adjustments.copy", lang),
+                subtotal_label=tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
+                subtotal_value=result.post_tax_adjustments_total_COP,
+                rows=[row for row in result.price_rows if row.stage_or_layer in {"commercial", "sale"}],
                 lang=lang,
             ),
         ],
@@ -1263,7 +1271,8 @@ def translate_admin_page_header(language_value):
     Output("admin-show-all", "options"),
     Output("apply-admin-btn", "children"),
     Output("add-economics-cost-row-btn", "children"),
-    Output("add-economics-price-row-btn", "children"),
+    Output("add-economics-tax-row-btn", "children"),
+    Output("add-economics-adjustment-row-btn", "children"),
     Output("add-inverter-row-btn", "children"),
     Output("add-battery-row-btn", "children"),
     Output("add-panel-row-btn", "children"),
@@ -1274,6 +1283,7 @@ def translate_admin_secure_content(language_value):
     return (
         [{"label": tr("workbench.assumptions.show_all", lang), "value": "all"}],
         tr("workbench.assumptions.apply", lang),
+        tr("workbench.profiles.add_row", lang),
         tr("workbench.profiles.add_row", lang),
         tr("workbench.profiles.add_row", lang),
         tr("workbench.add_row", lang),
@@ -1314,9 +1324,12 @@ def translate_profile_table_activators(language_value, activator_ids=None):
     Output("economics-cost-items-editor", "data"),
     Output("economics-cost-items-editor", "columns"),
     Output("economics-cost-items-editor", "tooltip_header"),
-    Output("economics-price-items-editor", "data"),
-    Output("economics-price-items-editor", "columns"),
-    Output("economics-price-items-editor", "tooltip_header"),
+    Output("economics-tax-items-editor", "data"),
+    Output("economics-tax-items-editor", "columns"),
+    Output("economics-tax-items-editor", "tooltip_header"),
+    Output("economics-adjustment-items-editor", "data"),
+    Output("economics-adjustment-items-editor", "columns"),
+    Output("economics-adjustment-items-editor", "tooltip_header"),
     Input("scenario-session-store", "data"),
     Input("admin-show-all", "value", allow_optional=True),
     Input("language-selector", "value"),
@@ -1338,6 +1351,7 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
                 context_note_type="admin-assumption-context-note",
             ),
             True,
+            *empty,
             *empty,
             *empty,
             *empty,
@@ -1367,6 +1381,7 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
             *empty,
             *empty,
             *empty,
+            *empty,
         )
     active = state.get_scenario()
     if active is None:
@@ -1381,6 +1396,7 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
                 context_note_type="admin-assumption-context-note",
             ),
             True,
+            *empty,
             *empty,
             *empty,
             *empty,
@@ -1442,7 +1458,18 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
         economics_cost_items_rows_to_editor(display_bundle.economics_cost_items_table, lang=lang),
         economics_cost_columns,
         economics_cost_tooltips,
-        economics_price_items_rows_to_editor(display_bundle.economics_price_items_table, lang=lang),
+        economics_price_items_rows_to_section_editor(
+            display_bundle.economics_price_items_table,
+            layers=("tax",),
+            lang=lang,
+        ),
+        economics_price_columns,
+        economics_price_tooltips,
+        economics_price_items_rows_to_section_editor(
+            display_bundle.economics_price_items_table,
+            layers=("commercial", "sale"),
+            lang=lang,
+        ),
         economics_price_columns,
         economics_price_tooltips,
     )
@@ -1567,11 +1594,19 @@ def render_admin_preview_candidate_selector(session_payload, preview_candidate_s
     Output("economics-preview-content", "children"),
     Input("scenario-session-store", "data"),
     Input("economics-cost-items-editor", "data", allow_optional=True),
-    Input("economics-price-items-editor", "data", allow_optional=True),
+    Input("economics-tax-items-editor", "data", allow_optional=True),
+    Input("economics-adjustment-items-editor", "data", allow_optional=True),
     Input("language-selector", "value"),
     Input("admin-preview-candidate-key", "data"),
 )
-def render_economics_preview(session_payload, economics_cost_rows, economics_price_rows, language_value, admin_preview_candidate_state=None):
+def render_economics_preview(
+    session_payload,
+    economics_cost_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
+    language_value,
+    admin_preview_candidate_state=None,
+):
     lang = _lang(language_value)
     if not _admin_page_access(session_payload).allowed:
         return []
@@ -1588,8 +1623,8 @@ def render_economics_preview(session_payload, economics_cost_rows, economics_pri
     )
     normalized_price_rows = (
         active.config_bundle.economics_price_items_table.to_dict("records")
-        if economics_price_rows is None
-        else economics_price_items_rows_from_editor(economics_price_rows)
+        if economics_tax_rows is None or economics_adjustment_rows is None
+        else economics_price_items_rows_from_split_editors(economics_tax_rows, economics_adjustment_rows)
     )
     preview_candidate_key = _requested_admin_preview_candidate_key(active, admin_preview_candidate_state)
     preview = resolve_economics_preview(
@@ -1615,7 +1650,8 @@ def render_economics_preview(session_payload, economics_cost_rows, economics_pri
     Input("month-profile-editor", "data", allow_optional=True),
     Input("sun-profile-editor", "data", allow_optional=True),
     Input("economics-cost-items-editor", "data", allow_optional=True),
-    Input("economics-price-items-editor", "data", allow_optional=True),
+    Input("economics-tax-items-editor", "data", allow_optional=True),
+    Input("economics-adjustment-items-editor", "data", allow_optional=True),
     Input("language-selector", "value"),
     Input("admin-preview-candidate-key", "data"),
 )
@@ -1629,7 +1665,8 @@ def sync_economics_bridge_cta(
     month_profile_rows,
     sun_profile_rows,
     economics_cost_rows,
-    economics_price_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
     language_value,
     admin_preview_candidate_state=None,
 ):
@@ -1654,7 +1691,8 @@ def sync_economics_bridge_cta(
         month_profile_rows=month_profile_rows,
         sun_profile_rows=sun_profile_rows,
         economics_cost_rows=economics_cost_rows,
-        economics_price_rows=economics_price_rows,
+        economics_tax_rows=economics_tax_rows,
+        economics_adjustment_rows=economics_adjustment_rows,
         applied_at=None,
     )
     return (not bool(bridge_context["eligible"])), _economics_bridge_cta_text(bridge_context, lang=lang)
@@ -1692,7 +1730,8 @@ def render_runtime_price_bridge_ui(session_payload, language_value):
     State("month-profile-editor", "data", allow_optional=True),
     State("sun-profile-editor", "data", allow_optional=True),
     State("economics-cost-items-editor", "data", allow_optional=True),
-    State("economics-price-items-editor", "data", allow_optional=True),
+    State("economics-tax-items-editor", "data", allow_optional=True),
+    State("economics-adjustment-items-editor", "data", allow_optional=True),
     State("language-selector", "value"),
     State("admin-preview-candidate-key", "data"),
     prevent_initial_call=True,
@@ -1709,7 +1748,8 @@ def apply_economics_runtime_price_bridge(
     month_profile_rows,
     sun_profile_rows,
     economics_cost_rows,
-    economics_price_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
     language_value,
     admin_preview_candidate_state=None,
 ):
@@ -1735,7 +1775,8 @@ def apply_economics_runtime_price_bridge(
             month_profile_rows=month_profile_rows,
             sun_profile_rows=sun_profile_rows,
             economics_cost_rows=economics_cost_rows,
-            economics_price_rows=economics_price_rows,
+            economics_tax_rows=economics_tax_rows,
+            economics_adjustment_rows=economics_adjustment_rows,
             applied_at=datetime.now().isoformat(timespec="seconds"),
         )
         if not bridge_context["eligible"]:
@@ -1840,7 +1881,8 @@ def sync_admin_assumption_context_ui(
     Input("month-profile-editor", "data", allow_optional=True),
     Input("sun-profile-editor", "data", allow_optional=True),
     Input("economics-cost-items-editor", "data", allow_optional=True),
-    Input("economics-price-items-editor", "data", allow_optional=True),
+    Input("economics-tax-items-editor", "data", allow_optional=True),
+    Input("economics-adjustment-items-editor", "data", allow_optional=True),
     prevent_initial_call=True,
 )
 def sync_admin_draft(
@@ -1853,7 +1895,8 @@ def sync_admin_draft(
     month_profile_rows,
     sun_profile_rows,
     economics_cost_rows,
-    economics_price_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
 ):
     if not _admin_page_access(session_payload).allowed:
         raise PreventUpdate
@@ -1870,7 +1913,7 @@ def sync_admin_draft(
         month_profile_rows,
         sun_profile_rows,
         None if economics_cost_rows is None else economics_cost_items_rows_from_editor(economics_cost_rows),
-        None if economics_price_rows is None else economics_price_items_rows_from_editor(economics_price_rows),
+        _combined_price_editor_rows_or_none(economics_tax_rows, economics_adjustment_rows),
     )
     unhydrated_tables = _unhydrated_admin_tables(table_rows)
     if unhydrated_tables:
@@ -2072,20 +2115,45 @@ def add_economics_cost_row(n_clicks, table_rows, table_columns, language_value):
 
 
 @callback(
-    Output("economics-price-items-editor", "data", allow_duplicate=True),
-    Input("add-economics-price-row-btn", "n_clicks", allow_optional=True),
-    State("economics-price-items-editor", "data", allow_optional=True),
-    State("economics-price-items-editor", "columns", allow_optional=True),
+    Output("economics-tax-items-editor", "data", allow_duplicate=True),
+    Input("add-economics-tax-row-btn", "n_clicks", allow_optional=True),
+    State("economics-tax-items-editor", "data", allow_optional=True),
+    State("economics-tax-items-editor", "columns", allow_optional=True),
     State("language-selector", "value"),
     prevent_initial_call=True,
 )
-def add_economics_price_row(n_clicks, table_rows, table_columns, language_value):
+def add_economics_tax_row(n_clicks, table_rows, table_columns, language_value):
     if not n_clicks:
         raise PreventUpdate
     lang = _lang(language_value)
     blank_row = _blank_table_row(table_columns, table_rows)
     if not blank_row:
         raise PreventUpdate
+    blank_row["layer"] = economics_ui_label("layer", "tax", lang=lang)
+    blank_row["method"] = economics_ui_label("method", "tax_pct", lang=lang)
+    blank_row["enabled"] = "Yes" if lang == "en" else "Sí"
+    rows = list(table_rows or [])
+    rows.append(blank_row)
+    return rows
+
+
+@callback(
+    Output("economics-adjustment-items-editor", "data", allow_duplicate=True),
+    Input("add-economics-adjustment-row-btn", "n_clicks", allow_optional=True),
+    State("economics-adjustment-items-editor", "data", allow_optional=True),
+    State("economics-adjustment-items-editor", "columns", allow_optional=True),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def add_economics_adjustment_row(n_clicks, table_rows, table_columns, language_value):
+    if not n_clicks:
+        raise PreventUpdate
+    lang = _lang(language_value)
+    blank_row = _blank_table_row(table_columns, table_rows)
+    if not blank_row:
+        raise PreventUpdate
+    blank_row["layer"] = economics_ui_label("layer", "commercial", lang=lang)
+    blank_row["method"] = economics_ui_label("method", "markup_pct", lang=lang)
     blank_row["enabled"] = "Yes" if lang == "en" else "Sí"
     rows = list(table_rows or [])
     rows.append(blank_row)
@@ -2106,7 +2174,8 @@ def add_economics_price_row(n_clicks, table_rows, table_columns, language_value)
     State("month-profile-editor", "data", allow_optional=True),
     State("sun-profile-editor", "data", allow_optional=True),
     State("economics-cost-items-editor", "data", allow_optional=True),
-    State("economics-price-items-editor", "data", allow_optional=True),
+    State("economics-tax-items-editor", "data", allow_optional=True),
+    State("economics-adjustment-items-editor", "data", allow_optional=True),
     State("language-selector", "value"),
     prevent_initial_call=True,
 )
@@ -2122,7 +2191,8 @@ def apply_admin_edits(
     month_profile_rows,
     sun_profile_rows,
     economics_cost_rows,
-    economics_price_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
     language_value,
 ):
     lang = _lang(language_value)
@@ -2142,7 +2212,7 @@ def apply_admin_edits(
             month_profile_rows,
             sun_profile_rows,
             None if economics_cost_rows is None else economics_cost_items_rows_from_editor(economics_cost_rows),
-            None if economics_price_rows is None else economics_price_items_rows_from_editor(economics_price_rows),
+            _combined_price_editor_rows_or_none(economics_tax_rows, economics_adjustment_rows),
         )
         unhydrated_tables = _unhydrated_admin_tables(table_rows)
         if unhydrated_tables:

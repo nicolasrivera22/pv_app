@@ -386,7 +386,7 @@ def test_candidate_financial_snapshot_cache_reuses_key_and_invalidates_on_econom
     assert first is second
 
     changed_prices = active.config_bundle.economics_price_items_table.copy()
-    changed_prices.at[0, "value"] = float(changed_prices.at[0, "value"]) + 0.05
+    changed_prices.at[1, "value"] = float(changed_prices.at[1, "value"]) + 0.05
     changed_bundle = replace(active.config_bundle, economics_price_items_table=changed_prices)
     changed_state = update_scenario_bundle(state, active.scenario_id, changed_bundle)
     changed_active = changed_state.get_scenario()
@@ -396,6 +396,34 @@ def test_candidate_financial_snapshot_cache_reuses_key_and_invalidates_on_econom
     assert third is not first
     assert third.economics_signature != first.economics_signature
     assert third.visible_npv_COP != pytest.approx(first.visible_npv_COP)
+
+
+def test_snapshot_year0_is_tax_inclusive_and_bridge_reuses_same_total() -> None:
+    state = _run_named_scenario("Tax-inclusive snapshot")
+    scenario = state.get_scenario()
+    assert scenario is not None
+    candidate_key = scenario.selected_candidate_key
+    assert candidate_key is not None
+
+    changed_prices = scenario.config_bundle.economics_price_items_table.copy()
+    changed_prices.at[0, "enabled"] = True
+    changed_prices.at[0, "value"] = 0.19
+    changed_bundle = replace(scenario.config_bundle, economics_price_items_table=changed_prices)
+    state = update_scenario_bundle(state, scenario.scenario_id, changed_bundle)
+    scenario = state.get_scenario()
+    assert scenario is not None
+
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key, use_cache=False)
+    prepared = prepare_economics_runtime_price_bridge(replace(scenario, selected_candidate_key=candidate_key))
+
+    assert snapshot.economics_result.tax_total_COP > 0.0
+    assert snapshot.economics_result.subtotal_with_tax_COP == pytest.approx(
+        snapshot.economics_result.cost_total_COP + snapshot.economics_result.tax_total_COP
+    )
+    assert snapshot.project_price_year0_COP == pytest.approx(snapshot.economics_result.final_price_COP)
+    assert prepared.applied is True
+    assert prepared.candidate_key == candidate_key
+    assert prepared.final_price_COP == pytest.approx(snapshot.project_price_year0_COP)
 
 
 def test_two_candidates_build_distinct_snapshots_and_ignore_poisoned_legacy_finance() -> None:

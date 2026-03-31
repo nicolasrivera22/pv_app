@@ -39,7 +39,9 @@ from services.economics_tables import (
     economics_cost_items_rows_from_editor,
     economics_cost_items_rows_to_editor,
     economics_price_items_rows_from_editor,
+    economics_price_items_rows_from_split_editors,
     economics_price_items_rows_to_editor,
+    economics_price_items_rows_to_section_editor,
 )
 from services.economics_engine import EconomicsPreviewResult, EconomicsQuantities, EconomicsResult
 from services.project_io import projects_root, read_project_manifest
@@ -108,10 +110,28 @@ def _bridge_args(
     *,
     economics_cost_rows=None,
     economics_price_rows=None,
+    economics_price_rows_are_editor: bool = False,
     assumption_input_ids=None,
     assumption_values=None,
     lang: str = "es",
 ):
+    if economics_price_rows is None:
+        tax_rows = economics_price_items_rows_to_section_editor(
+            active.config_bundle.economics_price_items_table,
+            layers=("tax",),
+            lang=lang,
+        )
+        adjustment_rows = economics_price_items_rows_to_section_editor(
+            active.config_bundle.economics_price_items_table,
+            layers=("commercial", "sale"),
+            lang=lang,
+        )
+    else:
+        tax_rows, adjustment_rows = _split_price_rows(
+            economics_price_rows,
+            lang=lang,
+            rows_are_editor=economics_price_rows_are_editor,
+        )
     return (
         [] if assumption_input_ids is None else assumption_input_ids,
         [] if assumption_values is None else assumption_values,
@@ -123,10 +143,202 @@ def _bridge_args(
         economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang=lang)
         if economics_cost_rows is None
         else economics_cost_rows,
-        economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang=lang)
-        if economics_price_rows is None
-        else economics_price_rows,
+        tax_rows,
+        adjustment_rows,
         lang,
+    )
+
+
+def _split_price_rows(
+    rows_or_frame,
+    *,
+    lang: str = "es",
+    rows_are_editor: bool = False,
+) -> tuple[list[dict[str, object]] | None, list[dict[str, object]] | None]:
+    if rows_or_frame is None:
+        return None, None
+    source = economics_price_items_rows_from_editor(rows_or_frame) if rows_are_editor else rows_or_frame
+    tax_rows = economics_price_items_rows_to_section_editor(source, layers=("tax",), lang=lang)
+    adjustment_rows = economics_price_items_rows_to_section_editor(source, layers=("commercial", "sale"), lang=lang)
+    return tax_rows, adjustment_rows
+
+
+def _render_preview_call(
+    session_payload,
+    *,
+    economics_cost_rows=None,
+    economics_price_rows=None,
+    economics_price_rows_are_editor: bool = False,
+    lang: str = "es",
+    admin_preview_candidate_state=None,
+):
+    economics_tax_rows, economics_adjustment_rows = _split_price_rows(
+        economics_price_rows,
+        lang=lang,
+        rows_are_editor=economics_price_rows_are_editor,
+    )
+    return render_economics_preview(
+        session_payload,
+        economics_cost_rows,
+        economics_tax_rows,
+        economics_adjustment_rows,
+        lang,
+        admin_preview_candidate_state,
+    )
+
+
+def _sync_admin_draft_call(
+    session_payload,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    panel_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    economics_cost_rows,
+    economics_price_rows,
+    *,
+    economics_price_rows_are_editor: bool = False,
+    lang: str = "es",
+):
+    economics_tax_rows, economics_adjustment_rows = _split_price_rows(
+        economics_price_rows,
+        lang=lang,
+        rows_are_editor=economics_price_rows_are_editor,
+    )
+    return sync_admin_draft(
+        session_payload,
+        assumption_input_ids,
+        assumption_values,
+        inverter_rows,
+        battery_rows,
+        panel_rows,
+        month_profile_rows,
+        sun_profile_rows,
+        economics_cost_rows,
+        economics_tax_rows,
+        economics_adjustment_rows,
+    )
+
+
+def _apply_admin_edits_call(
+    n_clicks,
+    session_payload,
+    project_name_value,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    panel_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    economics_cost_rows,
+    economics_price_rows,
+    language_value,
+    *,
+    economics_price_rows_are_editor: bool = False,
+):
+    economics_tax_rows, economics_adjustment_rows = _split_price_rows(
+        economics_price_rows,
+        lang=language_value,
+        rows_are_editor=economics_price_rows_are_editor,
+    )
+    return apply_admin_edits(
+        n_clicks,
+        session_payload,
+        project_name_value,
+        assumption_input_ids,
+        assumption_values,
+        inverter_rows,
+        battery_rows,
+        panel_rows,
+        month_profile_rows,
+        sun_profile_rows,
+        economics_cost_rows,
+        economics_tax_rows,
+        economics_adjustment_rows,
+        language_value,
+    )
+
+
+def _sync_economics_bridge_cta_call(
+    session_payload,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    panel_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    economics_cost_rows,
+    economics_price_rows,
+    language_value,
+    admin_preview_candidate_state=None,
+    *,
+    economics_price_rows_are_editor: bool = False,
+):
+    economics_tax_rows, economics_adjustment_rows = _split_price_rows(
+        economics_price_rows,
+        lang=language_value,
+        rows_are_editor=economics_price_rows_are_editor,
+    )
+    return sync_economics_bridge_cta(
+        session_payload,
+        assumption_input_ids,
+        assumption_values,
+        inverter_rows,
+        battery_rows,
+        panel_rows,
+        month_profile_rows,
+        sun_profile_rows,
+        economics_cost_rows,
+        economics_tax_rows,
+        economics_adjustment_rows,
+        language_value,
+        admin_preview_candidate_state,
+    )
+
+
+def _apply_economics_runtime_price_bridge_call(
+    n_clicks,
+    session_payload,
+    project_name_value,
+    assumption_input_ids,
+    assumption_values,
+    inverter_rows,
+    battery_rows,
+    panel_rows,
+    month_profile_rows,
+    sun_profile_rows,
+    economics_cost_rows,
+    economics_price_rows,
+    language_value,
+    admin_preview_candidate_state=None,
+    *,
+    economics_price_rows_are_editor: bool = False,
+):
+    economics_tax_rows, economics_adjustment_rows = _split_price_rows(
+        economics_price_rows,
+        lang=language_value,
+        rows_are_editor=economics_price_rows_are_editor,
+    )
+    return apply_economics_runtime_price_bridge(
+        n_clicks,
+        session_payload,
+        project_name_value,
+        assumption_input_ids,
+        assumption_values,
+        inverter_rows,
+        battery_rows,
+        panel_rows,
+        month_profile_rows,
+        sun_profile_rows,
+        economics_cost_rows,
+        economics_tax_rows,
+        economics_adjustment_rows,
+        language_value,
+        admin_preview_candidate_state,
     )
 
 
@@ -266,9 +478,12 @@ def test_economics_editor_round_trips_friendly_enum_labels_to_raw_values() -> No
     assert cost_editor_rows[0]["source_mode"] == "Hardware seleccionado"
     assert cost_editor_rows[0]["hardware_binding"] == "Panel"
     assert cost_editor_rows[0]["enabled"] == "Sí"
-    assert price_editor_rows[0]["layer"] == "Oferta comercial"
-    assert price_editor_rows[0]["method"] == "Ajuste porcentual"
-    assert price_editor_rows[0]["enabled"] == "Sí"
+    assert price_editor_rows[0]["layer"] == "Impuestos"
+    assert price_editor_rows[0]["method"] == "Impuesto porcentual"
+    assert price_editor_rows[0]["enabled"] == "No"
+    assert price_editor_rows[1]["layer"] == "Oferta comercial"
+    assert price_editor_rows[1]["method"] == "Ajuste porcentual"
+    assert price_editor_rows[1]["enabled"] == "Sí"
 
     round_trip_cost = economics_cost_items_rows_from_editor(cost_editor_rows)
     round_trip_price = economics_price_items_rows_from_editor(price_editor_rows)
@@ -278,9 +493,12 @@ def test_economics_editor_round_trips_friendly_enum_labels_to_raw_values() -> No
     assert round_trip_cost[0]["source_mode"] == "selected_hardware"
     assert round_trip_cost[0]["hardware_binding"] == "panel"
     assert bool(round_trip_cost[0]["enabled"]) is True
-    assert round_trip_price[0]["layer"] == "commercial"
-    assert round_trip_price[0]["method"] == "markup_pct"
-    assert bool(round_trip_price[0]["enabled"]) is True
+    assert round_trip_price[0]["layer"] == "tax"
+    assert round_trip_price[0]["method"] == "tax_pct"
+    assert bool(round_trip_price[0]["enabled"]) is False
+    assert round_trip_price[1]["layer"] == "commercial"
+    assert round_trip_price[1]["method"] == "markup_pct"
+    assert bool(round_trip_price[1]["enabled"]) is True
 
 
 @pytest.mark.parametrize(
@@ -326,23 +544,29 @@ def test_economics_enabled_localized_boolean_round_trip(editor_value: str, expec
 
 
 @pytest.mark.parametrize(
-    ("editor_value", "expected_internal"),
+    ("layer_label", "name", "method_label", "expected_method", "editor_value", "expected_internal"),
     [
-        (1, 0.01),
-        (1.0, 0.01),
-        (1.1, 0.011),
-        (20, 0.20),
+        ("Oferta comercial", "Margen comercial", "Ajuste porcentual", "markup_pct", 1, 0.01),
+        ("Oferta comercial", "Margen comercial", "Ajuste porcentual", "markup_pct", 1.0, 0.01),
+        ("Oferta comercial", "Margen comercial", "Ajuste porcentual", "markup_pct", 1.1, 0.011),
+        ("Oferta comercial", "Margen comercial", "Ajuste porcentual", "markup_pct", 20, 0.20),
+        ("Impuestos", "IVA", "Impuesto porcentual", "tax_pct", 1, 0.01),
+        ("Impuestos", "IVA", "Impuesto porcentual", "tax_pct", 19, 0.19),
     ],
 )
 def test_economics_price_percent_editor_values_normalize_to_internal_fractions(
+    layer_label: str,
+    name: str,
+    method_label: str,
+    expected_method: str,
     editor_value: float,
     expected_internal: float,
 ) -> None:
     rows = [
         {
-            "layer": "Oferta comercial",
-            "name": "Margen comercial",
-            "method": "Ajuste porcentual",
+            "layer": layer_label,
+            "name": name,
+            "method": method_label,
             "value": editor_value,
             "enabled": True,
             "notes": "",
@@ -351,18 +575,30 @@ def test_economics_price_percent_editor_values_normalize_to_internal_fractions(
 
     normalized = economics_price_items_rows_from_editor(rows)
 
-    assert normalized[0]["layer"] == "commercial"
-    assert normalized[0]["method"] == "markup_pct"
+    assert normalized[0]["method"] == expected_method
     assert float(normalized[0]["value"]) == pytest.approx(expected_internal)
 
 
-@pytest.mark.parametrize("editor_value", [1, 1.0, 1.1, 20])
-def test_economics_price_percent_round_trip_preserves_editor_percent_semantics(editor_value: float) -> None:
+@pytest.mark.parametrize(
+    ("layer_label", "name", "method_label", "editor_value"),
+    [
+        ("Oferta comercial", "Margen comercial", "Ajuste porcentual", 1),
+        ("Oferta comercial", "Margen comercial", "Ajuste porcentual", 20),
+        ("Impuestos", "IVA", "Impuesto porcentual", 1),
+        ("Impuestos", "IVA", "Impuesto porcentual", 19),
+    ],
+)
+def test_economics_price_percent_round_trip_preserves_editor_percent_semantics(
+    layer_label: str,
+    name: str,
+    method_label: str,
+    editor_value: float,
+) -> None:
     rows = [
         {
-            "layer": "Oferta comercial",
-            "name": "Margen comercial",
-            "method": "Ajuste porcentual",
+            "layer": layer_label,
+            "name": name,
+            "method": method_label,
             "value": editor_value,
             "enabled": True,
             "notes": "",
@@ -372,8 +608,8 @@ def test_economics_price_percent_round_trip_preserves_editor_percent_semantics(e
     normalized = economics_price_items_rows_from_editor(rows)
     round_trip_rows = economics_price_items_rows_to_editor(normalized, lang="es")
 
-    assert round_trip_rows[0]["layer"] == "Oferta comercial"
-    assert round_trip_rows[0]["method"] == "Ajuste porcentual"
+    assert round_trip_rows[0]["layer"] == layer_label
+    assert round_trip_rows[0]["method"] == method_label
     assert float(round_trip_rows[0]["value"]) == pytest.approx(float(editor_value))
 
 
@@ -408,10 +644,12 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     preview_copy = _find_component(section, "economics-preview-copy")
     candidate_shell = _find_component(section, "admin-preview-candidate-shell")
     cost_details = _find_component(section, "economics-cost-items-details")
-    price_details = _find_component(section, "economics-price-items-details")
+    tax_details = _find_component(section, "economics-tax-items-details")
+    adjustment_details = _find_component(section, "economics-adjustment-items-details")
     compatibility_shell = _find_component(section, "economics-compatibility-shell")
     cost_table = _find_component(section, "economics-cost-items-editor")
-    price_table = _find_component(section, "economics-price-items-editor")
+    tax_table = _find_component(section, "economics-tax-items-editor")
+    adjustment_table = _find_component(section, "economics-adjustment-items-editor")
 
     assert note is not None
     assert "flujo principal de pricing" in str(note.children).lower()
@@ -420,27 +658,31 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     assert "no cambia resultados" in str(preview_copy.children).lower()
     assert candidate_shell is not None
     assert cost_details is not None
-    assert price_details is not None
+    assert tax_details is not None
+    assert adjustment_details is not None
     assert compatibility_shell is not None
     assert cost_table is not None
-    assert price_table is not None
+    assert tax_table is not None
+    assert adjustment_table is not None
     assert "Costo técnico" in {option["label"] for option in cost_table.dropdown["stage"]["options"]}
     assert "Hardware seleccionado" in {option["label"] for option in cost_table.dropdown["source_mode"]["options"]}
     assert "Panel" in {option["label"] for option in cost_table.dropdown["hardware_binding"]["options"]}
     assert {"Sí", "No"} == {option["label"] for option in cost_table.dropdown["enabled"]["options"]}
-    assert "Ajuste porcentual" in {option["label"] for option in price_table.dropdown["method"]["options"]}
-    assert {"Sí", "No"} == {option["label"] for option in price_table.dropdown["enabled"]["options"]}
+    assert "Impuesto porcentual" in {option["label"] for option in tax_table.dropdown["method"]["options"]}
+    assert "Ajuste porcentual" in {option["label"] for option in adjustment_table.dropdown["method"]["options"]}
+    assert {"Sí", "No"} == {option["label"] for option in tax_table.dropdown["enabled"]["options"]}
+    assert {"Sí", "No"} == {option["label"] for option in adjustment_table.dropdown["enabled"]["options"]}
 
 
 def test_sync_admin_draft_tracks_economics_tables_with_simple_schema(monkeypatch, tmp_path) -> None:
     client_state, _state, active, payload = _admin_payload(monkeypatch, tmp_path)
 
     economics_cost_rows = active.config_bundle.economics_cost_items_table.to_dict("records")
-    economics_price_rows = active.config_bundle.economics_price_items_table.to_dict("records")
+    economics_price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
     economics_cost_rows[0] = {**economics_cost_rows[0], "amount_COP": 777_000}
-    economics_price_rows[0] = {**economics_price_rows[0], "value": 12}
+    economics_price_rows[1] = {**economics_price_rows[1], "value": 12}
 
-    meta = sync_admin_draft(
+    meta = _sync_admin_draft_call(
         payload,
         [],
         [],
@@ -451,14 +693,15 @@ def test_sync_admin_draft_tracks_economics_tables_with_simple_schema(monkeypatch
         active.config_bundle.sun_profile_table.to_dict("records"),
         economics_cost_rows,
         economics_price_rows,
+        economics_price_rows_are_editor=True,
     )
 
     draft = get_workspace_draft(client_state.session_id, active.scenario_id)
     assert meta["revision"] > 0
     assert draft is not None
     assert draft.table_rows["economics_cost_items"][0]["amount_COP"] == pytest.approx(777_000)
-    assert draft.table_rows["economics_price_items"][0]["method"] == "markup_pct"
-    assert draft.table_rows["economics_price_items"][0]["value"] == pytest.approx(0.12)
+    assert draft.table_rows["economics_price_items"][1]["method"] == "markup_pct"
+    assert draft.table_rows["economics_price_items"][1]["value"] == pytest.approx(0.12)
 
 
 def test_apply_admin_edits_persists_economics_tables_and_normalizes_markup_percent(monkeypatch, tmp_path) -> None:
@@ -471,9 +714,9 @@ def test_apply_admin_edits_persists_economics_tables_and_normalizes_markup_perce
     economics_cost_rows = economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang="es")
     economics_price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
     economics_cost_rows[0] = {**economics_cost_rows[0], "amount_COP": 777_000}
-    economics_price_rows[0] = {**economics_price_rows[0], "value": 19}
+    economics_price_rows[1] = {**economics_price_rows[1], "value": 19}
 
-    next_payload, _status = apply_admin_edits(
+    next_payload, _status = _apply_admin_edits_call(
         1,
         payload,
         "Proyecto Economics Admin",
@@ -487,6 +730,7 @@ def test_apply_admin_edits_persists_economics_tables_and_normalizes_markup_perce
         economics_cost_rows,
         economics_price_rows,
         "es",
+        economics_price_rows_are_editor=True,
     )
 
     _, updated_state = resolve_client_session(next_payload, language="es")
@@ -494,7 +738,7 @@ def test_apply_admin_edits_persists_economics_tables_and_normalizes_markup_perce
 
     assert updated_active is not None
     assert float(updated_active.config_bundle.economics_cost_items_table.iloc[0]["amount_COP"]) == pytest.approx(777_000)
-    assert float(updated_active.config_bundle.economics_price_items_table.iloc[0]["value"]) == pytest.approx(0.19)
+    assert float(updated_active.config_bundle.economics_price_items_table.iloc[1]["value"]) == pytest.approx(0.19)
     assert list(updated_active.config_bundle.economics_cost_items_table.columns) == COST_COLUMNS
     assert list(updated_active.config_bundle.economics_price_items_table.columns) == PRICE_COLUMNS
 
@@ -503,15 +747,17 @@ def test_apply_admin_edits_persists_economics_tables_and_normalizes_markup_perce
 
     assert reopened_active is not None
     assert float(reopened_active.config_bundle.economics_cost_items_table.iloc[0]["amount_COP"]) == pytest.approx(777_000)
-    assert float(reopened_active.config_bundle.economics_price_items_table.iloc[0]["value"]) == pytest.approx(0.19)
+    assert float(reopened_active.config_bundle.economics_price_items_table.iloc[1]["value"]) == pytest.approx(0.19)
     reopened_editor_cost_rows = economics_cost_items_rows_to_editor(reopened_active.config_bundle.economics_cost_items_table, lang="es")
     reopened_editor_price_rows = economics_price_items_rows_to_editor(reopened_active.config_bundle.economics_price_items_table, lang="es")
     assert reopened_editor_cost_rows[0]["stage"] == "Costo técnico"
     assert reopened_editor_cost_rows[0]["basis"] == "Por panel"
     assert reopened_editor_cost_rows[0]["source_mode"] == "Hardware seleccionado"
     assert reopened_editor_cost_rows[0]["hardware_binding"] == "Panel"
-    assert reopened_editor_price_rows[0]["layer"] == "Oferta comercial"
-    assert reopened_editor_price_rows[0]["method"] == "Ajuste porcentual"
+    assert reopened_editor_price_rows[0]["layer"] == "Impuestos"
+    assert reopened_editor_price_rows[0]["method"] == "Impuesto porcentual"
+    assert reopened_editor_price_rows[1]["layer"] == "Oferta comercial"
+    assert reopened_editor_price_rows[1]["method"] == "Ajuste porcentual"
 
 
 def test_open_project_without_economics_csv_defaults_new_tables(monkeypatch, tmp_path) -> None:
@@ -576,8 +822,11 @@ def test_open_rich_economics_schema_migrates_in_memory_only_and_rewrites_on_save
     assert reopened_active.config_bundle.economics_price_items_table.iloc[0]["layer"] == "commercial"
     assert reopened_active.config_bundle.economics_price_items_table.iloc[0]["method"] == "markup_pct"
     assert float(reopened_active.config_bundle.economics_price_items_table.iloc[0]["value"]) == pytest.approx(0.19)
-    assert bool(reopened_active.config_bundle.economics_price_items_table.iloc[1]["enabled"]) is False
-    assert "tax_pct" in str(reopened_active.config_bundle.economics_price_items_table.iloc[1]["notes"])
+    assert reopened_active.config_bundle.economics_price_items_table.iloc[1]["layer"] == "tax"
+    assert reopened_active.config_bundle.economics_price_items_table.iloc[1]["method"] == "tax_pct"
+    assert float(reopened_active.config_bundle.economics_price_items_table.iloc[1]["value"]) == pytest.approx(0.16)
+    assert bool(reopened_active.config_bundle.economics_price_items_table.iloc[1]["enabled"]) is True
+    assert str(reopened_active.config_bundle.economics_price_items_table.iloc[1]["notes"]) == "legacy tax"
     cost_messages = [issue.message for issue in reopened_active.config_bundle.issues if issue.field == "economics_cost_items"]
     price_messages = [issue.message for issue in reopened_active.config_bundle.issues if issue.field == "economics_price_items"]
     assert "Economics_Cost_Items fila 2: migrada desde schema rico y desactivada por método no soportado 'pct_of_running_subtotal'." in cost_messages
@@ -585,11 +834,7 @@ def test_open_rich_economics_schema_migrates_in_memory_only_and_rewrites_on_save
     assert cost_messages.count(
         "Economics_Cost_Items fila 2: migrada desde schema rico y desactivada por método no soportado 'pct_of_running_subtotal'."
     ) == 1
-    assert "Economics_Price_Items fila 2: migrada desde schema rico y desactivada por método no soportado 'tax_pct'." in price_messages
-    assert "Economics_Price_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in price_messages
-    assert price_messages.count(
-        "Economics_Price_Items fila 2: migrada desde schema rico y desactivada por método no soportado 'tax_pct'."
-    ) == 1
+    assert price_messages == []
 
     save_project(reopened, language="es")
     rewritten_cost = pd.read_csv(cost_path)
@@ -606,9 +851,9 @@ def test_open_rich_economics_schema_migrates_in_memory_only_and_rewrites_on_save
     post_save_cost_messages = [issue.message for issue in reopened_after_save_active.config_bundle.issues if issue.field == "economics_cost_items"]
     post_save_price_messages = [issue.message for issue in reopened_after_save_active.config_bundle.issues if issue.field == "economics_price_items"]
     assert "Economics_Cost_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in post_save_cost_messages
-    assert "Economics_Price_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in post_save_price_messages
     assert not any("fila 2: migrada desde schema rico" in message for message in post_save_cost_messages)
     assert not any("fila 2: migrada desde schema rico" in message for message in post_save_price_messages)
+    assert post_save_price_messages == []
 
 
 def test_normalize_invalid_economics_rows_preserves_disabled_row_and_source_row_number() -> None:
@@ -707,9 +952,9 @@ def test_validate_economics_tables_only_emits_aggregated_operational_warnings() 
 
     assert "Economics_Cost_Items: nombres habilitados duplicados: Panel hardware." in messages
     assert "Economics_Cost_Items: no hay filas habilitadas en 'installed'." in messages
-    assert "Economics_Price_Items: no hay filas habilitadas en 'commercial'." in messages
     assert "Economics_Cost_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in messages
     assert "Economics_Price_Items: 1 filas migradas desde schema rico siguen deshabilitadas." in messages
+    assert "Economics_Price_Items: no hay filas habilitadas en 'commercial'." not in messages
     assert not any("nombre vacío" in message for message in messages)
     assert not any("valor inválido" in message for message in messages)
     assert not any("enum inválido" in message for message in messages)
@@ -753,7 +998,7 @@ def test_apply_admin_edits_preserves_invalid_economics_rows_and_warnings_after_r
         }
     )
 
-    next_payload, _status = apply_admin_edits(
+    next_payload, _status = _apply_admin_edits_call(
         1,
         payload,
         "Proyecto Economics Invalid Row",
@@ -850,9 +1095,9 @@ def test_economics_changes_do_not_affect_deterministic_fingerprint_or_scan() -> 
 
 def test_render_economics_preview_uses_normalized_editor_rows(monkeypatch, tmp_path) -> None:
     _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
-    cost_rows = active.config_bundle.economics_cost_items_table.to_dict("records")
-    price_rows = active.config_bundle.economics_price_items_table.to_dict("records")
-    price_rows[0] = {**price_rows[0], "value": 12}
+    cost_rows = economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang="es")
+    price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
+    price_rows[1] = {**price_rows[1], "value": 12}
     captured: dict[str, object] = {}
 
     def _fake_preview(scenario, *, economics_cost_items, economics_price_items, **_kwargs):
@@ -866,15 +1111,21 @@ def test_render_economics_preview_uses_normalized_editor_rows(monkeypatch, tmp_p
 
     monkeypatch.setattr(admin_callbacks, "resolve_economics_preview", _fake_preview)
 
-    children = render_economics_preview(payload, cost_rows, price_rows, "es")
+    children = _render_preview_call(
+        payload,
+        economics_cost_rows=cost_rows,
+        economics_price_rows=price_rows,
+        economics_price_rows_are_editor=True,
+        lang="es",
+    )
 
     assert children
     assert captured["scenario_id"] == active.scenario_id
-    assert captured["cost_items"] == cost_rows
+    assert captured["cost_items"] == economics_cost_items_rows_from_editor(cost_rows)
     normalized_price_rows = captured["price_items"]
     assert isinstance(normalized_price_rows, list)
-    assert normalized_price_rows[0]["method"] == "markup_pct"
-    assert normalized_price_rows[0]["value"] == pytest.approx(0.12)
+    assert normalized_price_rows[1]["method"] == "markup_pct"
+    assert normalized_price_rows[1]["value"] == pytest.approx(0.12)
 
 
 def test_admin_preview_candidate_selector_is_local_and_does_not_mutate_scenario_selection(monkeypatch, tmp_path) -> None:
@@ -901,7 +1152,7 @@ def test_admin_preview_candidate_selector_is_local_and_does_not_mutate_scenario_
 
     local_preview_state = admin_callbacks.update_admin_preview_candidate_state(local_candidate, payload, synced_state)
     assert local_preview_state["source"] == admin_callbacks.ADMIN_PREVIEW_SOURCE_LOCAL
-    children = render_economics_preview(payload, None, None, "es", local_preview_state)
+    children = _render_preview_call(payload, lang="es", admin_preview_candidate_state=local_preview_state)
 
     preview_candidate = _find_component(children, "economics-preview-quantity-candidate")
     assert preview_candidate is not None
@@ -1000,7 +1251,7 @@ def test_admin_preview_local_candidate_invalidates_without_best_fallback_after_r
         rerun_state,
         "es",
     )
-    preview_children = render_economics_preview(rerun_payload, None, None, "es", rerun_state)
+    preview_children = _render_preview_call(rerun_payload, lang="es", admin_preview_candidate_state=rerun_state)
     preview_status = _find_component(preview_children, "economics-preview-status")
     preview_summary = _find_component(preview_children, "economics-summary-cards")
     bridge_disabled, bridge_note = sync_economics_bridge_cta(
@@ -1028,7 +1279,7 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     cost_rows = active.config_bundle.economics_cost_items_table.to_dict("records")
     price_rows = active.config_bundle.economics_price_items_table.to_dict("records")
     cost_rows[0] = {**cost_rows[0], "amount_COP": 100_000.0}
-    price_rows[0] = {**price_rows[0], "value": 10}
+    price_rows[0] = {**price_rows[0], "enabled": True, "value": 10}
     price_rows[2] = {**price_rows[2], "enabled": True, "value": 500_000.0}
     snapshot = build_candidate_financial_snapshot(
         active,
@@ -1038,7 +1289,12 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
         use_cache=False,
     )
 
-    children = render_economics_preview(payload, cost_rows, price_rows, "es")
+    children = _render_preview_call(
+        payload,
+        economics_cost_rows=cost_rows,
+        economics_price_rows=price_rows,
+        lang="es",
+    )
 
     status = _find_component(children, "economics-preview-status")
     summary_shell = _find_component(children, "economics-summary-shell")
@@ -1049,11 +1305,11 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     breakdown_copy = _find_component(children, "economics-breakdown-copy")
     technical_shell = _find_component(children, "economics-breakdown-technical-shell")
     installed_shell = _find_component(children, "economics-breakdown-installed-shell")
-    commercial_shell = _find_component(children, "economics-breakdown-commercial-shell")
-    sale_shell = _find_component(children, "economics-breakdown-sale-shell")
+    tax_shell = _find_component(children, "economics-breakdown-tax-shell")
+    adjustments_shell = _find_component(children, "economics-breakdown-adjustments-shell")
     technical_table = _find_component(children, "economics-breakdown-technical-table")
-    commercial_table = _find_component(children, "economics-breakdown-commercial-table")
-    sale_table = _find_component(children, "economics-breakdown-sale-table")
+    tax_table = _find_component(children, "economics-breakdown-tax-table")
+    adjustments_table = _find_component(children, "economics-breakdown-adjustments-table")
     technical_subtotal = _find_component(children, "economics-breakdown-technical-subtotal")
     closing_shell = _find_component(children, "economics-closing-shell")
     closing_table = _find_component(children, "economics-closing-table")
@@ -1081,14 +1337,14 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert str(breakdown_title.children) == "Desglose del cálculo"
     assert technical_shell is not None
     assert installed_shell is not None
-    assert commercial_shell is not None
-    assert sale_shell is not None
+    assert tax_shell is not None
+    assert adjustments_shell is not None
     assert technical_subtotal is not None
     assert closing_shell is not None
     assert closing_table is not None
     assert technical_table is not None
-    assert commercial_table is not None
-    assert sale_table is not None
+    assert tax_table is not None
+    assert adjustments_table is not None
     assert candidate_source is not None
     assert "Selección local de Admin" in str(candidate_source.children)
     assert panel_name is not None
@@ -1097,21 +1353,23 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert technical_copy is not None
     assert "subtotal técnico" in str(technical_copy.children)
     assert len(technical_table.data) >= 1
-    assert len(commercial_table.data) >= 1
-    assert len(sale_table.data) >= 1
+    assert len(tax_table.data) >= 1
+    assert len(adjustments_table.data) >= 1
     assert "Base monetaria [COP]" not in {column["name"] for column in technical_table.columns}
-    assert "Base monetaria [COP]" in {column["name"] for column in commercial_table.columns}
+    assert "Base monetaria [COP]" in {column["name"] for column in tax_table.columns}
     assert technical_table.data[0]["stage_or_layer"] == "Costo técnico"
     assert technical_table.data[0]["rule"] == "Por panel"
     assert technical_table.data[0]["value_source"] in {"Manual", "Catálogo de panel seleccionado"}
-    assert commercial_table.data[0]["stage_or_layer"] == "Oferta comercial"
-    assert commercial_table.data[0]["rule"] == "Ajuste porcentual"
+    assert tax_table.data[0]["stage_or_layer"] == "Impuestos"
+    assert tax_table.data[0]["rule"] == "Impuesto porcentual"
     assert "calculation" in technical_table.data[0]
     assert "x" in str(technical_table.data[0]["calculation"])
     assert float(technical_table.data[0]["line_amount_COP"]) == pytest.approx(snapshot.economics_result.cost_rows[0].line_amount_COP)
     assert len(technical_table.data) == len([row for row in snapshot.economics_result.cost_rows if row.stage_or_layer == "technical"])
-    assert len(commercial_table.data) == len([row for row in snapshot.economics_result.price_rows if row.stage_or_layer == "commercial"])
-    assert len(sale_table.data) == len([row for row in snapshot.economics_result.price_rows if row.stage_or_layer == "sale"])
+    assert len(tax_table.data) == len([row for row in snapshot.economics_result.price_rows if row.stage_or_layer == "tax"])
+    assert len(adjustments_table.data) == len(
+        [row for row in snapshot.economics_result.price_rows if row.stage_or_layer in {"commercial", "sale"}]
+    )
 
 
 def test_render_economics_preview_reports_no_scan_after_scan_invalidating_change(monkeypatch, tmp_path) -> None:
@@ -1123,7 +1381,7 @@ def test_render_economics_preview_reports_no_scan_after_scan_invalidating_change
     assert active is not None
     assert active.dirty is True
 
-    children = render_economics_preview(payload, None, None, "es")
+    children = _render_preview_call(payload, lang="es")
 
     status = _find_component(children, "economics-preview-status")
     summary_cards = _find_component(children, "economics-summary-cards")
@@ -1138,7 +1396,7 @@ def test_render_economics_preview_reports_no_scan_after_scan_invalidating_change
 def test_render_economics_preview_reports_no_scan_when_scenario_has_no_scan(monkeypatch, tmp_path) -> None:
     _client_state, _state, _active, payload = _admin_payload(monkeypatch, tmp_path)
 
-    children = render_economics_preview(payload, None, None, "es")
+    children = _render_preview_call(payload, lang="es")
 
     status = _find_component(children, "economics-preview-status")
     summary_cards = _find_component(children, "economics-summary-cards")
@@ -1160,7 +1418,7 @@ def test_render_economics_preview_reports_candidate_missing(monkeypatch, tmp_pat
     state = replace(state, scenarios=(broken_active,), active_scenario_id=broken_active.scenario_id)
     payload = commit_client_session(client_state, state).to_payload()
 
-    children = render_economics_preview(payload, None, None, "es")
+    children = _render_preview_call(payload, lang="es")
 
     status = _find_component(children, "economics-preview-status")
     assert status is not None
@@ -1180,7 +1438,7 @@ def test_apply_admin_edits_preserves_scan_for_economics_only_changes_and_preview
     economics_cost_rows[0] = {**economics_cost_rows[0], "amount_COP": 456_000.0}
     economics_price_rows[0] = {**economics_price_rows[0], "value": 14}
 
-    next_payload, status = apply_admin_edits(
+    next_payload, status = _apply_admin_edits_call(
         1,
         payload,
         "Proyecto Economics Preview",
@@ -1206,7 +1464,7 @@ def test_apply_admin_edits_preserves_scan_for_economics_only_changes_and_preview
     assert updated_active.dirty is False
     assert "pendientes hasta volver a ejecutar" not in status
 
-    preview_children = render_economics_preview(next_payload, None, None, "es")
+    preview_children = _render_preview_call(next_payload, lang="es")
     preview_status = _find_component(preview_children, "economics-preview-status")
     preview_summary = _find_component(preview_children, "economics-summary-cards")
 
@@ -1241,7 +1499,11 @@ def test_render_economics_preview_shows_localized_placeholders_from_ui_not_engin
                 technical_subtotal_COP=0.0,
                 installed_subtotal_COP=0.0,
                 cost_total_COP=0.0,
+                taxable_base_COP=0.0,
+                tax_total_COP=0.0,
+                subtotal_with_tax_COP=0.0,
                 commercial_adjustment_COP=0.0,
+                post_tax_adjustments_total_COP=0.0,
                 commercial_offer_COP=0.0,
                 sale_adjustment_COP=0.0,
                 final_price_COP=0.0,
@@ -1251,7 +1513,7 @@ def test_render_economics_preview_shows_localized_placeholders_from_ui_not_engin
 
     monkeypatch.setattr(admin_callbacks, "resolve_economics_preview", _fake_preview)
 
-    children = render_economics_preview(payload, None, None, "es")
+    children = _render_preview_call(payload, lang="es")
 
     candidate_source = _find_component(children, "economics-preview-quantity-candidate-source")
     panel_name = _find_component(children, "economics-preview-quantity-panel-name")
@@ -1300,7 +1562,13 @@ def test_selected_hardware_none_keeps_line_unavailable_without_fallback(monkeypa
         "amount_COP": 999_999.0,
     }
 
-    children = render_economics_preview(payload, cost_rows, price_rows, "es")
+    children = _render_preview_call(
+        payload,
+        economics_cost_rows=cost_rows,
+        economics_price_rows=price_rows,
+        economics_price_rows_are_editor=True,
+        lang="es",
+    )
 
     warnings_shell = _find_component(children, "economics-preview-warnings-shell")
     technical_table = _find_component(children, "economics-breakdown-technical-table")
@@ -1330,7 +1598,7 @@ def test_preview_selected_battery_hardware_uses_one_battery_not_energy_kwh(monke
     )
     payload = commit_client_session(client_state, state).to_payload()
 
-    children = render_economics_preview(payload, None, None, "es")
+    children = _render_preview_call(payload, lang="es")
     technical_table = _find_component(children, "economics-breakdown-technical-table")
 
     assert technical_table is not None
@@ -1346,7 +1614,13 @@ def test_preview_live_hardware_warnings_do_not_persist_before_apply(monkeypatch,
     price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
     cost_rows[0] = {**cost_rows[0], "source_mode": "Hardware seleccionado", "hardware_binding": "Sin vínculo"}
 
-    children = render_economics_preview(payload, cost_rows, price_rows, "es")
+    children = _render_preview_call(
+        payload,
+        economics_cost_rows=cost_rows,
+        economics_price_rows=price_rows,
+        economics_price_rows_are_editor=True,
+        lang="es",
+    )
     warnings_shell = _find_component(children, "economics-preview-warnings-shell")
 
     assert warnings_shell is not None
@@ -1374,7 +1648,7 @@ def test_preview_live_battery_energy_warning_does_not_persist_before_apply(monke
     )
     payload = commit_client_session(client_state, state).to_payload()
 
-    children = render_economics_preview(payload, None, None, "es")
+    children = _render_preview_call(payload, lang="es")
     warnings_shell = _find_component(children, "economics-preview-warnings-shell")
 
     assert warnings_shell is not None
@@ -1406,7 +1680,7 @@ def test_apply_persists_hardware_resolution_warning_when_scan_is_preserved(monke
         "amount_COP": 456_000.0,
     }
 
-    next_payload, status = apply_admin_edits(
+    next_payload, status = _apply_admin_edits_call(
         1,
         payload,
         "Proyecto Economics Hardware Warning",
@@ -1420,6 +1694,7 @@ def test_apply_persists_hardware_resolution_warning_when_scan_is_preserved(monke
         economics_cost_rows,
         economics_price_rows,
         "es",
+        economics_price_rows_are_editor=True,
     )
 
     _, updated_state = resolve_client_session(next_payload, language="es")
@@ -1432,7 +1707,7 @@ def test_apply_persists_hardware_resolution_warning_when_scan_is_preserved(monke
     persisted_messages = [issue.message for issue in updated_active.config_bundle.issues if issue.field == "economics_cost_items"]
     assert "Economics_Cost_Items fila 1: 'selected_hardware' requiere un 'hardware_binding' distinto de 'none'." in persisted_messages
 
-    preview_children = render_economics_preview(next_payload, None, None, "es")
+    preview_children = _render_preview_call(next_payload, lang="es")
     warnings_shell = _find_component(preview_children, "economics-preview-warnings-shell")
     assert warnings_shell is not None
     assert "requiere un vínculo hardware" in str(warnings_shell.children)
@@ -1460,7 +1735,7 @@ def test_apply_persists_battery_energy_warning_when_scan_is_preserved(monkeypatc
     economics_price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
     economics_cost_rows[0] = {**economics_cost_rows[0], "notes": "refresh warning persistence"}
 
-    next_payload, status = apply_admin_edits(
+    next_payload, status = _apply_admin_edits_call(
         1,
         payload,
         "Proyecto Economics Battery Energy Warning",
@@ -1474,6 +1749,7 @@ def test_apply_persists_battery_energy_warning_when_scan_is_preserved(monkeypatc
         economics_cost_rows,
         economics_price_rows,
         "es",
+        economics_price_rows_are_editor=True,
     )
 
     _, updated_state = resolve_client_session(next_payload, language="es")
@@ -1489,7 +1765,7 @@ def test_apply_persists_battery_energy_warning_when_scan_is_preserved(monkeypatc
         in persisted_messages
     )
 
-    preview_children = render_economics_preview(next_payload, None, None, "es")
+    preview_children = _render_preview_call(next_payload, lang="es")
     warnings_shell = _find_component(preview_children, "economics-preview-warnings-shell")
     assert warnings_shell is not None
     assert "no una energía válida" in str(warnings_shell.children)
@@ -1841,12 +2117,12 @@ def test_new_bridge_replaces_previous_provenance_snapshot(monkeypatch, tmp_path)
     assert active is not None
 
     first_price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
-    first_price_rows[0] = {**first_price_rows[0], "value": 5}
+    first_price_rows[1] = {**first_price_rows[1], "value": 5}
     first_payload, _ = apply_economics_runtime_price_bridge(
         1,
         payload,
         "Proyecto Bridge Replace",
-        *_bridge_args(active, economics_price_rows=first_price_rows),
+        *_bridge_args(active, economics_price_rows=first_price_rows, economics_price_rows_are_editor=True),
     )
     first_client, first_state = resolve_client_session(first_payload, language="es")
     first_active = first_state.get_scenario()
@@ -1859,12 +2135,12 @@ def test_new_bridge_replaces_previous_provenance_snapshot(monkeypatch, tmp_path)
     assert rerun_active is not None and rerun_active.scan_result is not None
 
     second_price_rows = economics_price_items_rows_to_editor(rerun_active.config_bundle.economics_price_items_table, lang="es")
-    second_price_rows[0] = {**second_price_rows[0], "value": 25}
+    second_price_rows[1] = {**second_price_rows[1], "value": 25}
     second_payload, _ = apply_economics_runtime_price_bridge(
         2,
         rerun_payload,
         "Proyecto Bridge Replace",
-        *_bridge_args(rerun_active, economics_price_rows=second_price_rows),
+        *_bridge_args(rerun_active, economics_price_rows=second_price_rows, economics_price_rows_are_editor=True),
     )
     _, second_state = resolve_client_session(second_payload, language="es")
     second_active = second_state.get_scenario()
@@ -1884,7 +2160,7 @@ def test_manual_bridge_persists_normalized_economics_tables_and_signature(monkey
         1,
         payload,
         "",
-        *_bridge_args(active, economics_price_rows=economics_price_rows),
+        *_bridge_args(active, economics_price_rows=economics_price_rows, economics_price_rows_are_editor=True),
     )
     _, bridged_state = resolve_client_session(bridged_payload, language="es")
     bridged_active = bridged_state.get_scenario()
@@ -1910,7 +2186,7 @@ def test_editing_economics_without_bridge_does_not_change_legacy_runtime_fields(
     economics_price_rows = economics_price_items_rows_to_editor(active.config_bundle.economics_price_items_table, lang="es")
     economics_price_rows[0] = {**economics_price_rows[0], "value": 22}
 
-    _meta = sync_admin_draft(
+    _meta = _sync_admin_draft_call(
         payload,
         [],
         [],
@@ -1921,6 +2197,7 @@ def test_editing_economics_without_bridge_does_not_change_legacy_runtime_fields(
         active.config_bundle.sun_profile_table.to_dict("records"),
         active.config_bundle.economics_cost_items_table.to_dict("records"),
         economics_price_rows,
+        economics_price_rows_are_editor=True,
     )
 
     _, current_state = resolve_client_session(payload, language="es")

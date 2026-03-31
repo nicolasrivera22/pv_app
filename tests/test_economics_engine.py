@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from services import create_scenario_record, load_example_config, resolve_deterministic_scan
+from services.economics_tables import economics_price_items_rows_from_editor, normalize_economics_price_items_with_issues
 from services.economics_engine import (
     PREVIEW_STATE_CANDIDATE_MISSING,
     PREVIEW_STATE_READY,
@@ -54,6 +55,7 @@ def test_calculate_economics_result_builds_cost_and_price_chain() -> None:
         {"stage": "installed", "name": "Engineering", "basis": "fixed_project", "amount_COP": 5_000.0, "enabled": True, "notes": ""},
     ]
     price_rows = [
+        {"layer": "tax", "name": "IVA", "method": "tax_pct", "value": 0.19, "enabled": True, "notes": ""},
         {"layer": "commercial", "name": "Margin", "method": "markup_pct", "value": 0.10, "enabled": True, "notes": ""},
         {"layer": "commercial", "name": "Offer fee", "method": "fixed_project", "value": 500.0, "enabled": True, "notes": ""},
         {"layer": "sale", "name": "Final adder", "method": "per_kwp", "value": 10.0, "enabled": True, "notes": ""},
@@ -68,17 +70,121 @@ def test_calculate_economics_result_builds_cost_and_price_chain() -> None:
     assert result.technical_subtotal_COP == pytest.approx(4_000.0)
     assert result.installed_subtotal_COP == pytest.approx(8_000.0)
     assert result.cost_total_COP == pytest.approx(12_000.0)
-    assert result.commercial_adjustment_COP == pytest.approx(1_700.0)
-    assert result.commercial_offer_COP == pytest.approx(13_700.0)
+    assert result.taxable_base_COP == pytest.approx(12_000.0)
+    assert result.tax_total_COP == pytest.approx(2_280.0)
+    assert result.subtotal_with_tax_COP == pytest.approx(14_280.0)
+    assert result.commercial_adjustment_COP == pytest.approx(1_928.0)
+    assert result.post_tax_adjustments_total_COP == pytest.approx(2_028.0)
+    assert result.commercial_offer_COP == pytest.approx(16_208.0)
     assert result.sale_adjustment_COP == pytest.approx(100.0)
-    assert result.final_price_COP == pytest.approx(13_800.0)
-    assert result.final_price_per_kwp_COP == pytest.approx(1_380.0)
+    assert result.final_price_COP == pytest.approx(16_308.0)
+    assert result.final_price_per_kwp_COP == pytest.approx(1_630.8)
 
     assert [row.source_row for row in result.cost_rows] == [1, 2, 3, 4]
-    assert [row.source_row for row in result.price_rows] == [1, 2, 3]
+    assert [row.source_row for row in result.price_rows] == [1, 2, 3, 4]
     assert result.cost_rows[0].line_amount_COP == pytest.approx(2_000.0)
     assert result.price_rows[0].base_amount_COP == pytest.approx(12_000.0)
-    assert result.price_rows[0].line_amount_COP == pytest.approx(1_200.0)
+    assert result.price_rows[0].line_amount_COP == pytest.approx(2_280.0)
+    assert result.price_rows[1].base_amount_COP == pytest.approx(14_280.0)
+    assert result.price_rows[1].line_amount_COP == pytest.approx(1_428.0)
+
+
+def test_calculate_economics_result_adds_multiple_tax_rows_over_same_taxable_base() -> None:
+    quantities = EconomicsQuantities(
+        candidate_key="12.000::",
+        kWp=10.0,
+        panel_count=20,
+        inverter_count=1,
+        battery_kwh=0.0,
+        battery_name="",
+        inverter_name="INV-A",
+        panel_name="PANEL-A",
+    )
+
+    result = calculate_economics_result(
+        economics_cost_items=[
+            {"stage": "technical", "name": "Panel hardware", "basis": "per_panel", "amount_COP": 100.0, "enabled": True, "notes": ""},
+        ],
+        economics_price_items=[
+            {"layer": "tax", "name": "IVA", "method": "tax_pct", "value": 0.19, "enabled": True, "notes": ""},
+            {"layer": "tax", "name": "Municipal", "method": "tax_pct", "value": 0.01, "enabled": True, "notes": ""},
+        ],
+        quantities=quantities,
+    )
+
+    assert result.cost_total_COP == pytest.approx(2_000.0)
+    assert result.taxable_base_COP == pytest.approx(2_000.0)
+    assert result.tax_total_COP == pytest.approx(400.0)
+    assert result.subtotal_with_tax_COP == pytest.approx(2_400.0)
+    assert [row.line_amount_COP for row in result.price_rows] == pytest.approx([380.0, 20.0])
+    assert all(row.base_amount_COP == pytest.approx(2_000.0) for row in result.price_rows)
+
+
+def test_calculate_economics_result_uses_canonical_layer_order_not_csv_row_order() -> None:
+    quantities = EconomicsQuantities(
+        candidate_key="12.000::",
+        kWp=10.0,
+        panel_count=20,
+        inverter_count=1,
+        battery_kwh=0.0,
+        battery_name="",
+        inverter_name="INV-A",
+        panel_name="PANEL-A",
+    )
+    price_rows = [
+        {"layer": "sale", "name": "Closing", "method": "fixed_project", "value": 50.0, "enabled": True, "notes": ""},
+        {"layer": "commercial", "name": "Margin", "method": "markup_pct", "value": 0.10, "enabled": True, "notes": ""},
+        {"layer": "tax", "name": "IVA", "method": "tax_pct", "value": 0.19, "enabled": True, "notes": ""},
+    ]
+
+    result = calculate_economics_result(
+        economics_cost_items=[
+            {"stage": "technical", "name": "Panel hardware", "basis": "per_panel", "amount_COP": 100.0, "enabled": True, "notes": ""},
+        ],
+        economics_price_items=price_rows,
+        quantities=quantities,
+    )
+
+    assert [row.stage_or_layer for row in result.price_rows] == ["tax", "commercial", "sale"]
+    assert [row.source_row for row in result.price_rows] == [3, 2, 1]
+    assert result.tax_total_COP == pytest.approx(380.0)
+    assert result.subtotal_with_tax_COP == pytest.approx(2_380.0)
+    assert result.commercial_adjustment_COP == pytest.approx(238.0)
+    assert result.final_price_COP == pytest.approx(2_668.0)
+
+
+def test_tax_percent_editor_values_round_trip_as_human_percentages() -> None:
+    rows = [
+        {
+            "layer": "Impuestos",
+            "name": "IVA",
+            "method": "Impuesto porcentual",
+            "value": 1,
+            "enabled": True,
+            "notes": "",
+        }
+    ]
+
+    normalized = economics_price_items_rows_from_editor(rows)
+
+    assert normalized[0]["layer"] == "tax"
+    assert normalized[0]["method"] == "tax_pct"
+    assert float(normalized[0]["value"]) == pytest.approx(0.01)
+
+
+def test_invalid_tax_layer_method_combinations_are_disabled_during_normalization() -> None:
+    frame, issues = normalize_economics_price_items_with_issues(
+        [
+            {"layer": "tax", "name": "IVA fijo", "method": "fixed_project", "value": 1000.0, "enabled": True, "notes": ""},
+            {"layer": "commercial", "name": "Bad tax", "method": "tax_pct", "value": 0.19, "enabled": True, "notes": ""},
+        ]
+    )
+
+    assert len(frame) == 2
+    assert bool(frame.iloc[0]["enabled"]) is False
+    assert bool(frame.iloc[1]["enabled"]) is False
+    assert "combinación inválida" in issues[0]
+    assert "combinación inválida" in issues[1]
 
 
 def test_calculate_economics_result_uses_selected_hardware_rate_without_overwriting_manual_amount() -> None:

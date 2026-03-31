@@ -60,7 +60,11 @@ class EconomicsResult:
     technical_subtotal_COP: float
     installed_subtotal_COP: float
     cost_total_COP: float
+    taxable_base_COP: float
+    tax_total_COP: float
+    subtotal_with_tax_COP: float
     commercial_adjustment_COP: float
+    post_tax_adjustments_total_COP: float
     commercial_offer_COP: float
     sale_adjustment_COP: float
     final_price_COP: float
@@ -324,7 +328,7 @@ def _cost_multiplier(
 
 
 def _price_line_amount(method: str, value: float, *, quantities: EconomicsQuantities, layer_base: float) -> tuple[float, float | None]:
-    if method == "markup_pct":
+    if method in {"markup_pct", "tax_pct"}:
         return float(value) * float(layer_base), float(layer_base)
     if method == "fixed_project":
         return float(value), None
@@ -392,17 +396,30 @@ def calculate_economics_result(
 
     cost_total = technical_subtotal + installed_subtotal
     price_rows: list[EconomicsBreakdownRow] = []
+    taxable_base = cost_total
+    tax_total = 0.0
+    subtotal_with_tax = cost_total
     commercial_adjustment = 0.0
-    commercial_offer = cost_total
+    commercial_offer = subtotal_with_tax
     sale_adjustment = 0.0
-    for source_row, row in enumerate(price_frame.to_dict("records"), start=1):
+    layer_order = {"tax": 0, "commercial": 1, "sale": 2}
+    ordered_price_records = sorted(
+        enumerate(price_frame.to_dict("records"), start=1),
+        key=lambda item: (layer_order.get(str(item[1].get("layer") or "").strip(), 999), item[0]),
+    )
+    for source_row, row in ordered_price_records:
         if not bool(row.get("enabled")):
             continue
         layer = str(row.get("layer") or "").strip()
         method = str(row.get("method") or "").strip()
         value = float(row.get("value", 0.0) or 0.0)
-        layer_base = cost_total if layer == "commercial" else commercial_offer
-        if method == "markup_pct":
+        if layer == "tax":
+            layer_base = taxable_base
+        elif layer == "commercial":
+            layer_base = subtotal_with_tax
+        else:
+            layer_base = commercial_offer
+        if method in {"markup_pct", "tax_pct"}:
             multiplier = float(layer_base)
         elif method == "per_kwp":
             multiplier = float(quantities.kWp)
@@ -414,7 +431,11 @@ def calculate_economics_result(
             quantities=quantities,
             layer_base=layer_base,
         )
-        if layer == "commercial":
+        if layer == "tax":
+            tax_total += line_amount
+            subtotal_with_tax = cost_total + tax_total
+            commercial_offer = subtotal_with_tax + commercial_adjustment
+        elif layer == "commercial":
             commercial_adjustment += line_amount
         elif layer == "sale":
             sale_adjustment += line_amount
@@ -437,8 +458,9 @@ def calculate_economics_result(
             )
         )
         if layer == "commercial":
-            commercial_offer = cost_total + commercial_adjustment
+            commercial_offer = subtotal_with_tax + commercial_adjustment
 
+    post_tax_adjustments_total = commercial_adjustment + sale_adjustment
     final_price = commercial_offer + sale_adjustment
     final_price_per_kwp = (final_price / quantities.kWp) if quantities.kWp > 0 else None
     return EconomicsResult(
@@ -448,7 +470,11 @@ def calculate_economics_result(
         technical_subtotal_COP=float(technical_subtotal),
         installed_subtotal_COP=float(installed_subtotal),
         cost_total_COP=float(cost_total),
+        taxable_base_COP=float(taxable_base),
+        tax_total_COP=float(tax_total),
+        subtotal_with_tax_COP=float(subtotal_with_tax),
         commercial_adjustment_COP=float(commercial_adjustment),
+        post_tax_adjustments_total_COP=float(post_tax_adjustments_total),
         commercial_offer_COP=float(commercial_offer),
         sale_adjustment_COP=float(sale_adjustment),
         final_price_COP=float(final_price),

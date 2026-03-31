@@ -13,10 +13,11 @@ VALID_ECONOMICS_COST_STAGES = {"technical", "installed"}
 VALID_ECONOMICS_COST_BASES = {"fixed_project", "per_kwp", "per_panel", "per_inverter", "per_battery_kwh"}
 VALID_ECONOMICS_COST_SOURCE_MODES = {"manual", "selected_hardware"}
 VALID_ECONOMICS_COST_HARDWARE_BINDINGS = {"none", "panel", "inverter", "battery"}
-VALID_ECONOMICS_PRICE_LAYERS = {"commercial", "sale"}
-VALID_ECONOMICS_PRICE_METHODS = {"markup_pct", "fixed_project", "per_kwp"}
-ECONOMICS_PRICE_PERCENT_METHODS = {"markup_pct"}
+VALID_ECONOMICS_PRICE_LAYERS = {"tax", "commercial", "sale"}
+VALID_ECONOMICS_PRICE_METHODS = {"tax_pct", "markup_pct", "fixed_project", "per_kwp"}
+ECONOMICS_PRICE_PERCENT_METHODS = {"tax_pct", "markup_pct"}
 RICH_MIGRATION_NOTE_PREFIX = "Migrated from prior economics schema"
+PRICE_LAYER_SORT_ORDER = {"tax": 0, "commercial": 1, "sale": 2}
 
 _ECONOMICS_UI_LABELS: dict[str, dict[str, dict[str, str]]] = {
     "stage": {
@@ -41,10 +42,12 @@ _ECONOMICS_UI_LABELS: dict[str, dict[str, dict[str, str]]] = {
         "battery": {"es": "Batería", "en": "Battery"},
     },
     "layer": {
+        "tax": {"es": "Impuestos", "en": "Taxes"},
         "commercial": {"es": "Oferta comercial", "en": "Commercial offer"},
         "sale": {"es": "Ajuste final de venta", "en": "Final sale adjustment"},
     },
     "method": {
+        "tax_pct": {"es": "Impuesto porcentual", "en": "Percentage tax"},
         "markup_pct": {"es": "Ajuste porcentual", "en": "Percentage adjustment"},
         "fixed_project": {"es": "Monto fijo por proyecto", "en": "Fixed project amount"},
         "per_kwp": {"es": "Monto por kWp", "en": "Amount per kWp"},
@@ -72,12 +75,14 @@ _RICH_COST_BASIS_MAP = {
     "per_battery_kwh": "per_battery_kwh",
 }
 _RICH_PRICE_METHOD_MAP = {
+    "tax_pct": "tax_pct",
     "markup_pct": "markup_pct",
     "fixed_project": "fixed_project",
     "per_kwp": "per_kwp",
 }
 _TECHNICAL_COST_NAMES = {"Panel hardware", "Inverter hardware", "Battery hardware"}
 _COMMERCIAL_PRICE_NAMES = {"Contingencia", "Margen comercial"}
+_TAX_PRICE_NAMES = {"taxes", "impuestos", "iva", "tax"}
 
 
 def _editor_lang(lang: str | None) -> str:
@@ -251,6 +256,7 @@ def default_economics_cost_items_rows() -> list[dict[str, Any]]:
 
 def default_economics_price_items_rows() -> list[dict[str, Any]]:
     return [
+        {"layer": "tax", "name": "IVA", "method": "tax_pct", "value": 0.0, "enabled": False, "notes": ""},
         {"layer": "commercial", "name": "Contingencia", "method": "markup_pct", "value": 0.0, "enabled": True, "notes": ""},
         {"layer": "commercial", "name": "Margen comercial", "method": "markup_pct", "value": 0.0, "enabled": True, "notes": ""},
         {"layer": "sale", "name": "Ajuste final", "method": "fixed_project", "value": 0.0, "enabled": False, "notes": ""},
@@ -342,6 +348,8 @@ def _fallback_cost_stage(name: str) -> str:
 
 
 def _fallback_price_layer(name: str) -> str:
+    if _strip_text(name).casefold() in _TAX_PRICE_NAMES:
+        return "tax"
     return "commercial" if _strip_text(name) in _COMMERCIAL_PRICE_NAMES else "sale"
 
 
@@ -394,6 +402,13 @@ def _recovered_mode_warning(table_name: str, row_number: int, field_name: str, f
 
 def _selected_hardware_binding_warning(table_name: str, row_number: int) -> str:
     return f"{table_name} fila {row_number}: 'selected_hardware' requiere un 'hardware_binding' distinto de 'none'."
+
+
+def _invalid_layer_method_combo_warning(table_name: str, row_number: int, layer: str, method: str) -> str:
+    return (
+        f"{table_name} fila {row_number}: se desactivó por combinación inválida entre "
+        f"'layer'={layer!r} y 'method'={method!r}."
+    )
 
 
 def _normalize_cost_row(record: dict[str, Any], *, row_number: int) -> tuple[dict[str, Any] | None, list[str]]:
@@ -499,8 +514,13 @@ def _normalize_price_row(
     raw_enabled = record.get("enabled")
     enabled, enabled_invalid = _parse_enabled(record.get("enabled"))
 
-    layer = raw_layer or _RICH_PRICE_LAYER_MAP.get(raw_stage, raw_stage)
     method = raw_method or _RICH_PRICE_METHOD_MAP.get(raw_calculation_method, raw_calculation_method)
+    if raw_method:
+        layer = raw_layer or _RICH_PRICE_LAYER_MAP.get(raw_stage, raw_stage)
+    elif method == "tax_pct":
+        layer = "tax"
+    else:
+        layer = raw_layer or _RICH_PRICE_LAYER_MAP.get(raw_stage, raw_stage)
     numeric_value = _coerce_numeric(raw_value, allow_percent_text=method in ECONOMICS_PRICE_PERCENT_METHODS)
     if (
         numeric_value is not None
@@ -540,6 +560,15 @@ def _normalize_price_row(
         issues.append(_invalid_value_warning("Economics_Price_Items", row_number, "value"))
         notes = _append_note(notes, _recovery_note(field="value", raw_value=raw_value))
         numeric_value = 0.0
+        enabled = False
+
+    layer_method_invalid = (
+        (layer == "tax" and method != "tax_pct")
+        or (layer in {"commercial", "sale"} and method == "tax_pct")
+    )
+    if layer_method_invalid:
+        issues.append(_invalid_layer_method_combo_warning("Economics_Price_Items", row_number, layer, method))
+        notes = _append_note(notes, _recovery_note(field="layer/method", raw_value=f"{layer}/{method}"))
         enabled = False
 
     return {
@@ -636,6 +665,17 @@ def normalize_economics_price_items_frame(frame: pd.DataFrame | list[dict[str, A
     return normalized
 
 
+def _sort_price_editor_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    indexed_rows = list(enumerate(rows))
+    indexed_rows.sort(
+        key=lambda item: (
+            PRICE_LAYER_SORT_ORDER.get(str(item[1].get("layer") or "").strip(), 999),
+            item[0],
+        )
+    )
+    return [dict(row) for _, row in indexed_rows]
+
+
 def _signature_json_default(value: Any) -> Any:
     if hasattr(value, "item"):
         return value.item()
@@ -697,6 +737,22 @@ def economics_price_items_rows_to_editor(frame: pd.DataFrame | list[dict[str, An
     return editor_rows
 
 
+def economics_price_items_rows_to_section_editor(
+    frame: pd.DataFrame | list[dict[str, Any]] | None,
+    *,
+    layers: tuple[str, ...],
+    lang: str = "es",
+) -> list[dict[str, Any]]:
+    normalized = normalize_economics_price_items_frame(frame)
+    if normalized.empty:
+        return []
+    layer_values = {str(layer).strip() for layer in layers}
+    filtered = normalized.loc[normalized["layer"].astype(str).isin(layer_values)].copy()
+    if filtered.empty:
+        return []
+    return economics_price_items_rows_to_editor(filtered, lang=lang)
+
+
 def economics_cost_items_rows_from_editor(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     return normalize_economics_cost_items_frame(
         _map_editor_raw_values(rows or [], fields=("stage", "basis", "source_mode", "hardware_binding"))
@@ -709,3 +765,12 @@ def economics_price_items_rows_from_editor(rows: list[dict[str, Any]] | None) ->
         percent_values_are_human=True,
     )
     return normalized.to_dict("records")
+
+
+def economics_price_items_rows_from_split_editors(
+    tax_rows: list[dict[str, Any]] | None,
+    adjustment_rows: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    normalized_tax_rows = economics_price_items_rows_from_editor(tax_rows)
+    normalized_adjustment_rows = economics_price_items_rows_from_editor(adjustment_rows)
+    return _sort_price_editor_records([*normalized_tax_rows, *normalized_adjustment_rows])
