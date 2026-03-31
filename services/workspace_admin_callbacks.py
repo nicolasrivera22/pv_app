@@ -423,9 +423,13 @@ def _admin_preview_candidate_meta(active, candidate_key: str | None, *, lang: st
         return ""
     detail = active.scan_result.candidate_details[candidate_key]
     battery_name = str(detail.get("battery_name") or "").strip() or tr("common.no_battery", lang)
+    inverter_name = str((((detail.get("inv_sel") or {}).get("inverter") or {}).get("name")) or "").strip()
+    panel_name = str(detail.get("panel_name") or active.config_bundle.config.get("panel_name") or "").strip()
+    if panel_name.startswith("__"):
+        panel_name = ""
     return html.Div(
-        id="admin-preview-candidate-meta-cards",
-        className="scan-summary-strip",
+        id="admin-preview-candidate-identity",
+        className="economics-candidate-identity-strip",
         children=[
             _economics_quantity_card(
                 tr("workspace.admin.economics.preview.selector.meta.candidate", lang),
@@ -441,6 +445,16 @@ def _admin_preview_candidate_meta(active, candidate_key: str | None, *, lang: st
                 tr("workspace.admin.economics.preview.selector.meta.battery", lang),
                 battery_name,
                 component_id="admin-preview-candidate-meta-battery",
+            ),
+            _economics_quantity_card(
+                tr("workspace.admin.economics.preview.quantity.panel_name", lang),
+                _economics_equipment_name(panel_name, kind="panel", lang=lang),
+                component_id="admin-preview-candidate-meta-panel",
+            ),
+            _economics_quantity_card(
+                tr("workspace.admin.economics.preview.quantity.inverter_name", lang),
+                _economics_equipment_name(inverter_name, kind="inverter", lang=lang),
+                component_id="admin-preview-candidate-meta-inverter",
             ),
         ],
     )
@@ -532,12 +546,33 @@ def _format_percent(value: float | None) -> str:
     return f"{formatted}%"
 
 
-def _economics_summary_card(label: str, value: str, *, emphasized: bool = False) -> html.Div:
+def _economics_summary_card(
+    label: str,
+    value: str,
+    *,
+    component_id: str | None = None,
+    emphasized: bool = False,
+    secondary_label: str | None = None,
+    secondary_value: str | None = None,
+) -> html.Div:
+    secondary_children: list[object] = []
+    if secondary_label and secondary_value:
+        secondary_children.append(
+            html.Div(
+                className="economics-summary-secondary",
+                children=[
+                    html.Span(secondary_label, className="economics-summary-secondary-label"),
+                    html.Strong(secondary_value, className="economics-summary-secondary-value"),
+                ],
+            )
+        )
     return html.Div(
+        id=component_id,
         className="scan-summary-card economics-summary-card" + (" economics-summary-card-key" if emphasized else ""),
         children=[
             html.Span(label, className="scan-summary-label"),
             html.Span(value, className="scan-summary-value"),
+            *secondary_children,
         ],
     )
 
@@ -628,22 +663,28 @@ def _economics_breakdown_table(
     rows: list[dict[str, object]],
     *,
     lang: str,
-    include_base_amount: bool = True,
+    advanced: bool = False,
+    show_stage: bool = False,
 ):
-    column_keys = [
-        "name",
-        "rule",
-        "value_source",
-        "hardware_binding",
-        "hardware_name",
-        "calculation",
-        "multiplier",
-        "unit_rate_COP",
-        "line_amount_COP",
-        "notes",
-    ]
-    if include_base_amount:
-        column_keys.insert(column_keys.index("line_amount_COP"), "base_amount_COP")
+    column_keys = ["name", "rule", "calculation", "line_amount_COP"]
+    if show_stage:
+        column_keys.insert(0, "stage_or_layer")
+    if advanced:
+        column_keys = [
+            "stage_or_layer",
+            "name",
+            "rule",
+            "value_source",
+            "hardware_binding",
+            "hardware_name",
+            "calculation",
+            "multiplier",
+            "unit_rate_COP",
+            "line_amount_COP",
+            "notes",
+        ]
+        if any(row.get("base_amount_COP") is not None for row in rows):
+            column_keys.insert(column_keys.index("line_amount_COP"), "base_amount_COP")
     columns, tooltip_header = build_table_display_columns("economics_breakdown", column_keys, lang)
     return dash_table.DataTable(
         id=table_id,
@@ -663,13 +704,20 @@ def _economics_breakdown_table(
             "whiteSpace": "normal",
             "height": "auto",
             "minWidth": 110,
-            "maxWidth": 280,
+            "maxWidth": 240 if not advanced else 280,
         },
         style_header={
             "backgroundColor": "var(--color-primary-soft)",
             "color": "var(--color-text-primary)",
             "fontWeight": "bold",
         },
+        style_cell_conditional=[
+            {"if": {"column_id": "source_row"}, "textAlign": "right"},
+            {"if": {"column_id": "multiplier"}, "textAlign": "right"},
+            {"if": {"column_id": "unit_rate_COP"}, "textAlign": "right"},
+            {"if": {"column_id": "base_amount_COP"}, "textAlign": "right"},
+            {"if": {"column_id": "line_amount_COP"}, "textAlign": "right"},
+        ],
         tooltip_delay=0,
         tooltip_duration=None,
     )
@@ -682,11 +730,19 @@ def _economics_preview_state_block(preview: EconomicsPreviewResult, *, lang: str
     body = tr(preview.message_key or "workspace.admin.economics.preview.state.no_scan", lang)
     return html.Div(
         id="economics-preview-state-shell",
-        className=f"subpanel economics-preview-state-shell economics-preview-state-{state_key}",
+        className=(
+            f"subpanel economics-preview-state-shell economics-preview-status-strip economics-preview-state-{state_key}"
+            + (" economics-preview-state-empty" if preview.result is None else "")
+        ),
         children=[
-            html.H5(title, id="economics-preview-state-title"),
-            html.Div(body, id="economics-preview-status", className="status-line economics-preview-status"),
-            html.P(detail, id="economics-preview-state-detail", className="section-copy"),
+            html.Div(
+                className="economics-preview-state-head",
+                children=[
+                    html.Span(title, id="economics-preview-state-title", className="economics-preview-state-chip"),
+                    html.Div(body, id="economics-preview-status", className="status-line economics-preview-status"),
+                ],
+            ),
+            html.P(detail, id="economics-preview-state-detail", className="section-copy economics-preview-state-detail"),
         ],
     )
 
@@ -806,16 +862,20 @@ def _economics_preview_warning_block(messages: tuple[str, ...], *, lang: str) ->
         return None
     return html.Div(
         id="economics-preview-warnings-shell",
-        className="subpanel economics-preview-warnings-shell",
+        className="subpanel economics-preview-warnings-shell economics-preview-status-strip",
         children=[
-            html.H5(tr("workspace.admin.economics.preview.warnings.title", lang), id="economics-preview-warnings-title"),
-            html.Ul(
+            html.Span(
+                tr("workspace.admin.economics.preview.warnings.title", lang),
+                id="economics-preview-warnings-title",
+                className="economics-preview-state-chip",
+            ),
+            html.Div(
                 id="economics-preview-warnings-list",
-                className="economics-preview-warnings-list",
+                className="economics-preview-warning-chips",
                 children=[
-                    html.Li(
+                    html.Span(
                         localize_validation_message(ValidationIssue("warning", "economics_cost_items", message), lang=lang),
-                        className="status-line economics-preview-warning-item",
+                        className="status-line economics-preview-warning-chip",
                     )
                     for message in messages
                 ],
@@ -916,40 +976,34 @@ def _economics_preview_summary_shell(result, *, lang: str) -> html.Div:
         className="kpi-grid",
         children=[
             _economics_summary_card(
-                tr("workspace.admin.economics.preview.summary.technical", lang),
-                _format_cop(result.technical_subtotal_COP, lang),
-            ),
-            _economics_summary_card(
-                tr("workspace.admin.economics.preview.summary.installed", lang),
-                _format_cop(result.installed_subtotal_COP, lang),
-            ),
-            _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.cost_total", lang),
                 _format_cop(result.cost_total_COP, lang),
+                component_id="economics-summary-card-cost-total",
                 emphasized=True,
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.tax_total", lang),
                 _format_cop(result.tax_total_COP, lang),
+                component_id="economics-summary-card-tax-total",
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.subtotal_with_tax", lang),
                 _format_cop(result.subtotal_with_tax_COP, lang),
+                component_id="economics-summary-card-subtotal-with-tax",
                 emphasized=True,
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
                 _format_cop(result.post_tax_adjustments_total_COP, lang),
+                component_id="economics-summary-card-post-tax-adjustments",
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.final_price", lang),
                 _format_cop(result.final_price_COP, lang),
+                component_id="economics-summary-card-final-price",
                 emphasized=True,
-            ),
-            _economics_summary_card(
-                tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
-                _format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
-                emphasized=True,
+                secondary_label=tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
+                secondary_value=_format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
             ),
         ],
     )
@@ -997,10 +1051,6 @@ def _economics_closing_rows(result, *, lang: str) -> list[dict[str, object]]:
             "metric": tr("workspace.admin.economics.preview.summary.final_price", lang),
             "value": _format_cop(result.final_price_COP, lang),
         },
-        {
-            "metric": tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
-            "value": _format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
-        },
     ]
     return rows
 
@@ -1015,30 +1065,38 @@ def _economics_closing_shell(result, *, lang: str) -> html.Div:
                 children=[html.H5(tr("workspace.admin.economics.preview.closing.title", lang), id="economics-closing-title")],
             ),
             html.P(tr("workspace.admin.economics.preview.closing.copy", lang), id="economics-closing-copy", className="section-copy"),
-            dash_table.DataTable(
-                id="economics-closing-table",
-                data=_economics_closing_rows(result, lang=lang),
-                columns=[
-                    {"name": tr("workspace.admin.economics.preview.closing.metric", lang), "id": "metric"},
-                    {"name": tr("workspace.admin.economics.preview.closing.value", lang), "id": "value"},
+            html.Div(
+                className="economics-table-wrap economics-table-wrap-dense",
+                children=[
+                    dash_table.DataTable(
+                        id="economics-closing-table",
+                        data=_economics_closing_rows(result, lang=lang),
+                        columns=[
+                            {"name": tr("workspace.admin.economics.preview.closing.metric", lang), "id": "metric"},
+                            {"name": tr("workspace.admin.economics.preview.closing.value", lang), "id": "value"},
+                        ],
+                        editable=False,
+                        row_deletable=False,
+                        sort_action="none",
+                        style_table={"overflowX": "auto"},
+                        style_cell={
+                            "padding": "0.45rem 0.55rem",
+                            "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
+                            "fontSize": 12,
+                            "color": "var(--color-text-primary)",
+                            "whiteSpace": "normal",
+                            "height": "auto",
+                        },
+                        style_header={
+                            "backgroundColor": "var(--color-primary-soft)",
+                            "color": "var(--color-text-primary)",
+                            "fontWeight": "bold",
+                        },
+                        style_cell_conditional=[
+                            {"if": {"column_id": "value"}, "textAlign": "right"},
+                        ],
+                    )
                 ],
-                editable=False,
-                row_deletable=False,
-                sort_action="none",
-                style_table={"overflowX": "auto"},
-                style_cell={
-                    "padding": "0.45rem 0.55rem",
-                    "fontFamily": "IBM Plex Sans, Segoe UI, sans-serif",
-                    "fontSize": 12,
-                    "color": "var(--color-text-primary)",
-                    "whiteSpace": "normal",
-                    "height": "auto",
-                },
-                style_header={
-                    "backgroundColor": "var(--color-primary-soft)",
-                    "color": "var(--color-text-primary)",
-                    "fontWeight": "bold",
-                },
             ),
         ],
     )
@@ -1053,18 +1111,25 @@ def _economics_breakdown_group(
     subtotal_value: float | None,
     rows,
     lang: str,
+    advanced: bool = False,
+    show_stage: bool = False,
 ) -> html.Div:
     table_rows = _economics_breakdown_rows(rows, lang=lang)
-    include_base_amount = any(row.get("base_amount_COP") is not None for row in table_rows)
     children = [html.Div(className="section-head", children=[html.H5(title, id=f"{group_id}-title")])]
     children.append(html.P(description, id=f"{group_id}-copy", className="section-copy"))
     if table_rows:
         children.append(
-            _economics_breakdown_table(
-                f"{group_id}-table",
-                table_rows,
-                lang=lang,
-                include_base_amount=include_base_amount,
+            html.Div(
+                className="economics-table-wrap economics-table-wrap-dense",
+                children=[
+                    _economics_breakdown_table(
+                        f"{group_id}-table",
+                        table_rows,
+                        lang=lang,
+                        advanced=advanced,
+                        show_stage=show_stage,
+                    )
+                ],
             )
         )
     else:
@@ -1080,6 +1145,113 @@ def _economics_breakdown_group(
         )
     )
     return html.Div(id=f"{group_id}-shell", className="profile-table-subsection economics-breakdown-group-shell", children=children)
+
+
+def _economics_breakdown_advanced_details(result, *, lang: str) -> html.Details:
+    return html.Details(
+        id="economics-breakdown-advanced-details",
+        className="subpanel economics-breakdown-advanced-details economics-collapsible-section",
+        open=False,
+        children=[
+            html.Summary(
+                id="economics-breakdown-advanced-summary",
+                className="economics-collapsible-summary",
+                children=[
+                    html.Div(
+                        className="economics-collapsible-summary-copy",
+                        children=[
+                            html.H5(tr("workspace.admin.economics.preview.breakdown.advanced.title", lang)),
+                            html.P(
+                                tr("workspace.admin.economics.preview.breakdown.advanced.copy", lang),
+                                className="section-copy",
+                            ),
+                        ],
+                    )
+                ],
+            ),
+            html.Div(
+                id="economics-breakdown-advanced-body",
+                className="economics-collapsible-body economics-breakdown-advanced-body",
+                children=[
+                    _economics_breakdown_group(
+                        group_id="economics-breakdown-advanced-technical",
+                        title=tr("workspace.admin.economics.preview.breakdown.group.technical", lang),
+                        description=tr("workspace.admin.economics.preview.breakdown.group.technical.copy", lang),
+                        subtotal_label=tr("workspace.admin.economics.preview.summary.technical", lang),
+                        subtotal_value=result.technical_subtotal_COP,
+                        rows=[row for row in result.cost_rows if row.stage_or_layer == "technical"],
+                        lang=lang,
+                        advanced=True,
+                        show_stage=True,
+                    ),
+                    _economics_breakdown_group(
+                        group_id="economics-breakdown-advanced-installed",
+                        title=tr("workspace.admin.economics.preview.breakdown.group.installed", lang),
+                        description=tr("workspace.admin.economics.preview.breakdown.group.installed.copy", lang),
+                        subtotal_label=tr("workspace.admin.economics.preview.summary.installed", lang),
+                        subtotal_value=result.installed_subtotal_COP,
+                        rows=[row for row in result.cost_rows if row.stage_or_layer == "installed"],
+                        lang=lang,
+                        advanced=True,
+                        show_stage=True,
+                    ),
+                    _economics_breakdown_group(
+                        group_id="economics-breakdown-advanced-tax",
+                        title=tr("workspace.admin.economics.preview.breakdown.group.tax", lang),
+                        description=tr("workspace.admin.economics.preview.breakdown.group.tax.copy", lang),
+                        subtotal_label=tr("workspace.admin.economics.preview.summary.tax_total", lang),
+                        subtotal_value=result.tax_total_COP,
+                        rows=[row for row in result.price_rows if row.stage_or_layer == "tax"],
+                        lang=lang,
+                        advanced=True,
+                        show_stage=True,
+                    ),
+                    _economics_breakdown_group(
+                        group_id="economics-breakdown-advanced-adjustments",
+                        title=tr("workspace.admin.economics.preview.breakdown.group.adjustments", lang),
+                        description=tr("workspace.admin.economics.preview.breakdown.group.adjustments.copy", lang),
+                        subtotal_label=tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
+                        subtotal_value=result.post_tax_adjustments_total_COP,
+                        rows=[row for row in result.price_rows if row.stage_or_layer in {"commercial", "sale"}],
+                        lang=lang,
+                        advanced=True,
+                        show_stage=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def _economics_preview_advanced_details(preview: EconomicsPreviewResult, result, *, lang: str) -> html.Details:
+    return html.Details(
+        id="economics-preview-advanced-details",
+        className="subpanel economics-preview-advanced-details economics-collapsible-section",
+        open=False,
+        children=[
+            html.Summary(
+                id="economics-preview-advanced-summary",
+                className="economics-collapsible-summary",
+                children=[
+                    html.Div(
+                        className="economics-collapsible-summary-copy",
+                        children=[
+                            html.H5(tr("workspace.admin.economics.preview.advanced.title", lang)),
+                            html.P(tr("workspace.admin.economics.preview.advanced.copy", lang), className="section-copy"),
+                        ],
+                    )
+                ],
+            ),
+            html.Div(
+                id="economics-preview-advanced-body",
+                className="economics-collapsible-body economics-preview-advanced-body",
+                children=[
+                    _economics_preview_quantities(preview, result, lang=lang),
+                    _economics_preview_flow(result, lang=lang),
+                ],
+            ),
+        ],
+    )
 
 
 def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings: tuple[str, ...] = (), lang: str):
@@ -1106,6 +1278,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
                 subtotal_value=result.technical_subtotal_COP,
                 rows=[row for row in result.cost_rows if row.stage_or_layer == "technical"],
                 lang=lang,
+                show_stage=False,
             ),
             _economics_breakdown_group(
                 group_id="economics-breakdown-installed",
@@ -1115,6 +1288,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
                 subtotal_value=result.installed_subtotal_COP,
                 rows=[row for row in result.cost_rows if row.stage_or_layer == "installed"],
                 lang=lang,
+                show_stage=False,
             ),
             _economics_breakdown_group(
                 group_id="economics-breakdown-tax",
@@ -1124,6 +1298,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
                 subtotal_value=result.tax_total_COP,
                 rows=[row for row in result.price_rows if row.stage_or_layer == "tax"],
                 lang=lang,
+                show_stage=False,
             ),
             _economics_breakdown_group(
                 group_id="economics-breakdown-adjustments",
@@ -1133,17 +1308,18 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
                 subtotal_value=result.post_tax_adjustments_total_COP,
                 rows=[row for row in result.price_rows if row.stage_or_layer in {"commercial", "sale"}],
                 lang=lang,
+                show_stage=True,
             ),
+            _economics_breakdown_advanced_details(result, lang=lang),
         ],
     )
     return [
         state_block,
         *( [warnings_block] if warnings_block is not None else [] ),
         _economics_preview_summary_shell(result, lang=lang),
-        _economics_preview_flow(result, lang=lang),
-        breakdown_shell,
         _economics_closing_shell(result, lang=lang),
-        _economics_preview_quantities(preview, result, lang=lang),
+        breakdown_shell,
+        _economics_preview_advanced_details(preview, result, lang=lang),
     ]
 
 
@@ -1590,6 +1766,35 @@ def render_admin_preview_candidate_selector(session_payload, preview_candidate_s
     )
 
 
+def _resolve_admin_economics_preview(
+    active,
+    *,
+    economics_cost_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
+    admin_preview_candidate_state,
+):
+    normalized_cost_rows = (
+        active.config_bundle.economics_cost_items_table.to_dict("records")
+        if economics_cost_rows is None
+        else economics_cost_items_rows_from_editor(economics_cost_rows)
+    )
+    normalized_price_rows = (
+        active.config_bundle.economics_price_items_table.to_dict("records")
+        if economics_tax_rows is None or economics_adjustment_rows is None
+        else economics_price_items_rows_from_split_editors(economics_tax_rows, economics_adjustment_rows)
+    )
+    preview_candidate_key = _requested_admin_preview_candidate_key(active, admin_preview_candidate_state)
+    return resolve_economics_preview(
+        active,
+        economics_cost_items=normalized_cost_rows,
+        economics_price_items=normalized_price_rows,
+        candidate_key=preview_candidate_key,
+        allow_best_fallback=False,
+        candidate_source="selected" if preview_candidate_key is not None else None,
+    )
+
+
 @callback(
     Output("economics-preview-content", "children"),
     Input("scenario-session-store", "data"),
@@ -1616,26 +1821,65 @@ def render_economics_preview(
     active = state.get_scenario()
     if active is None:
         return []
-    normalized_cost_rows = (
-        active.config_bundle.economics_cost_items_table.to_dict("records")
-        if economics_cost_rows is None
-        else economics_cost_items_rows_from_editor(economics_cost_rows)
-    )
-    normalized_price_rows = (
-        active.config_bundle.economics_price_items_table.to_dict("records")
-        if economics_tax_rows is None or economics_adjustment_rows is None
-        else economics_price_items_rows_from_split_editors(economics_tax_rows, economics_adjustment_rows)
-    )
-    preview_candidate_key = _requested_admin_preview_candidate_key(active, admin_preview_candidate_state)
-    preview = resolve_economics_preview(
+    preview = _resolve_admin_economics_preview(
         active,
-        economics_cost_items=normalized_cost_rows,
-        economics_price_items=normalized_price_rows,
-        candidate_key=preview_candidate_key,
-        allow_best_fallback=False,
-        candidate_source="selected" if preview_candidate_key is not None else None,
+        economics_cost_rows=economics_cost_rows,
+        economics_tax_rows=economics_tax_rows,
+        economics_adjustment_rows=economics_adjustment_rows,
+        admin_preview_candidate_state=admin_preview_candidate_state,
     )
     return _render_economics_preview(preview, live_warnings=economics_preview_warning_messages(preview), lang=lang)
+
+
+@callback(
+    Output("economics-editors-shell", "className"),
+    Output("economics-editors-gate-note", "children"),
+    Output("economics-editors-gate-note", "style"),
+    Output("economics-editors-panels", "style"),
+    Input("scenario-session-store", "data"),
+    Input("economics-cost-items-editor", "data", allow_optional=True),
+    Input("economics-tax-items-editor", "data", allow_optional=True),
+    Input("economics-adjustment-items-editor", "data", allow_optional=True),
+    Input("language-selector", "value"),
+    Input("admin-preview-candidate-key", "data"),
+)
+def sync_economics_editor_visibility(
+    session_payload,
+    economics_cost_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
+    language_value,
+    admin_preview_candidate_state=None,
+):
+    lang = _lang(language_value)
+    if not _admin_page_access(session_payload).allowed:
+        return "economics-editors-shell economics-editors-shell-gated", "", {"display": "none"}, {"display": "none"}
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        return "economics-editors-shell economics-editors-shell-gated", "", {"display": "none"}, {"display": "none"}
+    active = state.get_scenario()
+    if active is None:
+        return "economics-editors-shell economics-editors-shell-gated", "", {"display": "none"}, {"display": "none"}
+    preview = _resolve_admin_economics_preview(
+        active,
+        economics_cost_rows=economics_cost_rows,
+        economics_tax_rows=economics_tax_rows,
+        economics_adjustment_rows=economics_adjustment_rows,
+        admin_preview_candidate_state=admin_preview_candidate_state,
+    )
+    if preview.state == PREVIEW_STATE_READY and preview.result is not None:
+        return "economics-editors-shell", "", {"display": "none"}, {}
+    note_key = {
+        PREVIEW_STATE_NO_SCAN: "workspace.admin.economics.editors.gated.no_scan",
+        PREVIEW_STATE_RERUN_REQUIRED: "workspace.admin.economics.editors.gated.rerun_required",
+        PREVIEW_STATE_CANDIDATE_MISSING: "workspace.admin.economics.editors.gated.candidate_missing",
+    }.get(preview.state or PREVIEW_STATE_NO_SCAN, "workspace.admin.economics.editors.gated.no_scan")
+    return (
+        "economics-editors-shell economics-editors-shell-gated",
+        tr(note_key, lang),
+        {"display": "block"},
+        {"display": "none"},
+    )
 
 
 @callback(

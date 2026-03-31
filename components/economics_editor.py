@@ -33,16 +33,20 @@ def _economics_table(
             "color": "var(--color-text-primary)",
             "fontWeight": "bold",
         },
+        style_cell_conditional=[
+            {"if": {"column_id": "amount_COP"}, "textAlign": "right"},
+            {"if": {"column_id": "value"}, "textAlign": "right"},
+        ],
         tooltip_delay=0,
         tooltip_duration=None,
         tooltip_header={},
     )
 
 
-def _economics_layers_details(
+def _economics_layers_panel(
     *,
-    details_id: str,
-    summary_id: str,
+    section_id: str,
+    title_id: str,
     lang: str,
     title: str,
     note: str,
@@ -50,53 +54,39 @@ def _economics_layers_details(
     add_button_id: str,
     add_button_label: str,
     table,
-) -> html.Details:
-    return html.Details(
-        id=details_id,
-        open=True,
-        className="subpanel economics-editor-details",
+) -> html.Div:
+    return html.Div(
+        id=section_id,
+        className="subpanel economics-editor-panel",
         children=[
-            html.Summary(
-                id=summary_id,
-                className="economics-editor-details-summary",
+            html.Div(
+                className="section-head economics-editor-panel-head",
                 children=[
                     html.Div(
-                        className="economics-editor-details-head",
+                        className="economics-editor-panel-copy",
                         children=[
-                            html.Div(
-                                className="economics-editor-details-title-wrap",
-                                children=[
-                                    html.H4(title),
-                                    html.P(note, className="section-copy economics-editor-details-note"),
-                                ],
+                            html.H4(title, id=title_id),
+                            html.P(note, className="section-copy economics-editor-panel-note"),
+                        ],
+                    ),
+                    html.Div(
+                        className="profile-table-actions",
+                        children=[
+                            html.Button(
+                                add_button_label,
+                                id=add_button_id,
+                                n_clicks=0,
+                                className="action-btn tertiary profile-inline-btn",
                             ),
-                            html.Span(tr("workspace.admin.economics.layers.toggle", lang), className="economics-editor-details-pill"),
                         ],
                     ),
                 ],
             ),
             html.Div(
-                className="economics-editor-details-body",
+                className="economics-editor-panel-body",
                 children=[
-                    html.Div(
-                        className="section-head",
-                        children=[
-                            html.H4(title),
-                            html.Div(
-                                className="profile-table-actions",
-                                children=[
-                                    html.Button(
-                                        add_button_label,
-                                        id=add_button_id,
-                                        n_clicks=0,
-                                        className="action-btn tertiary profile-inline-btn",
-                                    ),
-                                ],
-                            ),
-                        ],
-                    ),
                     html.P(copy, className="section-copy"),
-                    table,
+                    html.Div(className="economics-table-wrap economics-table-wrap-dense", children=[table]),
                 ],
             ),
         ],
@@ -166,70 +156,103 @@ def economics_editor_section(*, lang: str = "es") -> html.Div:
                             html.Div(id="economics-preview-content", className="economics-preview-stack"),
                         ],
                     ),
-                    _economics_layers_details(
-                        details_id="economics-cost-items-details",
-                        summary_id="economics-cost-items-summary",
-                        lang=lang,
-                        title=tr("workspace.admin.economics.cost_items.title", lang),
-                        note=tr("workspace.admin.economics.cost_items.note", lang),
-                        copy=tr("workspace.admin.economics.cost_items.copy", lang),
-                        add_button_id="add-economics-cost-row-btn",
-                        add_button_label=tr("workbench.profiles.add_row", lang),
-                        table=_economics_table("economics-cost-items-editor", table_kind="economics_cost_items", lang=lang),
-                    ),
-                    _economics_layers_details(
-                        details_id="economics-tax-items-details",
-                        summary_id="economics-tax-items-summary",
-                        lang=lang,
-                        title=tr("workspace.admin.economics.tax_items.title", lang),
-                        note=tr("workspace.admin.economics.tax_items.note", lang),
-                        copy=tr("workspace.admin.economics.tax_items.copy", lang),
-                        add_button_id="add-economics-tax-row-btn",
-                        add_button_label=tr("workbench.profiles.add_row", lang),
-                        table=_economics_table("economics-tax-items-editor", table_kind="economics_price_items", lang=lang),
-                    ),
-                    _economics_layers_details(
-                        details_id="economics-adjustment-items-details",
-                        summary_id="economics-adjustment-items-summary",
-                        lang=lang,
-                        title=tr("workspace.admin.economics.adjustment_items.title", lang),
-                        note=tr("workspace.admin.economics.adjustment_items.note", lang),
-                        copy=tr("workspace.admin.economics.adjustment_items.copy", lang),
-                        add_button_id="add-economics-adjustment-row-btn",
-                        add_button_label=tr("workbench.profiles.add_row", lang),
-                        table=_economics_table("economics-adjustment-items-editor", table_kind="economics_price_items", lang=lang),
-                    ),
                     html.Div(
-                        id="economics-compatibility-shell",
-                        className="subpanel economics-compatibility-shell",
+                        id="economics-editors-shell",
+                        className="economics-editors-shell",
                         children=[
+                            html.Div(id="economics-editors-gate-note", className="status-line economics-editors-gate-note"),
                             html.Div(
-                                className="section-head",
+                                id="economics-editors-panels",
+                                className="economics-editors-panels",
                                 children=[
-                                    html.H4(
-                                        tr("workspace.admin.economics.bridge.compat.title", lang),
-                                        id="economics-compatibility-title",
+                                    _economics_layers_panel(
+                                        section_id="economics-cost-items-details",
+                                        title_id="economics-cost-items-title",
+                                        lang=lang,
+                                        title=tr("workspace.admin.economics.cost_items.title", lang),
+                                        note=tr("workspace.admin.economics.cost_items.note", lang),
+                                        copy=tr("workspace.admin.economics.cost_items.copy", lang),
+                                        add_button_id="add-economics-cost-row-btn",
+                                        add_button_label=tr("workbench.profiles.add_row", lang),
+                                        table=_economics_table("economics-cost-items-editor", table_kind="economics_cost_items", lang=lang),
                                     ),
-                                    html.Div(
-                                        className="profile-table-actions",
-                                        children=[
-                                            html.Button(
-                                                tr("workspace.admin.economics.bridge.button", lang),
-                                                id="economics-bridge-btn",
-                                                n_clicks=0,
-                                                className="action-btn tertiary profile-inline-btn",
-                                            ),
-                                        ],
+                                    _economics_layers_panel(
+                                        section_id="economics-tax-items-details",
+                                        title_id="economics-tax-items-title",
+                                        lang=lang,
+                                        title=tr("workspace.admin.economics.tax_items.title", lang),
+                                        note=tr("workspace.admin.economics.tax_items.note", lang),
+                                        copy=tr("workspace.admin.economics.tax_items.copy", lang),
+                                        add_button_id="add-economics-tax-row-btn",
+                                        add_button_label=tr("workbench.profiles.add_row", lang),
+                                        table=_economics_table("economics-tax-items-editor", table_kind="economics_price_items", lang=lang),
+                                    ),
+                                    _economics_layers_panel(
+                                        section_id="economics-adjustment-items-details",
+                                        title_id="economics-adjustment-items-title",
+                                        lang=lang,
+                                        title=tr("workspace.admin.economics.adjustment_items.title", lang),
+                                        note=tr("workspace.admin.economics.adjustment_items.note", lang),
+                                        copy=tr("workspace.admin.economics.adjustment_items.copy", lang),
+                                        add_button_id="add-economics-adjustment-row-btn",
+                                        add_button_label=tr("workbench.profiles.add_row", lang),
+                                        table=_economics_table("economics-adjustment-items-editor", table_kind="economics_price_items", lang=lang),
                                     ),
                                 ],
                             ),
-                            html.P(
-                                tr("workspace.admin.economics.bridge.compat.copy", lang),
-                                id="economics-compatibility-copy",
-                                className="section-copy",
+                        ],
+                    ),
+                    html.Details(
+                        id="economics-compatibility-shell",
+                        className="subpanel economics-compatibility-shell economics-collapsible-section",
+                        open=False,
+                        children=[
+                            html.Summary(
+                                id="economics-compatibility-summary",
+                                className="economics-collapsible-summary",
+                                children=[
+                                    html.Div(
+                                        className="economics-collapsible-summary-copy",
+                                        children=[
+                                            html.H4(
+                                                tr("workspace.admin.economics.bridge.compat.title", lang),
+                                                id="economics-compatibility-title",
+                                            ),
+                                            html.P(
+                                                tr("workspace.admin.economics.bridge.compat.copy", lang),
+                                                id="economics-compatibility-copy",
+                                                className="section-copy",
+                                            ),
+                                        ],
+                                    )
+                                ],
                             ),
-                            html.Div(id="economics-bridge-cta-note", className="status-line economics-bridge-cta-note"),
-                            html.Div(id="economics-bridge-status-shell", className="economics-bridge-status-shell"),
+                            html.Div(
+                                id="economics-compatibility-body",
+                                className="economics-collapsible-body",
+                                children=[
+                                    html.Div(
+                                        className="section-head",
+                                        children=[
+                                            html.H4(tr("workspace.admin.economics.bridge.compat.title", lang)),
+                                            html.Div(
+                                                className="profile-table-actions",
+                                                children=[
+                                                    html.Button(
+                                                        tr("workspace.admin.economics.bridge.button", lang),
+                                                        id="economics-bridge-btn",
+                                                        n_clicks=0,
+                                                        className="action-btn tertiary profile-inline-btn",
+                                                    ),
+                                                ],
+                                            ),
+                                        ],
+                                    ),
+                                    html.P(tr("workspace.admin.economics.bridge.compat.copy", lang), className="section-copy"),
+                                    html.Div(id="economics-bridge-cta-note", className="status-line economics-bridge-cta-note"),
+                                    html.Div(id="economics-bridge-status-shell", className="economics-bridge-status-shell"),
+                                ],
+                            ),
                         ],
                     ),
                 ],

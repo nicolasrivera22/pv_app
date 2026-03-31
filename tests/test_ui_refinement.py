@@ -23,6 +23,7 @@ from components.candidate_explorer import candidate_explorer_section
 from components.selected_candidate_deep_dive import selected_candidate_deep_dive_section
 from components.profile_editor import profile_editor_section
 from components.catalog_editor import catalog_editor_section
+from components.workspace_frame import workspace_frame
 from pages import risk as risk_page
 from pages import workbench as workbench_page
 help_page = importlib.import_module("pages.help")
@@ -1048,6 +1049,27 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".demand-relocated-card" in css_source
     assert ".workbench-state-strip" in css_source
     assert ".workbench-state-chip" in css_source
+    assert ".page-admin" in css_source
+    assert ".workbench-grid-admin" in css_source
+    assert ".admin-auxiliary-details" in css_source
+    assert ".economics-preview-status-strip" in css_source
+    assert ".economics-candidate-identity-strip" in css_source
+    assert ".economics-preview-advanced-details" in css_source
+    assert ".economics-breakdown-advanced-details" in css_source
+    assert ".economics-editors-shell-gated" in css_source
+    assert ".economics-table-wrap" in css_source
+
+
+def test_workspace_frame_accepts_admin_specific_layout_hooks() -> None:
+    frame = workspace_frame(
+        page_class_name="page-admin",
+        grid_class_name="workbench-grid-admin",
+        children=[],
+    )
+    grid = _find_component_with_class(frame, "workbench-grid-admin")
+
+    assert "page-admin" in str(frame.className).split()
+    assert grid is not None
 
 
 def test_delete_project_button_removes_selected_project_and_unbinds_current_session(monkeypatch, tmp_path) -> None:

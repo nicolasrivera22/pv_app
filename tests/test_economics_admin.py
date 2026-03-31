@@ -7,6 +7,7 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
+from components.admin_view import admin_secure_content
 from components.economics_editor import economics_editor_section
 import services.workspace_admin_callbacks as admin_callbacks
 from services.candidate_financials import build_candidate_financial_snapshot
@@ -643,6 +644,8 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     note = _find_component(section, "economics-editor-note")
     preview_copy = _find_component(section, "economics-preview-copy")
     candidate_shell = _find_component(section, "admin-preview-candidate-shell")
+    editors_shell = _find_component(section, "economics-editors-shell")
+    editors_panels = _find_component(section, "economics-editors-panels")
     cost_details = _find_component(section, "economics-cost-items-details")
     tax_details = _find_component(section, "economics-tax-items-details")
     adjustment_details = _find_component(section, "economics-adjustment-items-details")
@@ -657,10 +660,13 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     assert preview_copy is not None
     assert "no cambia resultados" in str(preview_copy.children).lower()
     assert candidate_shell is not None
+    assert editors_shell is not None
+    assert editors_panels is not None
     assert cost_details is not None
     assert tax_details is not None
     assert adjustment_details is not None
     assert compatibility_shell is not None
+    assert getattr(compatibility_shell, "open", None) is False
     assert cost_table is not None
     assert tax_table is not None
     assert adjustment_table is not None
@@ -672,6 +678,23 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     assert "Ajuste porcentual" in {option["label"] for option in adjustment_table.dropdown["method"]["options"]}
     assert {"Sí", "No"} == {option["label"] for option in tax_table.dropdown["enabled"]["options"]}
     assert {"Sí", "No"} == {option["label"] for option in adjustment_table.dropdown["enabled"]["options"]}
+
+
+def test_admin_secure_content_places_economics_before_collapsed_assumptions() -> None:
+    content = admin_secure_content(lang="es")
+    assumptions_details = _find_component(content, "admin-assumptions-details")
+    assumptions_sections = _find_component(content, "admin-assumption-sections")
+    economics_index = next(
+        index for index, child in enumerate(content.children) if _find_component(child, "economics-editor-title") is not None
+    )
+    assumptions_index = next(
+        index for index, child in enumerate(content.children) if getattr(child, "id", None) == "admin-assumptions-details"
+    )
+
+    assert assumptions_index > economics_index
+    assert assumptions_details is not None
+    assert getattr(assumptions_details, "open", None) is False
+    assert assumptions_sections is not None
 
 
 def test_sync_admin_draft_tracks_economics_tables_with_simple_schema(monkeypatch, tmp_path) -> None:
@@ -1149,6 +1172,8 @@ def test_admin_preview_candidate_selector_is_local_and_does_not_mutate_scenario_
     assert disabled is False
     assert helper
     assert meta != ""
+    assert _find_component(meta, "admin-preview-candidate-meta-panel") is not None
+    assert _find_component(meta, "admin-preview-candidate-meta-inverter") is not None
 
     local_preview_state = admin_callbacks.update_admin_preview_candidate_state(local_candidate, payload, synced_state)
     assert local_preview_state["source"] == admin_callbacks.ADMIN_PREVIEW_SOURCE_LOCAL
@@ -1254,6 +1279,18 @@ def test_admin_preview_local_candidate_invalidates_without_best_fallback_after_r
     preview_children = _render_preview_call(rerun_payload, lang="es", admin_preview_candidate_state=rerun_state)
     preview_status = _find_component(preview_children, "economics-preview-status")
     preview_summary = _find_component(preview_children, "economics-summary-cards")
+    editors_class, editors_note, editors_note_style, editors_panels_style = admin_callbacks.sync_economics_editor_visibility(
+        rerun_payload,
+        rerun_active.config_bundle.economics_cost_items_table.to_dict("records"),
+        economics_price_items_rows_to_section_editor(rerun_active.config_bundle.economics_price_items_table, layers=("tax",), lang="es"),
+        economics_price_items_rows_to_section_editor(
+            rerun_active.config_bundle.economics_price_items_table,
+            layers=("commercial", "sale"),
+            lang="es",
+        ),
+        "es",
+        rerun_state,
+    )
     bridge_disabled, bridge_note = sync_economics_bridge_cta(
         rerun_payload,
         *_bridge_args(rerun_active),
@@ -1270,6 +1307,10 @@ def test_admin_preview_local_candidate_invalidates_without_best_fallback_after_r
     assert preview_status is not None
     assert "No hay un diseño determinístico disponible" in str(preview_status.children)
     assert preview_summary is None
+    assert "economics-editors-shell-gated" in editors_class
+    assert "candidato determinístico" in editors_note.lower()
+    assert editors_note_style == {"display": "block"}
+    assert editors_panels_style == {"display": "none"}
     assert bridge_disabled is True
     assert "candidato determinístico" in bridge_note.lower()
 
@@ -1300,9 +1341,11 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     summary_shell = _find_component(children, "economics-summary-shell")
     quantities_shell = _find_component(children, "economics-preview-quantities-shell")
     flow_shell = _find_component(children, "economics-preview-flow-shell")
+    advanced_preview = _find_component(children, "economics-preview-advanced-details")
     summary_cards = _find_component(children, "economics-summary-cards")
     breakdown_title = _find_component(children, "economics-breakdown-title")
     breakdown_copy = _find_component(children, "economics-breakdown-copy")
+    breakdown_advanced = _find_component(children, "economics-breakdown-advanced-details")
     technical_shell = _find_component(children, "economics-breakdown-technical-shell")
     installed_shell = _find_component(children, "economics-breakdown-installed-shell")
     tax_shell = _find_component(children, "economics-breakdown-tax-shell")
@@ -1310,6 +1353,7 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     technical_table = _find_component(children, "economics-breakdown-technical-table")
     tax_table = _find_component(children, "economics-breakdown-tax-table")
     adjustments_table = _find_component(children, "economics-breakdown-adjustments-table")
+    advanced_tax_table = _find_component(children, "economics-breakdown-advanced-tax-table")
     technical_subtotal = _find_component(children, "economics-breakdown-technical-subtotal")
     closing_shell = _find_component(children, "economics-closing-shell")
     closing_table = _find_component(children, "economics-closing-table")
@@ -1322,18 +1366,21 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
 
     assert status is not None
     assert "diseño determinístico vigente" in str(status.children)
-    assert child_ids.index("economics-summary-shell") < child_ids.index("economics-preview-flow-shell")
-    assert child_ids.index("economics-preview-flow-shell") < child_ids.index("economics-breakdown-shell")
-    assert child_ids.index("economics-breakdown-shell") < child_ids.index("economics-closing-shell")
+    assert child_ids.index("economics-summary-shell") < child_ids.index("economics-closing-shell")
+    assert child_ids.index("economics-closing-shell") < child_ids.index("economics-breakdown-shell")
+    assert child_ids.index("economics-breakdown-shell") < child_ids.index("economics-preview-advanced-details")
     assert summary_shell is not None
     assert quantities_shell is not None
     assert flow_shell is not None
+    assert advanced_preview is not None
     assert "final_price_per_kwp_COP" not in str(flow_shell)
     assert "markup_pct" not in str(flow_shell)
     assert summary_cards is not None
-    assert len(summary_cards.children) == 8
+    assert len(summary_cards.children) == 5
+    assert "Precio final por kWp" in str(summary_shell)
     assert breakdown_title is not None
     assert breakdown_copy is not None
+    assert breakdown_advanced is not None
     assert str(breakdown_title.children) == "Desglose del cálculo"
     assert technical_shell is not None
     assert installed_shell is not None
@@ -1345,6 +1392,7 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert technical_table is not None
     assert tax_table is not None
     assert adjustments_table is not None
+    assert advanced_tax_table is not None
     assert candidate_source is not None
     assert "Selección local de Admin" in str(candidate_source.children)
     assert panel_name is not None
@@ -1356,11 +1404,11 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert len(tax_table.data) >= 1
     assert len(adjustments_table.data) >= 1
     assert "Base monetaria [COP]" not in {column["name"] for column in technical_table.columns}
-    assert "Base monetaria [COP]" in {column["name"] for column in tax_table.columns}
-    assert technical_table.data[0]["stage_or_layer"] == "Costo técnico"
+    assert "Base monetaria [COP]" not in {column["name"] for column in tax_table.columns}
+    assert "Base monetaria [COP]" in {column["name"] for column in advanced_tax_table.columns}
+    assert "Etapa" not in {column["name"] for column in technical_table.columns}
+    assert "Etapa" in {column["name"] for column in adjustments_table.columns}
     assert technical_table.data[0]["rule"] == "Por panel"
-    assert technical_table.data[0]["value_source"] in {"Manual", "Catálogo de panel seleccionado"}
-    assert tax_table.data[0]["stage_or_layer"] == "Impuestos"
     assert tax_table.data[0]["rule"] == "Impuesto porcentual"
     assert "calculation" in technical_table.data[0]
     assert "x" in str(technical_table.data[0]["calculation"])
@@ -1370,6 +1418,9 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert len(adjustments_table.data) == len(
         [row for row in snapshot.economics_result.price_rows if row.stage_or_layer in {"commercial", "sale"}]
     )
+    assert "Precio final por kWp" not in {
+        row["metric"] for row in closing_table.data
+    }
 
 
 def test_render_economics_preview_reports_no_scan_after_scan_invalidating_change(monkeypatch, tmp_path) -> None:

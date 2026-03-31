@@ -93,8 +93,35 @@ def admin_secure_content(*, lang: str = "es") -> html.Div:
                     ),
                 ],
             ),
-            html.Div(className="panel assumption-editor-panel", children=[html.Div(id="admin-assumption-sections")]),
             economics_editor_section(lang=lang),
+            html.Details(
+                id="admin-assumptions-details",
+                className="panel secondary-panel admin-auxiliary-details",
+                open=False,
+                children=[
+                    html.Summary(
+                        id="admin-assumptions-summary",
+                        className="admin-auxiliary-summary",
+                        children=[
+                            html.Div(
+                                className="admin-auxiliary-summary-copy",
+                                children=[
+                                    html.H3(tr("workbench.assumptions", lang), id="admin-assumptions-title"),
+                                    html.P(
+                                        tr("workspace.admin.assumptions.copy", lang),
+                                        id="admin-assumptions-copy",
+                                        className="section-copy",
+                                    ),
+                                ],
+                            )
+                        ],
+                    ),
+                    html.Div(
+                        className="assumption-editor-panel admin-auxiliary-body",
+                        children=[html.Div(id="admin-assumption-sections")],
+                    ),
+                ],
+            ),
             resource_profile_editor_section(lang=lang),
             catalog_editor_section(lang=lang),
         ],

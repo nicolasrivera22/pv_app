@@ -7,7 +7,18 @@ from services.i18n import tr
 from .scenario_controls import scenario_sidebar
 
 
-def workspace_frame(*, children: list, stores: list | None = None, show_internal_entry: bool = False) -> html.Div:
+def _join_classes(*class_names: str | None) -> str:
+    return " ".join(part for part in class_names if part and part.strip())
+
+
+def workspace_frame(
+    *,
+    children: list,
+    stores: list | None = None,
+    show_internal_entry: bool = False,
+    page_class_name: str | None = None,
+    grid_class_name: str | None = None,
+) -> html.Div:
     active_summary_children = [
         html.Div(
             className="active-summary-content",
@@ -53,11 +64,11 @@ def workspace_frame(*, children: list, stores: list | None = None, show_internal
             )
         )
     return html.Div(
-        className="page",
+        className=_join_classes("page", page_class_name),
         children=[
             *(stores or []),
             html.Div(
-                className="workbench-grid",
+                className=_join_classes("workbench-grid", grid_class_name),
                 children=[
                     html.Div(
                         className="workspace-sidebar-stack",
