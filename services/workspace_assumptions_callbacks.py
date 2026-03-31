@@ -204,9 +204,8 @@ def _empty_demand_outputs(lang: str):
     Output("assumptions-demand-profile-energy-label", "children"),
     Output("assumptions-demand-profile-weights-preview-title", "children"),
     Output("assumptions-demand-profile-weights-preview-copy", "children"),
-    Output("workspace-internal-title", "children"),
-    Output("workspace-internal-copy", "children"),
-    Output("workspace-admin-link", "children"),
+    Output("assumptions-advanced-tools-title", "children"),
+    Output("assumptions-advanced-tools-copy", "children"),
     Input("language-selector", "value"),
 )
 def translate_assumptions_page(language_value):
@@ -237,16 +236,11 @@ def translate_assumptions_page(language_value):
         tr("workbench.profiles.relative.energy", lang),
         tr("workbench.profiles.relative.preview", lang),
         tr("workbench.profiles.relative.preview.copy", lang),
-        tr("workspace.internal.title", lang),
-        tr("workspace.internal.copy", lang),
-        tr("workspace.internal.link", lang),
+        tr("workspace.advanced.title", lang),
+        tr("workspace.advanced.copy", lang),
     )
 
 
-@callback(
-    Output("workspace-admin-entry", "style"),
-    Input("scenario-session-store", "data"),
-)
 def sync_workspace_internal_entry(session_payload):
     return internal_entry_style(resolve_ui_mode_from_payload(session_payload))
 

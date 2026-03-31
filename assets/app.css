@@ -120,7 +120,8 @@ body {
     padding: 1rem 1.25rem 3rem;
 }
 
-.page-admin {
+.page-admin,
+.page-advanced-host {
     max-width: 1680px;
     padding-left: 1.5rem;
     padding-right: 1.5rem;
@@ -133,8 +134,20 @@ body {
     align-items: start;
 }
 
-.workbench-grid-admin {
+.workbench-grid-admin,
+.workbench-grid-advanced-host {
     grid-template-columns: minmax(280px, 296px) minmax(0, 1fr);
+}
+
+.page-admin-redirect {
+    max-width: 720px;
+}
+
+.admin-redirect-fallback,
+.assumptions-advanced-section,
+.assumptions-advanced-tools-shell {
+    display: grid;
+    gap: 0.85rem;
 }
 
 .workspace-sidebar-stack {

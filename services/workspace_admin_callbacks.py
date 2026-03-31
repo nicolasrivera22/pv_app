@@ -11,7 +11,6 @@ import plotly.graph_objects as go
 
 from components.admin_view import build_admin_access_shell
 from components.assumption_editor import render_assumption_sections
-from components.ui_mode_gate import render_ui_mode_gate
 from .admin_access import (
     admin_pin_configured,
     grant_admin_session_access,
@@ -61,7 +60,6 @@ from .workspace_actions import (
 )
 from .workspace_drafts import bind_workspace_draft_project, upsert_workspace_draft
 from .workspace_partitions import partition_assumption_sections
-from .ui_mode import PAGE_ADMIN, resolve_page_access, resolve_ui_mode_from_payload
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +77,6 @@ def _admin_session(payload, language_value: str | None):
     return client_state, state, is_admin_session_unlocked(client_state.session_id)
 
 
-def _admin_page_access(payload) -> object:
-    return resolve_page_access(PAGE_ADMIN, resolve_ui_mode_from_payload(payload))
-
-
 def _admin_locked_meta(message_key: str | None = None, *, tone: str = "neutral") -> dict[str, object]:
     return {
         "revision": time.time(),
@@ -95,13 +89,13 @@ def _validate_admin_setup_pin(pin_value, confirm_value) -> str:
     pin = str(pin_value or "").strip()
     confirm = str(confirm_value or "").strip()
     if not pin:
-        raise ValueError("workspace.admin.setup.empty")
+        raise ValueError("workspace.advanced.setup.empty")
     if not pin.isdigit():
-        raise ValueError("workspace.admin.setup.digits_only")
+        raise ValueError("workspace.advanced.setup.digits_only")
     if len(pin) < 4:
-        raise ValueError("workspace.admin.setup.too_short")
+        raise ValueError("workspace.advanced.setup.too_short")
     if pin != confirm:
-        raise ValueError("workspace.admin.setup.mismatch")
+        raise ValueError("workspace.advanced.setup.mismatch")
     return pin
 
 
@@ -1372,18 +1366,16 @@ ADMIN_EXCLUDED_FIELDS = {
     prevent_initial_call=True,
 )
 def setup_admin_session(_setup_clicks, session_payload, pin_value, confirm_value):
-    if not _admin_page_access(session_payload).allowed:
-        raise PreventUpdate
     client_state, _state, _unlocked = _admin_session(session_payload, None)
     if admin_pin_configured():
-        return _admin_locked_meta("workspace.admin.setup.already_configured", tone="info")
+        return _admin_locked_meta("workspace.advanced.setup.already_configured", tone="info")
     try:
         pin = _validate_admin_setup_pin(pin_value, confirm_value)
     except ValueError as exc:
         return _admin_locked_meta(str(exc), tone="error")
     set_admin_pin(pin)
     grant_admin_session_access(client_state.session_id)
-    return _admin_locked_meta("workspace.admin.setup.success", tone="success")
+    return _admin_locked_meta("workspace.advanced.setup.success", tone="success")
 
 
 @callback(
@@ -1394,28 +1386,23 @@ def setup_admin_session(_setup_clicks, session_payload, pin_value, confirm_value
     prevent_initial_call=True,
 )
 def unlock_admin_session(_unlock_clicks, session_payload, pin_value):
-    if not _admin_page_access(session_payload).allowed:
-        raise PreventUpdate
     client_state, _state, _unlocked = _admin_session(session_payload, None)
     if not admin_pin_configured():
-        return _admin_locked_meta("workspace.admin.setup.ready", tone="info")
+        return _admin_locked_meta("workspace.advanced.setup.ready", tone="info")
     if not verify_admin_pin(pin_value):
-        return _admin_locked_meta("workspace.admin.locked.invalid", tone="error")
+        return _admin_locked_meta("workspace.advanced.locked.invalid", tone="error")
     grant_admin_session_access(client_state.session_id)
-    return _admin_locked_meta("workspace.admin.locked.unlocked", tone="success")
+    return _admin_locked_meta("workspace.advanced.locked.unlocked", tone="success")
 
 
 @callback(
-    Output("admin-access-shell", "children"),
+    Output("assumptions-advanced-tools-shell", "children"),
     Input("scenario-session-store", "data"),
     Input("language-selector", "value"),
     Input("admin-access-meta", "data"),
 )
 def render_admin_access_shell(session_payload, language_value, access_meta):
     lang = _lang(language_value)
-    access = _admin_page_access(session_payload)
-    if access.is_gated:
-        return render_ui_mode_gate(access, lang=lang, component_id="admin-mode-gate")
     _client_state, _state, unlocked = _admin_session(session_payload, lang)
     configured = admin_pin_configured()
     meta = access_meta or {}
@@ -1425,21 +1412,6 @@ def render_admin_access_shell(session_payload, language_value, access_meta):
         unlocked=unlocked,
         status_key=meta.get("message_key"),
         tone=str(meta.get("tone") or "neutral"),
-    )
-
-
-@callback(
-    Output("admin-page-title", "children"),
-    Output("admin-page-copy", "children"),
-    Output("admin-gating-note", "children"),
-    Input("language-selector", "value"),
-)
-def translate_admin_page_header(language_value):
-    lang = _lang(language_value)
-    return (
-        tr("workspace.admin.title", lang),
-        tr("workspace.admin.copy", lang),
-        tr("workspace.admin.note", lang),
     )
 
 
@@ -1514,30 +1486,10 @@ def translate_profile_table_activators(language_value, activator_ids=None):
 def populate_admin_page(session_payload, show_all_values, language_value, access_meta=None):
     lang = _lang(language_value)
     _access_meta = access_meta or {}
-    if not _admin_page_access(session_payload).allowed:
-        empty = ([], [], {})
-        return (
-            render_assumption_sections(
-                [],
-                show_all=False,
-                empty_message=tr("workbench.assumptions.none", lang),
-                advanced_label=tr("workbench.assumptions.advanced", lang),
-                input_id_type="admin-assumption-input",
-                field_card_type="admin-assumption-field-card",
-                context_note_type="admin-assumption-context-note",
-            ),
-            True,
-            *empty,
-            *empty,
-            *empty,
-            *empty,
-            *empty,
-            *empty,
-            *empty,
-            *empty,
-        )
-    client_state, state, unlocked = _admin_session(session_payload, lang)
     empty = ([], [], {})
+    if _access_meta.get("revision") is None:
+        _access_meta = {}
+    client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         return (
             render_assumption_sections(
@@ -1657,8 +1609,6 @@ def populate_admin_page(session_payload, show_all_values, language_value, access
     State("admin-preview-candidate-key", "data"),
 )
 def sync_admin_preview_candidate_state(session_payload, current_state):
-    if not _admin_page_access(session_payload).allowed:
-        return _empty_admin_preview_candidate_state()
     _client_state, state, unlocked = _admin_session(session_payload, None)
     if not unlocked:
         return _empty_admin_preview_candidate_state()
@@ -1677,8 +1627,6 @@ def sync_admin_preview_candidate_state(session_payload, current_state):
     prevent_initial_call=True,
 )
 def update_admin_preview_candidate_state(dropdown_value, session_payload, current_state):
-    if not _admin_page_access(session_payload).allowed:
-        raise PreventUpdate
     _client_state, state, unlocked = _admin_session(session_payload, None)
     if not unlocked:
         raise PreventUpdate
@@ -1710,8 +1658,6 @@ def update_admin_preview_candidate_state(dropdown_value, session_payload, curren
 )
 def render_admin_preview_candidate_selector(session_payload, preview_candidate_state, language_value):
     lang = _lang(language_value)
-    if not _admin_page_access(session_payload).allowed:
-        return [], None, True, "", ""
     _client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         return [], None, True, "", ""
@@ -1813,8 +1759,6 @@ def render_economics_preview(
     admin_preview_candidate_state=None,
 ):
     lang = _lang(language_value)
-    if not _admin_page_access(session_payload).allowed:
-        return []
     _client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         return []
@@ -1852,8 +1796,6 @@ def sync_economics_editor_visibility(
     admin_preview_candidate_state=None,
 ):
     lang = _lang(language_value)
-    if not _admin_page_access(session_payload).allowed:
-        return "economics-editors-shell economics-editors-shell-gated", "", {"display": "none"}, {"display": "none"}
     _client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         return "economics-editors-shell economics-editors-shell-gated", "", {"display": "none"}, {"display": "none"}
@@ -1915,8 +1857,6 @@ def sync_economics_bridge_cta(
     admin_preview_candidate_state=None,
 ):
     lang = _lang(language_value)
-    if not _admin_page_access(session_payload).allowed:
-        return True, ""
     _client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         return True, ""
@@ -1949,8 +1889,6 @@ def sync_economics_bridge_cta(
 )
 def render_runtime_price_bridge_ui(session_payload, language_value):
     lang = _lang(language_value)
-    if not _admin_page_access(session_payload).allowed:
-        return []
     _client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         return []
@@ -1998,8 +1936,6 @@ def apply_economics_runtime_price_bridge(
     admin_preview_candidate_state=None,
 ):
     lang = _lang(language_value)
-    if not _admin_page_access(session_payload).allowed:
-        raise PreventUpdate
     client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         raise PreventUpdate
@@ -2081,8 +2017,6 @@ def sync_admin_assumption_context_ui(
     note_ids,
 ):
     lang = _lang(language_value)
-    if not _admin_page_access(session_payload).allowed:
-        raise PreventUpdate
     _client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         raise PreventUpdate
@@ -2142,8 +2076,6 @@ def sync_admin_draft(
     economics_tax_rows,
     economics_adjustment_rows,
 ):
-    if not _admin_page_access(session_payload).allowed:
-        raise PreventUpdate
     client_state, state, unlocked = _admin_session(session_payload, None)
     if not unlocked:
         raise PreventUpdate
@@ -2440,8 +2372,6 @@ def apply_admin_edits(
     language_value,
 ):
     lang = _lang(language_value)
-    if not _admin_page_access(session_payload).allowed:
-        raise PreventUpdate
     client_state, state, unlocked = _admin_session(session_payload, lang)
     if not unlocked:
         raise PreventUpdate

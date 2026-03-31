@@ -12,11 +12,20 @@ register_page(__name__, path="/assumptions", name="Supuestos")
 
 
 layout = workspace_frame(
+    page_class_name="page-advanced-host",
+    grid_class_name="workbench-grid-advanced-host",
     stores=[
         dcc.Store(id="run-scan-choice-state", storage_type="memory", data={"open": False}),
         dcc.Store(id="assumptions-draft-meta", storage_type="memory", data={}),
+        dcc.Store(id="active-profile-table-state", storage_type="memory", data={"table_id": None}),
+        dcc.Store(
+            id="admin-preview-candidate-key",
+            storage_type="memory",
+            data={"scenario_id": None, "candidate_key": None, "source": None},
+        ),
+        dcc.Store(id="admin-draft-meta", storage_type="memory", data={}),
+        dcc.Store(id="admin-access-meta", storage_type="memory", data={"revision": 0, "message_key": None, "tone": "neutral"}),
     ],
-    show_internal_entry=True,
     children=[
         run_scan_choice_dialog(),
         html.Div(
@@ -89,6 +98,18 @@ layout = workspace_frame(
                         ),
                     ],
                 ),
+            ],
+        ),
+        html.Div(
+            id="advanced-tools",
+            className="panel secondary-panel assumptions-advanced-section",
+            children=[
+                html.Div(
+                    className="section-head",
+                    children=[html.H3("Herramientas avanzadas", id="assumptions-advanced-tools-title")],
+                ),
+                html.P("", id="assumptions-advanced-tools-copy", className="section-copy section-copy-wide"),
+                html.Div(id="assumptions-advanced-tools-shell", className="assumptions-advanced-tools-shell"),
             ],
         ),
     ],

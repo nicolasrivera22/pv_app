@@ -179,13 +179,15 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(assumptions_layout, "run-assumptions-scan-btn") is not None
     assert _find_component(assumptions_layout, "assumptions-general-tab") is not None
     assert _find_component(assumptions_layout, "assumptions-demand-tab") is not None
-    assert _find_component(assumptions_layout, "workspace-admin-entry") is not None
+    assert _find_component(assumptions_layout, "advanced-tools") is not None
+    assert _find_component(assumptions_layout, "assumptions-advanced-tools-shell") is not None
+    assert _find_component(assumptions_layout, "workspace-admin-entry") is None
     assert _find_component(assumptions_layout, "assumptions-demand-profile-mode-selector") is not None
     assert _find_component(assumptions_layout, "inverter-table-editor") is None
+    assert _find_component(assumptions_layout, "economics-editor-title") is None
 
-    assert _find_component(admin_layout, "admin-access-shell") is not None
-    assert _find_component(admin_layout, "admin-gating-note") is not None
-    assert _find_component(admin_layout, "admin-mode-gate") is not None
+    assert _find_component(admin_layout, "admin-redirect-location") is not None
+    assert _find_component(admin_layout, "admin-redirect-fallback") is not None
     assert _find_component(admin_layout, "admin-setup-pin-input") is None
     assert _find_component(admin_layout, "admin-pin-input") is None
     assert _find_component(admin_layout, "profile-editor-title") is None
@@ -235,8 +237,10 @@ def test_admin_page_gracefully_handles_direct_access_without_active_scenario(mon
 
     rendered = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
 
-    assert _find_component(rendered, "admin-gating-note") is not None
-    assert _find_component(rendered, "admin-mode-gate") is not None
+    redirect = _find_component(rendered, "admin-redirect-location")
+    assert redirect is not None
+    assert redirect.href == "/assumptions#advanced-tools"
+    assert _find_component(rendered, "admin-redirect-link") is not None
     assert _find_component(rendered, "admin-setup-pin-input") is None
     assert payload["active_scenario_id"] is None
 

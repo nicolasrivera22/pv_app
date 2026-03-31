@@ -91,8 +91,7 @@ def test_ui_mode_helpers_define_expected_visibility_rules() -> None:
     assert resolve_page_access(PAGE_COMPARE, UI_MODE_SIMPLE).allowed is False
     assert resolve_page_access(PAGE_COMPARE, UI_MODE_PRO).allowed is True
     assert resolve_page_access(PAGE_RISK, UI_MODE_SIMPLE).cta_target_mode == UI_MODE_PRO
-    assert resolve_page_access(PAGE_ADMIN, UI_MODE_PRO).allowed is False
-    assert resolve_page_access(PAGE_ADMIN, UI_MODE_PRO).cta_target_mode == UI_MODE_ADMIN
+    assert resolve_page_access(PAGE_ADMIN, UI_MODE_PRO).allowed is True
     assert resolve_page_access(PAGE_ADMIN, UI_MODE_ADMIN).allowed is True
 
 

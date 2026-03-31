@@ -1051,6 +1051,8 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".workbench-state-chip" in css_source
     assert ".page-admin" in css_source
     assert ".workbench-grid-admin" in css_source
+    assert ".page-advanced-host" in css_source
+    assert ".workbench-grid-advanced-host" in css_source
     assert ".admin-auxiliary-details" in css_source
     assert ".economics-preview-status-strip" in css_source
     assert ".economics-candidate-identity-strip" in css_source
@@ -1060,15 +1062,15 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".economics-table-wrap" in css_source
 
 
-def test_workspace_frame_accepts_admin_specific_layout_hooks() -> None:
+def test_workspace_frame_accepts_advanced_host_layout_hooks() -> None:
     frame = workspace_frame(
-        page_class_name="page-admin",
-        grid_class_name="workbench-grid-admin",
+        page_class_name="page-advanced-host",
+        grid_class_name="workbench-grid-advanced-host",
         children=[],
     )
-    grid = _find_component_with_class(frame, "workbench-grid-admin")
+    grid = _find_component_with_class(frame, "workbench-grid-advanced-host")
 
-    assert "page-admin" in str(frame.className).split()
+    assert "page-advanced-host" in str(frame.className).split()
     assert grid is not None
 
 

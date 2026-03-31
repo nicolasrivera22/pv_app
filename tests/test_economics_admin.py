@@ -1394,7 +1394,7 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert adjustments_table is not None
     assert advanced_tax_table is not None
     assert candidate_source is not None
-    assert "Selección local de Admin" in str(candidate_source.children)
+    assert "Selección local de herramientas avanzadas" in str(candidate_source.children)
     assert panel_name is not None
     assert inverter_name is not None
     assert battery_name is not None
