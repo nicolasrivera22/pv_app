@@ -197,6 +197,11 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(admin_layout, "workspace-admin-entry") is None
 
 
+def test_assumptions_page_registers_advanced_access_shell_callback() -> None:
+    assert assumptions_page._workspace_admin_callbacks is not None
+    assert assumptions_page._workspace_admin_callbacks.render_admin_access_shell is not None
+
+
 def test_assumptions_demand_tab_places_summary_strip_above_tables() -> None:
     assumptions_layout = assumptions_page.layout() if callable(assumptions_page.layout) else assumptions_page.layout
 

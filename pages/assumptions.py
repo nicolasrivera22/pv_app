@@ -4,6 +4,7 @@ from dash import dcc, html, register_page
 
 from components import demand_profile_module, run_scan_choice_dialog
 from components.workspace_frame import workspace_frame
+import services.workspace_admin_callbacks as _workspace_admin_callbacks  # noqa: F401
 import services.workspace_assumptions_callbacks as _workspace_assumptions_callbacks  # noqa: F401
 import services.workspace_shared_callbacks as _workspace_shared_callbacks  # noqa: F401
 
