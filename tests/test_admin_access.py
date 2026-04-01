@@ -25,13 +25,16 @@ from services import (
     is_admin_session_unlocked,
     load_config_from_excel,
     load_example_config,
+    run_scenario_scan,
     set_admin_pin,
     table_draft_rows,
+    tr,
     verify_admin_pin,
 )
 from services.workspace_admin_callbacks import (
     apply_admin_edits,
     populate_admin_page,
+    render_admin_access_summary,
     render_admin_access_shell,
     setup_admin_session,
     sync_admin_draft,
@@ -64,6 +67,11 @@ def _admin_client_state(lang: str = "es"):
 
 def _pro_client_state(lang: str = "es"):
     return replace(bootstrap_client_session(lang), ui_mode="pro")
+
+
+def _admin_payload_for_state(state, client_state=None, *, lang: str = "es") -> dict:
+    session = client_state or _admin_client_state(lang)
+    return commit_client_session(session, state).to_payload()
 
 
 def _find_component(node, component_id: str):
@@ -165,9 +173,15 @@ def test_admin_page_defaults_to_internal_gate_shell(monkeypatch, tmp_path) -> No
     layout = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
 
     redirect = _find_component(layout, "admin-redirect-location")
+    fallback_title = _find_component(layout, "admin-redirect-title")
+    fallback_copy = _find_component(layout, "admin-redirect-copy")
     assert redirect is not None
     assert redirect.href == "/assumptions#advanced-tools"
     assert _find_component(layout, "admin-redirect-fallback") is not None
+    assert fallback_title is not None
+    assert fallback_title.children == tr("workspace.advanced.redirect.title", "es")
+    assert fallback_copy is not None
+    assert fallback_copy.children == tr("workspace.advanced.redirect.copy", "es")
     assert _find_component(layout, "admin-setup-pin-input") is None
     assert _find_component(layout, "admin-pin-input") is None
     assert _find_component(layout, "profile-editor-title") is None
@@ -188,6 +202,26 @@ def test_render_admin_access_shell_shows_setup_when_pin_missing(monkeypatch, tmp
     assert _find_component(rendered, "profile-editor-title") is None
 
 
+def test_render_admin_access_summary_shows_setup_when_pin_missing(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    rendered = render_admin_access_summary(_admin_client_state("es").to_payload(), "es", {"revision": 1})
+
+    status = _find_component(rendered, "assumptions-advanced-tools-entry-status")
+    link = _find_component(rendered, "assumptions-advanced-tools-entry-link")
+
+    assert status is not None
+    assert status.children == tr("workspace.advanced.entry.status.setup_required", "es")
+    assert link is not None
+    assert link.children == tr("workspace.advanced.entry.cta.setup_required", "es")
+    assert link.href == "#advanced-tools"
+    assert _find_component(rendered, "admin-setup-pin-input") is None
+    assert _find_component(rendered, "admin-pin-input") is None
+    assert _find_component(rendered, "economics-editor-title") is None
+
+
 def test_render_admin_access_shell_shows_unlock_when_pin_is_configured(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
@@ -202,6 +236,26 @@ def test_render_admin_access_shell_shows_unlock_when_pin_is_configured(monkeypat
     assert _find_component(rendered, "admin-pin-input") is not None
     assert _find_component(rendered, "admin-setup-pin-input") is None
     assert _find_component(rendered, "profile-editor-title") is None
+
+
+def test_render_admin_access_summary_shows_locked_when_pin_is_configured(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+    set_admin_pin("2468")
+
+    rendered = render_admin_access_summary(_admin_client_state("es").to_payload(), "es", {"revision": 1})
+
+    status = _find_component(rendered, "assumptions-advanced-tools-entry-status")
+    link = _find_component(rendered, "assumptions-advanced-tools-entry-link")
+
+    assert status is not None
+    assert status.children == tr("workspace.advanced.entry.status.locked", "es")
+    assert link is not None
+    assert link.children == tr("workspace.advanced.entry.cta.locked", "es")
+    assert _find_component(rendered, "admin-setup-pin-input") is None
+    assert _find_component(rendered, "admin-pin-input") is None
+    assert _find_component(rendered, "economics-editor-title") is None
 
 
 def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypatch, tmp_path) -> None:
@@ -225,6 +279,98 @@ def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypa
     assert _find_component(rendered, "panel-table-editor") is not None
     assert _find_component(rendered, "admin-pin-input") is None
     assert _find_component(rendered, "profile-demand-legacy-shell") is None
+
+
+def test_render_admin_access_summary_shows_active_scenario_and_candidate_when_unlocked(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    active = state.get_scenario()
+    assert active is not None
+
+    set_admin_pin("2468")
+    client_state = _admin_client_state("es")
+    grant_admin_session_access(client_state.session_id)
+    rendered = render_admin_access_summary(
+        commit_client_session(client_state, state).to_payload(),
+        "es",
+        {"revision": 1, "message_key": "workspace.advanced.locked.unlocked", "tone": "success"},
+    )
+
+    status = _find_component(rendered, "assumptions-advanced-tools-entry-status")
+    context = _find_component(rendered, "assumptions-advanced-tools-entry-context")
+    meta = _find_component(rendered, "assumptions-advanced-tools-entry-meta")
+
+    assert status is not None
+    assert status.children == tr("workspace.advanced.entry.status.unlocked", "es")
+    assert context is not None
+    assert active.name in context.children
+    assert active.selected_candidate_key in context.children
+    assert meta is not None
+    assert meta.children == tr("workspace.advanced.locked.unlocked", "es")
+    assert _find_component(rendered, "admin-setup-pin-input") is None
+    assert _find_component(rendered, "admin-pin-input") is None
+    assert _find_component(rendered, "economics-editor-title") is None
+
+
+def test_render_admin_access_summary_shows_prescan_note_without_fake_candidate(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    active = state.get_scenario()
+    assert active is not None
+
+    set_admin_pin("2468")
+    client_state = _admin_client_state("es")
+    grant_admin_session_access(client_state.session_id)
+    rendered = render_admin_access_summary(_admin_payload_for_state(state, client_state), "es", {"revision": 1})
+
+    context = _find_component(rendered, "assumptions-advanced-tools-entry-context")
+
+    assert context is not None
+    assert active.name in context.children
+    assert tr("workspace.advanced.entry.context.pre_scan", "es", scenario_name=active.name) == context.children
+    assert "Candidato activo" not in context.children
+
+
+def test_admin_access_summary_and_shell_share_same_state_resolution(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    setup_payload = _admin_client_state("es").to_payload()
+    setup_summary = render_admin_access_summary(setup_payload, "es", {"revision": 1})
+    setup_shell = render_admin_access_shell(setup_payload, "es", {"revision": 1})
+    assert _find_component(setup_summary, "assumptions-advanced-tools-entry-status").children == tr(
+        "workspace.advanced.entry.status.setup_required", "es"
+    )
+    assert _find_component(setup_shell, "admin-setup-shell") is not None
+
+    set_admin_pin("2468")
+    locked_payload = _admin_client_state("es").to_payload()
+    locked_summary = render_admin_access_summary(locked_payload, "es", {"revision": 1})
+    locked_shell = render_admin_access_shell(locked_payload, "es", {"revision": 1})
+    assert _find_component(locked_summary, "assumptions-advanced-tools-entry-status").children == tr(
+        "workspace.advanced.entry.status.locked", "es"
+    )
+    assert _find_component(locked_shell, "admin-locked-shell") is not None
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    unlocked_client_state = _admin_client_state("es")
+    grant_admin_session_access(unlocked_client_state.session_id)
+    unlocked_payload = commit_client_session(unlocked_client_state, state).to_payload()
+    unlocked_summary = render_admin_access_summary(unlocked_payload, "es", {"revision": 1})
+    unlocked_shell = render_admin_access_shell(unlocked_payload, "es", {"revision": 1})
+    assert _find_component(unlocked_summary, "assumptions-advanced-tools-entry-status").children == tr(
+        "workspace.advanced.entry.status.unlocked", "es"
+    )
+    assert _find_component(unlocked_shell, "admin-unlocked-shell") is not None
 
 
 def test_render_admin_access_shell_orders_economics_before_profiles_and_catalogs(monkeypatch, tmp_path) -> None:

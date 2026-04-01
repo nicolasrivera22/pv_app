@@ -179,6 +179,7 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(assumptions_layout, "run-assumptions-scan-btn") is not None
     assert _find_component(assumptions_layout, "assumptions-general-tab") is not None
     assert _find_component(assumptions_layout, "assumptions-demand-tab") is not None
+    assert _find_component(assumptions_layout, "assumptions-advanced-tools-entry-shell") is not None
     assert _find_component(assumptions_layout, "advanced-tools") is not None
     assert _find_component(assumptions_layout, "assumptions-advanced-tools-shell") is not None
     assert _find_component(assumptions_layout, "workspace-admin-entry") is None
@@ -188,6 +189,8 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
 
     assert _find_component(admin_layout, "admin-redirect-location") is not None
     assert _find_component(admin_layout, "admin-redirect-fallback") is not None
+    assert _find_component(admin_layout, "admin-redirect-title") is not None
+    assert _find_component(admin_layout, "admin-redirect-copy") is not None
     assert _find_component(admin_layout, "admin-setup-pin-input") is None
     assert _find_component(admin_layout, "admin-pin-input") is None
     assert _find_component(admin_layout, "profile-editor-title") is None
@@ -195,6 +198,19 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(admin_layout, "apply-admin-btn") is None
     assert _find_component(admin_layout, "run-assumptions-scan-btn") is None
     assert _find_component(admin_layout, "workspace-admin-entry") is None
+
+
+def test_assumptions_layout_places_advanced_entry_near_top_before_real_host() -> None:
+    assumptions_layout = assumptions_page.layout() if callable(assumptions_page.layout) else assumptions_page.layout
+    main_stack = _find_matching_component(
+        assumptions_layout,
+        lambda node: "main-stack" in str(getattr(node, "className", "")).split(),
+    )
+
+    assert main_stack is not None
+    child_ids = [getattr(child, "id", None) for child in main_stack.children]
+    assert child_ids.index("assumptions-advanced-tools-entry-shell") == 3
+    assert child_ids.index("assumptions-advanced-tools-entry-shell") < child_ids.index("advanced-tools")
 
 
 def test_assumptions_page_registers_advanced_access_shell_callback() -> None:

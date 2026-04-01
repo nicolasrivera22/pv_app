@@ -1014,6 +1014,9 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".assumption-editor-panel .Select-control" in css_source
     assert ".candidate-selection-helper" in css_source
     assert ".candidate-horizon-toolbar" in css_source
+    assert ".assumptions-advanced-entry-card" in css_source
+    assert "#advanced-tools:target" in css_source
+    assert "scroll-margin-top" in css_source
     assert ":root {" in css_source
     assert "--color-primary" in css_source
     assert "--color-primary-soft" in css_source

@@ -49,6 +49,10 @@ layout = workspace_frame(
             ],
         ),
         html.Div(
+            id="assumptions-advanced-tools-entry-shell",
+            className="assumptions-advanced-tools-entry-shell",
+        ),
+        html.Div(
             className="panel",
             children=[
                 html.H3("", id="assumptions-validation-title"),

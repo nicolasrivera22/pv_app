@@ -9,7 +9,7 @@ from dash.exceptions import PreventUpdate
 import pandas as pd
 import plotly.graph_objects as go
 
-from components.admin_view import build_admin_access_shell
+from components.admin_view import build_admin_access_shell, build_admin_access_summary
 from components.assumption_editor import render_assumption_sections
 from .admin_access import (
     admin_pin_configured,
@@ -101,6 +101,35 @@ def _validate_admin_setup_pin(pin_value, confirm_value) -> str:
     if pin != confirm:
         raise ValueError("workspace.advanced.setup.mismatch")
     return pin
+
+
+def _resolve_admin_access_view_state(session_payload, language_value, access_meta=None) -> dict[str, object]:
+    lang = _lang(language_value)
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    configured = admin_pin_configured()
+    active = state.get_scenario()
+    if not configured:
+        access_mode = "setup_required"
+    elif unlocked:
+        access_mode = "unlocked"
+    else:
+        access_mode = "locked"
+    preview_state = _admin_preview_selector_state_key(active)
+    candidate_key = None
+    if preview_state == PREVIEW_STATE_READY:
+        candidate_key = _resolve_admin_preview_candidate_key(active)
+    meta = access_meta or {}
+    return {
+        "lang": lang,
+        "configured": configured,
+        "unlocked": unlocked,
+        "access_mode": access_mode,
+        "status_key": meta.get("message_key"),
+        "tone": str(meta.get("tone") or "neutral"),
+        "preview_state": preview_state,
+        "scenario_name": None if active is None else str(active.name or "").strip() or None,
+        "candidate_key": candidate_key,
+    }
 
 
 PROFILE_MAIN_TABLE_IDS = (
@@ -1417,22 +1446,37 @@ def unlock_admin_session(_unlock_clicks, session_payload, pin_value):
 
 
 @callback(
+    Output("assumptions-advanced-tools-entry-shell", "children"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+    Input("admin-access-meta", "data"),
+)
+def render_admin_access_summary(session_payload, language_value, access_meta):
+    view_state = _resolve_admin_access_view_state(session_payload, language_value, access_meta)
+    return build_admin_access_summary(
+        lang=str(view_state["lang"]),
+        access_mode=str(view_state["access_mode"]),
+        preview_state=str(view_state["preview_state"]),
+        scenario_name=view_state["scenario_name"],
+        candidate_key=view_state["candidate_key"],
+        status_key=view_state["status_key"],
+        tone=str(view_state["tone"]),
+    )
+
+
+@callback(
     Output("assumptions-advanced-tools-shell", "children"),
     Input("scenario-session-store", "data"),
     Input("language-selector", "value"),
     Input("admin-access-meta", "data"),
 )
 def render_admin_access_shell(session_payload, language_value, access_meta):
-    lang = _lang(language_value)
-    _client_state, _state, unlocked = _admin_session(session_payload, lang)
-    configured = admin_pin_configured()
-    meta = access_meta or {}
+    view_state = _resolve_admin_access_view_state(session_payload, language_value, access_meta)
     return build_admin_access_shell(
-        lang=lang,
-        configured=configured,
-        unlocked=unlocked,
-        status_key=meta.get("message_key"),
-        tone=str(meta.get("tone") or "neutral"),
+        lang=str(view_state["lang"]),
+        access_mode=str(view_state["access_mode"]),
+        status_key=view_state["status_key"],
+        tone=str(view_state["tone"]),
     )
 
 
