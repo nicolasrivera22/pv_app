@@ -4,7 +4,7 @@ from datetime import datetime
 import logging
 import time
 
-from dash import ALL, Input, Output, State, callback, ctx, dash_table, html
+from dash import ALL, Input, Output, State, callback, ctx, dash_table, html, no_update
 from dash.exceptions import PreventUpdate
 import pandas as pd
 import plotly.graph_objects as go
@@ -36,15 +36,29 @@ from .economics_engine import (
     economics_preview_warning_messages,
     resolve_economics_preview,
 )
+from .financial_presets import (
+    build_financial_preset_catalog,
+    duplicate_preset_name,
+    financial_preset_name_conflict,
+    preset_record_signature,
+    preset_signature,
+    preset_summary_counts,
+    resolve_financial_preset,
+    sanitize_financial_presets,
+)
 from .i18n import tr
 from .profile_charts import build_profile_chart
 from .project_io import save_project
 from .scenario_session import (
+    add_financial_preset,
+    create_financial_preset_record,
+    delete_financial_preset,
     PreparedEconomicsRuntimePriceBridge,
     apply_prepared_economics_runtime_price_bridge,
     prepare_economics_runtime_price_bridge,
     resolve_runtime_bridge_candidate_key,
     resolve_runtime_price_bridge_state,
+    update_financial_preset,
     update_selected_candidate,
 )
 from .session_state import commit_client_session, resolve_client_session
@@ -87,6 +101,43 @@ def _admin_locked_meta(message_key: str | None = None, *, tone: str = "neutral")
         "message_key": message_key,
         "tone": tone,
     }
+
+
+def _admin_preset_meta(
+    message_key: str | None = None,
+    *,
+    tone: str = "neutral",
+    message: str | None = None,
+) -> dict[str, object]:
+    return {
+        "revision": time.time(),
+        "message_key": message_key,
+        "tone": tone,
+        "message": message,
+    }
+
+
+def _admin_preset_selection_state(preset_id: str | None = None) -> dict[str, str | None]:
+    normalized = str(preset_id or "").strip()
+    return {"preset_id": normalized or None}
+
+
+def _selected_admin_preset_id(selection_state: dict[str, object] | None) -> str | None:
+    preset_id = str((selection_state or {}).get("preset_id") or "").strip()
+    return preset_id or None
+
+
+def _admin_preset_meta_message(meta: dict[str, object] | None, *, lang: str) -> str:
+    message = str((meta or {}).get("message") or "").strip()
+    if message:
+        return message
+    message_key = str((meta or {}).get("message_key") or "").strip()
+    return tr(message_key, lang) if message_key else ""
+
+
+def _admin_preset_meta_tone(meta: dict[str, object] | None) -> str:
+    tone = str((meta or {}).get("tone") or "").strip()
+    return tone or "neutral"
 
 
 def _validate_admin_setup_pin(pin_value, confirm_value) -> str:
@@ -334,6 +385,146 @@ def _combined_price_editor_rows_or_none(
     if economics_tax_rows is None or economics_adjustment_rows is None:
         return None
     return economics_price_items_rows_from_split_editors(economics_tax_rows, economics_adjustment_rows)
+
+
+def _resolved_admin_economics_rows(
+    active,
+    *,
+    economics_cost_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    normalized_cost_rows = (
+        active.config_bundle.economics_cost_items_table.to_dict("records")
+        if economics_cost_rows is None
+        else economics_cost_items_rows_from_editor(economics_cost_rows)
+    )
+    normalized_price_rows = (
+        active.config_bundle.economics_price_items_table.to_dict("records")
+        if economics_tax_rows is None or economics_adjustment_rows is None
+        else economics_price_items_rows_from_split_editors(economics_tax_rows, economics_adjustment_rows)
+    )
+    return normalized_cost_rows, normalized_price_rows
+
+
+def _valid_custom_financial_presets(state) -> tuple[tuple[object, ...], tuple[str, ...]]:
+    return sanitize_financial_presets(state.financial_presets)
+
+
+def _resolve_selected_financial_preset(state, selection_state, *, lang: str):
+    preset_id = _selected_admin_preset_id(selection_state)
+    return resolve_financial_preset(preset_id, state.financial_presets, lang=lang)
+
+
+def _financial_preset_origin_badge(selected_preset, *, lang: str) -> tuple[str, str]:
+    if selected_preset is None:
+        return (
+            tr("workspace.admin.economics.presets.origin.none", lang),
+            "workbench-state-chip workbench-state-chip-neutral",
+        )
+    if selected_preset.origin == "system":
+        return (
+            tr("workspace.admin.economics.presets.origin.system", lang),
+            "workbench-state-chip workbench-state-chip-info",
+        )
+    return (
+        tr("workspace.admin.economics.presets.origin.custom", lang),
+        "workbench-state-chip workbench-state-chip-success",
+    )
+
+
+def _financial_preset_summary(selected_preset, *, lang: str) -> str:
+    if selected_preset is None:
+        return tr("workspace.admin.economics.presets.summary.none", lang)
+    counts = preset_summary_counts(selected_preset)
+    return tr(
+        "workspace.admin.economics.presets.summary.selected",
+        lang,
+        cost_count=counts["cost_count"],
+        tax_count=counts["tax_count"],
+        adjustment_count=counts["adjustment_count"],
+    )
+
+
+def _financial_preset_match_badge(
+    selected_preset,
+    *,
+    current_cost_rows: list[dict[str, object]] | None,
+    current_price_rows: list[dict[str, object]] | None,
+    lang: str,
+) -> tuple[str, str]:
+    if selected_preset is None:
+        return (
+            tr("workspace.admin.economics.presets.match.none", lang),
+            "workbench-state-chip workbench-state-chip-neutral",
+        )
+    if current_cost_rows is None or current_price_rows is None:
+        return (
+            tr("workspace.admin.economics.presets.match.none", lang),
+            "workbench-state-chip workbench-state-chip-neutral",
+        )
+    current_signature = preset_signature(
+        economics_cost_items_rows=current_cost_rows,
+        economics_price_items_rows=current_price_rows,
+    )
+    selected_signature = preset_record_signature(selected_preset)
+    if current_signature == selected_signature:
+        return (
+            tr("workspace.admin.economics.presets.match.exact", lang),
+            "workbench-state-chip workbench-state-chip-success",
+        )
+    return (
+        tr("workspace.admin.economics.presets.match.modified", lang),
+        "workbench-state-chip workbench-state-chip-warning",
+    )
+
+
+def _financial_preset_helper(
+    *,
+    lang: str,
+    meta: dict[str, object] | None,
+    invalid_preset_ids: tuple[str, ...],
+) -> str:
+    parts = [_admin_preset_meta_message(meta, lang=lang)]
+    if invalid_preset_ids:
+        parts.append(
+            tr(
+                "workspace.admin.economics.presets.warning.invalid_hidden",
+                lang,
+                count=len(invalid_preset_ids),
+            )
+        )
+    return _join_status_parts(*parts)
+
+
+def _resolve_target_preset_name(
+    raw_name: str | None,
+    *,
+    state,
+    lang: str,
+    exclude_preset_id: str | None = None,
+) -> str:
+    resolved_name = str(raw_name or "").strip()
+    if not resolved_name:
+        raise ValueError("workspace.admin.economics.presets.error.name_required")
+    conflict_id = financial_preset_name_conflict(
+        resolved_name,
+        state.financial_presets,
+        lang=lang,
+        exclude_preset_id=exclude_preset_id,
+    )
+    if conflict_id is not None:
+        raise ValueError("workspace.admin.economics.presets.error.name_conflict")
+    return resolved_name
+
+
+def _commit_admin_project_state(client_state, state, *, project_name_value, lang: str):
+    saved = False
+    if _project_is_bound(state):
+        state = save_project(state, project_name=_resolved_project_name(project_name_value, state), language=lang)
+        saved = True
+    client_state = commit_client_session(client_state, state)
+    return state, client_state, saved
 
 
 def _unhydrated_admin_tables(table_rows: dict[str, list[dict[str, object]] | None]) -> tuple[str, ...]:
@@ -1478,6 +1669,527 @@ def render_admin_access_shell(session_payload, language_value, access_meta):
         status_key=view_state["status_key"],
         tone=str(view_state["tone"]),
     )
+
+
+@callback(
+    Output("admin-financial-preset-selection", "data"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+    State("admin-financial-preset-selection", "data"),
+)
+def sync_admin_financial_preset_selection(session_payload, language_value, current_state):
+    lang = _lang(language_value)
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked or state.get_scenario() is None:
+        return _admin_preset_selection_state()
+    selected_preset_id = _selected_admin_preset_id(current_state)
+    if selected_preset_id is None:
+        return _admin_preset_selection_state()
+    if _resolve_selected_financial_preset(state, current_state, lang=lang) is None:
+        return _admin_preset_selection_state()
+    return _admin_preset_selection_state(selected_preset_id)
+
+
+@callback(
+    Output("admin-financial-preset-selection", "data", allow_duplicate=True),
+    Output("admin-financial-preset-meta", "data", allow_duplicate=True),
+    Input("economics-preset-dropdown", "value", allow_optional=True),
+    prevent_initial_call=True,
+)
+def update_admin_financial_preset_selection(dropdown_value):
+    return _admin_preset_selection_state(str(dropdown_value or "").strip() or None), _admin_preset_meta()
+
+
+@callback(
+    Output("economics-preset-dropdown", "options"),
+    Output("economics-preset-dropdown", "value"),
+    Output("economics-preset-dropdown", "disabled"),
+    Output("economics-preset-origin-badge", "children"),
+    Output("economics-preset-origin-badge", "className"),
+    Output("economics-preset-match-badge", "children"),
+    Output("economics-preset-match-badge", "className"),
+    Output("economics-preset-summary", "children"),
+    Output("economics-preset-helper", "children"),
+    Output("apply-economics-preset-btn", "disabled"),
+    Output("save-economics-preset-btn", "disabled"),
+    Output("duplicate-economics-preset-btn", "disabled"),
+    Output("rename-economics-preset-btn", "disabled"),
+    Output("delete-economics-preset-btn", "disabled"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+    Input("admin-financial-preset-selection", "data"),
+    Input("admin-financial-preset-meta", "data"),
+    Input("economics-cost-items-editor", "data", allow_optional=True),
+    Input("economics-tax-items-editor", "data", allow_optional=True),
+    Input("economics-adjustment-items-editor", "data", allow_optional=True),
+)
+def render_financial_preset_controls(
+    session_payload,
+    language_value,
+    preset_selection_state,
+    preset_meta,
+    economics_cost_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
+):
+    lang = _lang(language_value)
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    empty_origin, empty_origin_class = _financial_preset_origin_badge(None, lang=lang)
+    empty_match, empty_match_class = _financial_preset_match_badge(
+        None,
+        current_cost_rows=None,
+        current_price_rows=None,
+        lang=lang,
+    )
+    if not unlocked:
+        return [], None, True, empty_origin, empty_origin_class, empty_match, empty_match_class, tr(
+            "workspace.admin.economics.presets.summary.none",
+            lang,
+        ), "", True, True, True, True, True
+    active = state.get_scenario()
+    if active is None:
+        return [], None, True, empty_origin, empty_origin_class, empty_match, empty_match_class, tr(
+            "workspace.admin.economics.presets.summary.none",
+            lang,
+        ), "", True, True, True, True, True
+
+    valid_custom_presets, invalid_preset_ids = _valid_custom_financial_presets(state)
+    catalog = build_financial_preset_catalog(valid_custom_presets, lang=lang)
+    selected_preset = resolve_financial_preset(
+        _selected_admin_preset_id(preset_selection_state),
+        valid_custom_presets,
+        lang=lang,
+    )
+    options = [{"label": preset.display_name, "value": preset.preset_id} for preset in catalog]
+    summary_text = _financial_preset_summary(selected_preset, lang=lang)
+    helper_text = _financial_preset_helper(lang=lang, meta=preset_meta, invalid_preset_ids=invalid_preset_ids)
+    origin_text, origin_class = _financial_preset_origin_badge(selected_preset, lang=lang)
+
+    current_cost_rows = None
+    current_price_rows = None
+    tables_ready = _admin_economics_tables_ready(
+        active,
+        economics_cost_rows=economics_cost_rows,
+        economics_tax_rows=economics_tax_rows,
+        economics_adjustment_rows=economics_adjustment_rows,
+    )
+    if tables_ready:
+        current_cost_rows, current_price_rows = _resolved_admin_economics_rows(
+            active,
+            economics_cost_rows=economics_cost_rows,
+            economics_tax_rows=economics_tax_rows,
+            economics_adjustment_rows=economics_adjustment_rows,
+        )
+    match_text, match_class = _financial_preset_match_badge(
+        selected_preset,
+        current_cost_rows=current_cost_rows,
+        current_price_rows=current_price_rows,
+        lang=lang,
+    )
+    duplicate_disabled = selected_preset is None
+    rename_disabled = selected_preset is None or selected_preset.origin != "custom"
+    delete_disabled = rename_disabled
+    return (
+        options,
+        None if selected_preset is None else selected_preset.preset_id,
+        not bool(options),
+        origin_text,
+        origin_class,
+        match_text,
+        match_class,
+        summary_text,
+        helper_text,
+        (selected_preset is None) or not tables_ready,
+        not tables_ready,
+        duplicate_disabled,
+        rename_disabled,
+        delete_disabled,
+    )
+
+
+@callback(
+    Output("economics-preset-name-input", "value"),
+    Input("admin-financial-preset-selection", "data"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+)
+def sync_financial_preset_name_input(preset_selection_state, session_payload, language_value):
+    lang = _lang(language_value)
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        return ""
+    selected_preset = _resolve_selected_financial_preset(state, preset_selection_state, lang=lang)
+    if selected_preset is None:
+        return ""
+    return selected_preset.display_name
+
+
+@callback(
+    Output("economics-cost-items-editor", "data", allow_duplicate=True),
+    Output("economics-tax-items-editor", "data", allow_duplicate=True),
+    Output("economics-adjustment-items-editor", "data", allow_duplicate=True),
+    Output("admin-financial-preset-meta", "data", allow_duplicate=True),
+    Output("workbench-status", "children", allow_duplicate=True),
+    Input("apply-economics-preset-btn", "n_clicks", allow_optional=True),
+    State("scenario-session-store", "data"),
+    State("admin-financial-preset-selection", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def apply_financial_preset(
+    _apply_clicks,
+    session_payload,
+    preset_selection_state,
+    language_value,
+):
+    lang = _lang(language_value)
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        raise PreventUpdate
+    selected_preset = _resolve_selected_financial_preset(state, preset_selection_state, lang=lang)
+    if selected_preset is None:
+        raise PreventUpdate
+    message = tr("workspace.admin.economics.presets.status.applied", lang, name=selected_preset.display_name)
+    return (
+        economics_cost_items_rows_to_editor(selected_preset.economics_cost_items_rows, lang=lang),
+        economics_price_items_rows_to_section_editor(
+            selected_preset.economics_price_items_rows,
+            layers=("tax",),
+            lang=lang,
+        ),
+        economics_price_items_rows_to_section_editor(
+            selected_preset.economics_price_items_rows,
+            layers=("commercial", "sale"),
+            lang=lang,
+        ),
+        _admin_preset_meta(message=message, tone="success"),
+        message,
+    )
+
+
+@callback(
+    Output("scenario-session-store", "data", allow_duplicate=True),
+    Output("admin-financial-preset-selection", "data", allow_duplicate=True),
+    Output("admin-financial-preset-meta", "data", allow_duplicate=True),
+    Output("workbench-status", "children", allow_duplicate=True),
+    Input("save-economics-preset-btn", "n_clicks", allow_optional=True),
+    State("scenario-session-store", "data"),
+    State("project-name-input", "value"),
+    State("economics-preset-name-input", "value"),
+    State("economics-cost-items-editor", "data", allow_optional=True),
+    State("economics-tax-items-editor", "data", allow_optional=True),
+    State("economics-adjustment-items-editor", "data", allow_optional=True),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def save_current_financial_preset(
+    _save_clicks,
+    session_payload,
+    project_name_value,
+    preset_name_value,
+    economics_cost_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
+    language_value,
+):
+    lang = _lang(language_value)
+    client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        raise PreventUpdate
+    try:
+        active = state.get_scenario()
+        if active is None:
+            raise PreventUpdate
+        resolved_name = _resolve_target_preset_name(preset_name_value, state=state, lang=lang)
+        normalized_cost_rows, normalized_price_rows = _resolved_admin_economics_rows(
+            active,
+            economics_cost_rows=economics_cost_rows,
+            economics_tax_rows=economics_tax_rows,
+            economics_adjustment_rows=economics_adjustment_rows,
+        )
+        preset = create_financial_preset_record(
+            resolved_name,
+            economics_cost_items_rows=normalized_cost_rows,
+            economics_price_items_rows=normalized_price_rows,
+        )
+        state = add_financial_preset(state, preset)
+        state, client_state, saved = _commit_admin_project_state(
+            client_state,
+            state,
+            project_name_value=project_name_value,
+            lang=lang,
+        )
+        message = tr("workspace.admin.economics.presets.status.saved", lang, name=preset.name)
+        status = _join_status_parts(
+            message,
+            tr("workbench.run_flow.saved", lang) if saved else tr("workspace.admin.economics.presets.status.workspace_only", lang),
+        )
+        return (
+            client_state.to_payload(),
+            _admin_preset_selection_state(preset.preset_id),
+            _admin_preset_meta(message=message, tone="success"),
+            status,
+        )
+    except PreventUpdate:
+        raise
+    except ValueError as exc:
+        client_state = commit_client_session(client_state, state, bump_revision=False)
+        return (
+            client_state.to_payload(),
+            no_update,
+            _admin_preset_meta(message_key=str(exc), tone="error"),
+            tr(str(exc), lang),
+        )
+    except Exception as exc:
+        client_state = commit_client_session(client_state, state, bump_revision=False)
+        return (
+            client_state.to_payload(),
+            no_update,
+            _admin_preset_meta(message=workbench_status_message("common.action_failed", lang, error=exc), tone="error"),
+            workbench_status_message("common.action_failed", lang, error=exc),
+        )
+
+
+@callback(
+    Output("scenario-session-store", "data", allow_duplicate=True),
+    Output("admin-financial-preset-selection", "data", allow_duplicate=True),
+    Output("admin-financial-preset-meta", "data", allow_duplicate=True),
+    Output("workbench-status", "children", allow_duplicate=True),
+    Input("duplicate-economics-preset-btn", "n_clicks", allow_optional=True),
+    State("scenario-session-store", "data"),
+    State("project-name-input", "value"),
+    State("admin-financial-preset-selection", "data"),
+    State("economics-preset-name-input", "value"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def duplicate_financial_preset_action(
+    _duplicate_clicks,
+    session_payload,
+    project_name_value,
+    preset_selection_state,
+    preset_name_value,
+    language_value,
+):
+    lang = _lang(language_value)
+    client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        raise PreventUpdate
+    try:
+        selected_preset = _resolve_selected_financial_preset(state, preset_selection_state, lang=lang)
+        if selected_preset is None:
+            raise PreventUpdate
+        valid_custom_presets, _invalid = _valid_custom_financial_presets(state)
+        catalog = build_financial_preset_catalog(valid_custom_presets, lang=lang)
+        proposed_name = str(preset_name_value or "").strip()
+        if proposed_name and proposed_name.casefold() != selected_preset.display_name.casefold():
+            resolved_name = _resolve_target_preset_name(proposed_name, state=state, lang=lang)
+        else:
+            resolved_name = duplicate_preset_name(
+                selected_preset.display_name,
+                [preset.display_name for preset in catalog],
+                lang=lang,
+            )
+        preset = create_financial_preset_record(
+            resolved_name,
+            economics_cost_items_rows=selected_preset.economics_cost_items_rows,
+            economics_price_items_rows=selected_preset.economics_price_items_rows,
+        )
+        state = add_financial_preset(state, preset)
+        state, client_state, saved = _commit_admin_project_state(
+            client_state,
+            state,
+            project_name_value=project_name_value,
+            lang=lang,
+        )
+        message = tr("workspace.admin.economics.presets.status.duplicated", lang, name=preset.name)
+        status = _join_status_parts(
+            message,
+            tr("workbench.run_flow.saved", lang) if saved else tr("workspace.admin.economics.presets.status.workspace_only", lang),
+        )
+        return (
+            client_state.to_payload(),
+            _admin_preset_selection_state(preset.preset_id),
+            _admin_preset_meta(message=message, tone="success"),
+            status,
+        )
+    except PreventUpdate:
+        raise
+    except ValueError as exc:
+        client_state = commit_client_session(client_state, state, bump_revision=False)
+        return (
+            client_state.to_payload(),
+            no_update,
+            _admin_preset_meta(message_key=str(exc), tone="error"),
+            tr(str(exc), lang),
+        )
+    except Exception as exc:
+        client_state = commit_client_session(client_state, state, bump_revision=False)
+        return (
+            client_state.to_payload(),
+            no_update,
+            _admin_preset_meta(message=workbench_status_message("common.action_failed", lang, error=exc), tone="error"),
+            workbench_status_message("common.action_failed", lang, error=exc),
+        )
+
+
+@callback(
+    Output("scenario-session-store", "data", allow_duplicate=True),
+    Output("admin-financial-preset-selection", "data", allow_duplicate=True),
+    Output("admin-financial-preset-meta", "data", allow_duplicate=True),
+    Output("workbench-status", "children", allow_duplicate=True),
+    Input("rename-economics-preset-btn", "n_clicks", allow_optional=True),
+    State("scenario-session-store", "data"),
+    State("project-name-input", "value"),
+    State("admin-financial-preset-selection", "data"),
+    State("economics-preset-name-input", "value"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def rename_financial_preset_action(
+    _rename_clicks,
+    session_payload,
+    project_name_value,
+    preset_selection_state,
+    preset_name_value,
+    language_value,
+):
+    lang = _lang(language_value)
+    client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        raise PreventUpdate
+    try:
+        selected_preset = _resolve_selected_financial_preset(state, preset_selection_state, lang=lang)
+        if selected_preset is None or selected_preset.origin != "custom":
+            raise PreventUpdate
+        resolved_name = _resolve_target_preset_name(
+            preset_name_value,
+            state=state,
+            lang=lang,
+            exclude_preset_id=selected_preset.preset_id,
+        )
+        if resolved_name.casefold() == selected_preset.display_name.casefold():
+            raise PreventUpdate
+        updated_preset = create_financial_preset_record(
+            resolved_name,
+            preset_id=selected_preset.preset_id,
+            economics_cost_items_rows=selected_preset.economics_cost_items_rows,
+            economics_price_items_rows=selected_preset.economics_price_items_rows,
+        )
+        state = update_financial_preset(state, updated_preset)
+        state, client_state, saved = _commit_admin_project_state(
+            client_state,
+            state,
+            project_name_value=project_name_value,
+            lang=lang,
+        )
+        message = tr("workspace.admin.economics.presets.status.renamed", lang, name=updated_preset.name)
+        status = _join_status_parts(
+            message,
+            tr("workbench.run_flow.saved", lang) if saved else tr("workspace.admin.economics.presets.status.workspace_only", lang),
+        )
+        return (
+            client_state.to_payload(),
+            _admin_preset_selection_state(updated_preset.preset_id),
+            _admin_preset_meta(message=message, tone="success"),
+            status,
+        )
+    except PreventUpdate:
+        raise
+    except ValueError as exc:
+        client_state = commit_client_session(client_state, state, bump_revision=False)
+        return (
+            client_state.to_payload(),
+            no_update,
+            _admin_preset_meta(message_key=str(exc), tone="error"),
+            tr(str(exc), lang),
+        )
+    except Exception as exc:
+        client_state = commit_client_session(client_state, state, bump_revision=False)
+        return (
+            client_state.to_payload(),
+            no_update,
+            _admin_preset_meta(message=workbench_status_message("common.action_failed", lang, error=exc), tone="error"),
+            workbench_status_message("common.action_failed", lang, error=exc),
+        )
+
+
+@callback(
+    Output("economics-preset-delete-confirm", "displayed"),
+    Input("delete-economics-preset-btn", "n_clicks", allow_optional=True),
+    State("scenario-session-store", "data"),
+    State("admin-financial-preset-selection", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def request_financial_preset_delete(_delete_clicks, session_payload, preset_selection_state, language_value):
+    lang = _lang(language_value)
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        raise PreventUpdate
+    selected_preset = _resolve_selected_financial_preset(state, preset_selection_state, lang=lang)
+    if selected_preset is None or selected_preset.origin != "custom":
+        raise PreventUpdate
+    return True
+
+
+@callback(
+    Output("scenario-session-store", "data", allow_duplicate=True),
+    Output("admin-financial-preset-selection", "data", allow_duplicate=True),
+    Output("admin-financial-preset-meta", "data", allow_duplicate=True),
+    Output("workbench-status", "children", allow_duplicate=True),
+    Input("economics-preset-delete-confirm", "submit_n_clicks"),
+    State("scenario-session-store", "data"),
+    State("project-name-input", "value"),
+    State("admin-financial-preset-selection", "data"),
+    State("language-selector", "value"),
+    prevent_initial_call=True,
+)
+def delete_financial_preset_action(
+    submit_n_clicks,
+    session_payload,
+    project_name_value,
+    preset_selection_state,
+    language_value,
+):
+    if not submit_n_clicks:
+        raise PreventUpdate
+    lang = _lang(language_value)
+    client_state, state, unlocked = _admin_session(session_payload, lang)
+    if not unlocked:
+        raise PreventUpdate
+    try:
+        selected_preset = _resolve_selected_financial_preset(state, preset_selection_state, lang=lang)
+        if selected_preset is None or selected_preset.origin != "custom":
+            raise PreventUpdate
+        state = delete_financial_preset(state, selected_preset.preset_id)
+        state, client_state, saved = _commit_admin_project_state(
+            client_state,
+            state,
+            project_name_value=project_name_value,
+            lang=lang,
+        )
+        message = tr("workspace.admin.economics.presets.status.deleted", lang, name=selected_preset.display_name)
+        status = _join_status_parts(
+            message,
+            tr("workbench.run_flow.saved", lang) if saved else tr("workspace.admin.economics.presets.status.workspace_only", lang),
+        )
+        return (
+            client_state.to_payload(),
+            _admin_preset_selection_state(),
+            _admin_preset_meta(message=message, tone="success"),
+            status,
+        )
+    except PreventUpdate:
+        raise
+    except Exception as exc:
+        client_state = commit_client_session(client_state, state, bump_revision=False)
+        return (
+            client_state.to_payload(),
+            no_update,
+            _admin_preset_meta(message=workbench_status_message("common.action_failed", lang, error=exc), tone="error"),
+            workbench_status_message("common.action_failed", lang, error=exc),
+        )
 
 
 @callback(

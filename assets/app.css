@@ -1453,11 +1453,53 @@ body {
 }
 
 .economics-editors-shell,
+.economics-presets-shell,
 .economics-candidate-shell,
 .economics-summary-shell,
 .economics-closing-shell {
     display: grid;
     gap: 0.75rem;
+}
+
+.economics-presets-shell {
+    padding: 1rem 1.05rem;
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(255, 255, 255, 0.99) 100%);
+}
+
+.economics-presets-head {
+    align-items: start;
+    gap: 0.9rem;
+}
+
+.economics-preset-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    justify-content: flex-end;
+}
+
+.economics-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem;
+}
+
+.economics-preset-name-control,
+.economics-preset-summary {
+    min-width: 0;
+}
+
+.economics-preset-summary {
+    color: var(--color-text-secondary);
+}
+
+.economics-preset-helper {
+    color: var(--color-primary-hover);
+}
+
+.economics-preset-actions {
+    gap: 0.65rem;
 }
 
 .economics-editors-panels,
@@ -2085,6 +2127,10 @@ body {
     }
 
     .economics-candidate-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .economics-preset-grid {
         grid-template-columns: 1fr;
     }
 

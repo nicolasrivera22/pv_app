@@ -5,12 +5,13 @@ from dataclasses import replace
 from pathlib import Path
 
 from .config_metadata import materialize_panel_config_rows
+from .financial_presets import sanitize_financial_presets
 from .io_excel import TABLE_FILE_MAP, load_bundle_from_tables
 from .runtime_paths import legacy_packaged_root, project_exports_root, project_inputs_root, project_root, projects_root
 from .scenario_session import create_scenario_record
 from .types import LoadedConfigBundle, ProjectManifest, ProjectScenarioManifest, ScenarioRecord, ScenarioSessionState
 
-PROJECT_FORMAT_VERSION = 1
+PROJECT_FORMAT_VERSION = 2
 
 
 def _slugify(value: str) -> str:
@@ -81,6 +82,7 @@ def _write_table_inputs(root: Path, scenario: ScenarioRecord) -> None:
 
 
 def _build_manifest(state: ScenarioSessionState, *, project_name: str, slug: str, language: str) -> ProjectManifest:
+    valid_financial_presets, _invalid = sanitize_financial_presets(state.financial_presets)
     scenarios = tuple(
         ProjectScenarioManifest(
             scenario_id=scenario.scenario_id,
@@ -102,6 +104,7 @@ def _build_manifest(state: ScenarioSessionState, *, project_name: str, slug: str
         comparison_scenario_ids=state.comparison_scenario_ids,
         design_comparison_candidate_keys=state.design_comparison_candidate_keys,
         scenarios=scenarios,
+        financial_presets=valid_financial_presets,
         ui_prefs={"language": language},
     )
 
@@ -188,6 +191,7 @@ def open_project(slug: str) -> ScenarioSessionState:
         active_scenario_id=active_scenario_id,
         comparison_scenario_ids=comparison_ids,
         design_comparison_candidate_keys=design_keys,
+        financial_presets=manifest.financial_presets,
         project_slug=manifest.slug,
         project_name=manifest.name,
         project_dirty=False,

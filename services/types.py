@@ -298,6 +298,31 @@ class ScenarioRunResult:
 
 
 @dataclass(frozen=True)
+class FinancialPresetRecord:
+    preset_id: str
+    name: str
+    economics_cost_items_rows: tuple[dict[str, Any], ...] = ()
+    economics_price_items_rows: tuple[dict[str, Any], ...] = ()
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "preset_id": self.preset_id,
+            "name": self.name,
+            "economics_cost_items_rows": [dict(row) for row in self.economics_cost_items_rows],
+            "economics_price_items_rows": [dict(row) for row in self.economics_price_items_rows],
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "FinancialPresetRecord":
+        return cls(
+            preset_id=str(payload["preset_id"]),
+            name=str(payload["name"]),
+            economics_cost_items_rows=tuple(dict(row) for row in payload.get("economics_cost_items_rows", [])),
+            economics_price_items_rows=tuple(dict(row) for row in payload.get("economics_price_items_rows", [])),
+        )
+
+
+@dataclass(frozen=True)
 class ScenarioRecord:
     scenario_id: str
     name: str
@@ -351,6 +376,7 @@ class ScenarioSessionState:
     active_scenario_id: str | None = None
     comparison_scenario_ids: tuple[str, ...] = ()
     design_comparison_candidate_keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    financial_presets: tuple[FinancialPresetRecord, ...] = ()
     project_slug: str | None = None
     project_name: str | None = None
     project_dirty: bool = False
@@ -368,6 +394,7 @@ class ScenarioSessionState:
                 scenario_id: list(candidate_keys)
                 for scenario_id, candidate_keys in self.design_comparison_candidate_keys.items()
             },
+            "financial_presets": [preset.to_payload() for preset in self.financial_presets],
             "project_slug": self.project_slug,
             "project_name": self.project_name,
             "project_dirty": self.project_dirty,
@@ -385,6 +412,7 @@ class ScenarioSessionState:
                 str(scenario_id): tuple(candidate_keys)
                 for scenario_id, candidate_keys in payload.get("design_comparison_candidate_keys", {}).items()
             },
+            financial_presets=tuple(FinancialPresetRecord.from_payload(item) for item in payload.get("financial_presets", [])),
             project_slug=payload.get("project_slug"),
             project_name=payload.get("project_name"),
             project_dirty=bool(payload.get("project_dirty", False)),
@@ -507,6 +535,7 @@ class ProjectManifest:
     comparison_scenario_ids: tuple[str, ...] = ()
     design_comparison_candidate_keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
     scenarios: tuple[ProjectScenarioManifest, ...] = ()
+    financial_presets: tuple[FinancialPresetRecord, ...] = ()
     ui_prefs: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
@@ -521,13 +550,14 @@ class ProjectManifest:
                 for scenario_id, candidate_keys in self.design_comparison_candidate_keys.items()
             },
             "scenarios": [scenario.to_payload() for scenario in self.scenarios],
+            "financial_presets": [preset.to_payload() for preset in self.financial_presets],
             "ui_prefs": self.ui_prefs,
         }
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "ProjectManifest":
         return cls(
-            format_version=int(payload["format_version"]),
+            format_version=int(payload.get("format_version", 1)),
             name=str(payload["name"]),
             slug=str(payload["slug"]),
             active_scenario_id=payload.get("active_scenario_id"),
@@ -537,6 +567,7 @@ class ProjectManifest:
                 for scenario_id, candidate_keys in payload.get("design_comparison_candidate_keys", {}).items()
             },
             scenarios=tuple(ProjectScenarioManifest.from_payload(item) for item in payload.get("scenarios", [])),
+            financial_presets=tuple(FinancialPresetRecord.from_payload(item) for item in payload.get("financial_presets", [])),
             ui_prefs=dict(payload.get("ui_prefs", {})),
         )
 

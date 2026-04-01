@@ -22,12 +22,16 @@ from .economics_tables import (
     normalize_economics_price_items_frame,
 )
 from .scenario_runner import resolve_deterministic_scan
-from .types import LoadedConfigBundle, RuntimePriceBridgeRecord, ScenarioRecord, ScenarioSessionState, ValidationIssue
+from .types import FinancialPresetRecord, LoadedConfigBundle, RuntimePriceBridgeRecord, ScenarioRecord, ScenarioSessionState, ValidationIssue
 from .validation import refresh_bundle_issues
 
 
 def _scenario_id() -> str:
     return f"scenario-{uuid4().hex[:8]}"
+
+
+def _financial_preset_id() -> str:
+    return f"preset-{uuid4().hex[:8]}"
 
 
 def create_scenario_record(name: str, bundle: LoadedConfigBundle, source_name: str | None = None) -> ScenarioRecord:
@@ -431,6 +435,51 @@ def _sanitize_design_comparison_keys(
 def add_scenario(state: ScenarioSessionState, scenario: ScenarioRecord, make_active: bool = True) -> ScenarioSessionState:
     active_id = scenario.scenario_id if make_active else state.active_scenario_id
     return replace(state, scenarios=(*state.scenarios, scenario), active_scenario_id=active_id, project_dirty=True)
+
+
+def create_financial_preset_record(
+    name: str,
+    *,
+    economics_cost_items_rows: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    economics_price_items_rows: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    preset_id: str | None = None,
+) -> FinancialPresetRecord:
+    resolved_name = str(name or "").strip()
+    if not resolved_name:
+        raise ValueError("Financial preset name cannot be empty.")
+    return FinancialPresetRecord(
+        preset_id=str(preset_id or _financial_preset_id()),
+        name=resolved_name,
+        economics_cost_items_rows=tuple(dict(row) for row in economics_cost_items_rows),
+        economics_price_items_rows=tuple(dict(row) for row in economics_price_items_rows),
+    )
+
+
+def add_financial_preset(state: ScenarioSessionState, preset: FinancialPresetRecord) -> ScenarioSessionState:
+    if any(item.preset_id == preset.preset_id for item in state.financial_presets):
+        raise KeyError(f"Ya existe el preset financiero '{preset.preset_id}'.")
+    return replace(state, financial_presets=(*state.financial_presets, preset), project_dirty=True)
+
+
+def update_financial_preset(state: ScenarioSessionState, preset: FinancialPresetRecord) -> ScenarioSessionState:
+    updated = False
+    presets: list[FinancialPresetRecord] = []
+    for item in state.financial_presets:
+        if item.preset_id == preset.preset_id:
+            presets.append(preset)
+            updated = True
+        else:
+            presets.append(item)
+    if not updated:
+        raise KeyError(f"No existe el preset financiero '{preset.preset_id}'.")
+    return replace(state, financial_presets=tuple(presets), project_dirty=True)
+
+
+def delete_financial_preset(state: ScenarioSessionState, preset_id: str) -> ScenarioSessionState:
+    remaining = tuple(item for item in state.financial_presets if item.preset_id != preset_id)
+    if len(remaining) == len(state.financial_presets):
+        raise KeyError(f"No existe el preset financiero '{preset_id}'.")
+    return replace(state, financial_presets=remaining, project_dirty=True)
 
 
 def duplicate_scenario(state: ScenarioSessionState, scenario_id: str, new_name: str | None = None) -> ScenarioSessionState:

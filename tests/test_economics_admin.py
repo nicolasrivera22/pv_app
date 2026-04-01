@@ -16,11 +16,13 @@ from services import (
     ScenarioSessionState,
     ValidationIssue,
     add_scenario,
+    add_financial_preset,
     bootstrap_client_session,
     clear_all_admin_session_access,
     clear_session_states,
     clear_workspace_drafts,
     commit_client_session,
+    create_financial_preset_record,
     create_scenario_record,
     fingerprint_deterministic_input,
     get_workspace_draft,
@@ -33,9 +35,11 @@ from services import (
     run_scenario_scan,
     save_project,
     set_admin_pin,
+    tr,
     update_config_table_values,
     update_scenario_bundle,
 )
+from services.financial_presets import build_financial_preset_catalog, resolve_financial_preset
 from services.economics_tables import RICH_MIGRATION_NOTE_PREFIX, normalize_economics_cost_items_with_issues
 from services.economics_tables import (
     economics_cost_items_rows_from_editor,
@@ -59,9 +63,17 @@ from services.validation import localize_validation_message, validate_economics_
 from services.workspace_admin_callbacks import (
     apply_economics_runtime_price_bridge,
     apply_admin_edits,
+    apply_financial_preset,
+    delete_financial_preset_action,
+    duplicate_financial_preset_action,
+    render_financial_preset_controls,
+    rename_financial_preset_action,
+    request_financial_preset_delete,
     render_economics_preview,
     render_runtime_price_bridge_ui,
+    save_current_financial_preset,
     sync_admin_draft,
+    sync_financial_preset_name_input,
     sync_economics_bridge_cta,
 )
 
@@ -218,6 +230,37 @@ def _sync_admin_draft_call(
         panel_rows,
         month_profile_rows,
         sun_profile_rows,
+        economics_cost_rows,
+        economics_tax_rows,
+        economics_adjustment_rows,
+    )
+
+
+def _resolve_state_from_payload(session_payload, *, lang: str = "es"):
+    _client_state, state = resolve_client_session(session_payload, language=lang)
+    return state
+
+
+def _render_preset_controls_call(
+    session_payload,
+    *,
+    preset_selection_state=None,
+    preset_meta=None,
+    economics_cost_rows=None,
+    economics_price_rows=None,
+    economics_price_rows_are_editor: bool = False,
+    lang: str = "es",
+):
+    economics_tax_rows, economics_adjustment_rows = _split_price_rows(
+        economics_price_rows,
+        lang=lang,
+        rows_are_editor=economics_price_rows_are_editor,
+    )
+    return render_financial_preset_controls(
+        session_payload,
+        lang,
+        preset_selection_state or {"preset_id": None},
+        preset_meta or {"revision": 0, "message_key": None, "tone": "neutral"},
         economics_cost_rows,
         economics_tax_rows,
         economics_adjustment_rows,
@@ -614,6 +657,213 @@ def test_economics_price_percent_round_trip_preserves_editor_percent_semantics(
     assert round_trip_rows[0]["method"] == method_label
     assert float(round_trip_rows[0]["value"]) == pytest.approx(float(editor_value))
 
+
+def test_financial_preset_catalog_exposes_stable_system_ids_and_localized_labels() -> None:
+    catalog_es = build_financial_preset_catalog((), lang="es")
+    catalog_en = build_financial_preset_catalog((), lang="en")
+
+    assert [preset.preset_id for preset in catalog_es[:3]] == [
+        "system:residential_conservative",
+        "system:commercial_standard",
+        "system:industrial_aggressive",
+    ]
+    assert catalog_es[0].display_name == "Residencial conservador"
+    assert catalog_en[0].display_name == "Residential conservative"
+
+
+def test_financial_preset_controls_disable_destructive_actions_for_system_presets(monkeypatch, tmp_path) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+    clear_all_admin_session_access()
+    clear_session_states()
+
+    client_state = _admin_client_state("es")
+    grant_admin_session_access(client_state.session_id)
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    session_payload = commit_client_session(client_state, state).to_payload()
+
+    rendered = _render_preset_controls_call(
+        session_payload,
+        preset_selection_state={"preset_id": "system:commercial_standard"},
+        lang="es",
+    )
+
+    options, value, _dropdown_disabled, origin, _origin_class, _match, _match_class, _summary, _helper, _apply_disabled, _save_disabled, duplicate_disabled, rename_disabled, delete_disabled = rendered
+    assert any(option["value"] == "system:commercial_standard" for option in options)
+    assert value == "system:commercial_standard"
+    assert origin == "Sistema"
+    assert duplicate_disabled is False
+    assert rename_disabled is True
+    assert delete_disabled is True
+
+
+def test_apply_financial_preset_loads_editor_rows_without_mutating_stored_preset(monkeypatch, tmp_path) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+    clear_all_admin_session_access()
+    clear_session_states()
+
+    bundle = _fast_bundle()
+    custom_preset = create_financial_preset_record(
+        "Comercial propio",
+        economics_cost_items_rows=bundle.economics_cost_items_table.to_dict("records"),
+        economics_price_items_rows=bundle.economics_price_items_table.to_dict("records"),
+    )
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", bundle))
+    state = add_financial_preset(state, custom_preset)
+    client_state = _admin_client_state("es")
+    grant_admin_session_access(client_state.session_id)
+    session_payload = commit_client_session(client_state, state).to_payload()
+
+    cost_rows, tax_rows, adjustment_rows, _meta, _status = apply_financial_preset(
+        1,
+        session_payload,
+        {"preset_id": custom_preset.preset_id},
+        "es",
+    )
+    resolved = resolve_financial_preset(custom_preset.preset_id, state.financial_presets, lang="es")
+
+    assert resolved is not None
+    assert cost_rows == economics_cost_items_rows_to_editor(resolved.economics_cost_items_rows, lang="es")
+    assert tax_rows == economics_price_items_rows_to_section_editor(resolved.economics_price_items_rows, layers=("tax",), lang="es")
+    assert adjustment_rows == economics_price_items_rows_to_section_editor(
+        resolved.economics_price_items_rows,
+        layers=("commercial", "sale"),
+        lang="es",
+    )
+    assert state.financial_presets[0].economics_cost_items_rows == custom_preset.economics_cost_items_rows
+    assert state.financial_presets[0].economics_price_items_rows == custom_preset.economics_price_items_rows
+
+
+def test_financial_preset_divergence_is_visible_after_manual_editor_change(monkeypatch, tmp_path) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+    clear_all_admin_session_access()
+    clear_session_states()
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    client_state = _admin_client_state("es")
+    grant_admin_session_access(client_state.session_id)
+    session_payload = commit_client_session(client_state, state).to_payload()
+    selection = {"preset_id": "system:commercial_standard"}
+
+    cost_rows, tax_rows, adjustment_rows, _meta, _status = apply_financial_preset(1, session_payload, selection, "es")
+    exact = _render_preset_controls_call(
+        session_payload,
+        preset_selection_state=selection,
+        economics_cost_rows=cost_rows,
+        economics_price_rows=[*tax_rows, *adjustment_rows],
+        economics_price_rows_are_editor=True,
+        lang="es",
+    )
+    edited_cost_rows = [dict(row) for row in cost_rows]
+    edited_cost_rows[3]["amount_COP"] = float(edited_cost_rows[3]["amount_COP"]) + 1000.0
+    modified = _render_preset_controls_call(
+        session_payload,
+        preset_selection_state=selection,
+        economics_cost_rows=edited_cost_rows,
+        economics_price_rows=[*tax_rows, *adjustment_rows],
+        economics_price_rows_are_editor=True,
+        lang="es",
+    )
+
+    assert exact[5] == tr("workspace.admin.economics.presets.match.exact", "es")
+    assert modified[5] == tr("workspace.admin.economics.presets.match.modified", "es")
+
+
+def test_save_financial_preset_rejects_collision_with_visible_system_label(monkeypatch, tmp_path) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+    clear_all_admin_session_access()
+    clear_session_states()
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    client_state = _admin_client_state("es")
+    grant_admin_session_access(client_state.session_id)
+    session_payload = commit_client_session(client_state, state).to_payload()
+    active = state.get_scenario()
+    assert active is not None
+
+    result_payload, _selection, preset_meta, status = save_current_financial_preset(
+        1,
+        session_payload,
+        None,
+        "Comercial estándar",
+        economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang="es"),
+        economics_price_items_rows_to_section_editor(active.config_bundle.economics_price_items_table, layers=("tax",), lang="es"),
+        economics_price_items_rows_to_section_editor(active.config_bundle.economics_price_items_table, layers=("commercial", "sale"), lang="es"),
+        "es",
+    )
+
+    assert status == tr("workspace.admin.economics.presets.error.name_conflict", "es")
+    assert preset_meta["tone"] == "error"
+    assert _resolve_state_from_payload(result_payload, lang="es").financial_presets == ()
+
+
+def test_save_duplicate_rename_and_delete_financial_preset_persist_when_project_is_bound(monkeypatch, tmp_path) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+    clear_all_admin_session_access()
+    clear_session_states()
+
+    base_state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    base_state = save_project(base_state, project_name="Proyecto Presets", language="es")
+    client_state = _admin_client_state("es")
+    grant_admin_session_access(client_state.session_id)
+    session_payload = commit_client_session(client_state, base_state).to_payload()
+    active = base_state.get_scenario()
+    assert active is not None
+
+    saved_payload, selection, _meta, _status = save_current_financial_preset(
+        1,
+        session_payload,
+        "Proyecto Presets",
+        "Mi preset comercial",
+        economics_cost_items_rows_to_editor(active.config_bundle.economics_cost_items_table, lang="es"),
+        economics_price_items_rows_to_section_editor(active.config_bundle.economics_price_items_table, layers=("tax",), lang="es"),
+        economics_price_items_rows_to_section_editor(active.config_bundle.economics_price_items_table, layers=("commercial", "sale"), lang="es"),
+        "es",
+    )
+    saved_state = _resolve_state_from_payload(saved_payload, lang="es")
+    assert len(saved_state.financial_presets) == 1
+    assert read_project_manifest(saved_state.project_slug).format_version == 2
+    assert len(read_project_manifest(saved_state.project_slug).financial_presets) == 1
+
+    duplicated_payload, duplicated_selection, _meta, _status = duplicate_financial_preset_action(
+        1,
+        saved_payload,
+        "Proyecto Presets",
+        selection,
+        "",
+        "es",
+    )
+    duplicated_state = _resolve_state_from_payload(duplicated_payload, lang="es")
+    assert len(duplicated_state.financial_presets) == 2
+    duplicated_preset_id = duplicated_selection["preset_id"]
+    assert duplicated_preset_id != selection["preset_id"]
+
+    renamed_payload, renamed_selection, _meta, _status = rename_financial_preset_action(
+        1,
+        duplicated_payload,
+        "Proyecto Presets",
+        duplicated_selection,
+        "Mi preset duplicado",
+        "es",
+    )
+    renamed_state = _resolve_state_from_payload(renamed_payload, lang="es")
+    renamed_preset = next(preset for preset in renamed_state.financial_presets if preset.preset_id == renamed_selection["preset_id"])
+    assert renamed_preset.name == "Mi preset duplicado"
+
+    assert request_financial_preset_delete(1, renamed_payload, renamed_selection, "es") is True
+    deleted_payload, deleted_selection, _meta, _status = delete_financial_preset_action(
+        1,
+        renamed_payload,
+        "Proyecto Presets",
+        renamed_selection,
+        "es",
+    )
+    deleted_state = _resolve_state_from_payload(deleted_payload, lang="es")
+
+    assert deleted_selection == {"preset_id": None}
+    assert len(deleted_state.financial_presets) == 1
+    reopened = open_project(deleted_state.project_slug)
+    assert len(reopened.financial_presets) == 1
+    assert reopened.financial_presets[0].name == "Mi preset comercial"
 
 def test_economics_columns_mark_enum_fields_as_dropdowns() -> None:
     cost_columns, _ = build_table_display_columns(

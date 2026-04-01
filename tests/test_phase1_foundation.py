@@ -12,11 +12,13 @@ import pytest
 import services.scenario_runner as scenario_runner
 from services import (
     add_scenario,
+    add_financial_preset,
     build_assumption_sections,
     bootstrap_client_session,
     commit_client_session,
     collect_config_updates,
     configure_runtime_environment,
+    create_financial_preset_record,
     create_scenario_record,
     fingerprint_deterministic_input,
     frame_from_rows,
@@ -407,6 +409,47 @@ def test_ui_mode_does_not_persist_into_project_manifest(tmp_path, monkeypatch) -
     raw = json.dumps(manifest_payload, ensure_ascii=False)
 
     assert "ui_mode" not in raw
+
+
+def test_project_manifest_v2_persists_financial_presets_round_trip(tmp_path, monkeypatch) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+
+    bundle = _fast_bundle()
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", bundle))
+    preset = create_financial_preset_record(
+        "Mi preset financiero",
+        economics_cost_items_rows=bundle.economics_cost_items_table.to_dict("records"),
+        economics_price_items_rows=bundle.economics_price_items_table.to_dict("records"),
+    )
+    state = add_financial_preset(state, preset)
+
+    saved = save_project(state, project_name="Proyecto Demo", language="es")
+    manifest = read_project_manifest(saved.project_slug)
+    reopened = open_project(saved.project_slug)
+
+    assert manifest.format_version == 2
+    assert len(manifest.financial_presets) == 1
+    assert manifest.financial_presets[0].preset_id == preset.preset_id
+    assert manifest.financial_presets[0].name == "Mi preset financiero"
+    assert len(reopened.financial_presets) == 1
+    assert reopened.financial_presets[0].preset_id == preset.preset_id
+
+
+def test_project_manifest_v1_without_financial_presets_stays_tolerant(tmp_path, monkeypatch) -> None:
+    _patch_user_root(monkeypatch, tmp_path)
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    saved = save_project(state, project_name="Proyecto Demo", language="es")
+    manifest_path = projects_root() / saved.project_slug / "project.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["format_version"] = 1
+    payload.pop("financial_presets", None)
+    manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    reopened = open_project(saved.project_slug)
+
+    assert reopened.project_slug == saved.project_slug
+    assert reopened.financial_presets == ()
 
 
 def test_apply_no_battery_edit_persists_through_project_save_and_reopen(tmp_path, monkeypatch) -> None:

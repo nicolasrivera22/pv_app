@@ -24,6 +24,16 @@ layout = workspace_frame(
             storage_type="memory",
             data={"scenario_id": None, "candidate_key": None, "source": None},
         ),
+        dcc.Store(
+            id="admin-financial-preset-selection",
+            storage_type="memory",
+            data={"preset_id": None},
+        ),
+        dcc.Store(
+            id="admin-financial-preset-meta",
+            storage_type="memory",
+            data={"revision": 0, "message_key": None, "tone": "neutral"},
+        ),
         dcc.Store(id="admin-draft-meta", storage_type="memory", data={}),
         dcc.Store(id="admin-access-meta", storage_type="memory", data={"revision": 0, "message_key": None, "tone": "neutral"}),
     ],

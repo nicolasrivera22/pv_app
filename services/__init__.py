@@ -102,10 +102,13 @@ from .risk_ui import (
 from .scenario_runner import resolve_deterministic_scan, run_scan, run_scenario
 from .scenario_session import (
     add_scenario,
+    add_financial_preset,
     apply_prepared_economics_runtime_price_bridge,
     compute_economics_runtime_signature,
+    create_financial_preset_record,
     create_scenario_record,
     default_scenario_name,
+    delete_financial_preset,
     delete_scenario,
     duplicate_scenario,
     hydrate_scenario_scan,
@@ -118,6 +121,7 @@ from .scenario_session import (
     set_comparison_scenarios,
     set_design_comparison_candidates,
     sync_selected_candidate_runtime_price,
+    update_financial_preset,
     update_scenario_risk_config,
     update_scenario_bundle,
     update_selected_candidate,
@@ -137,6 +141,7 @@ from .session_state import (
 from .stochastic_runner import MONTE_CARLO_WARNING_THRESHOLD, run_monte_carlo, summarize_monte_carlo
 from .types import (
     ClientSessionState,
+    FinancialPresetRecord,
     LoadedConfigBundle,
     MetricDistributionSummary,
     MonteCarloRunRequest,
@@ -266,6 +271,7 @@ __all__ = [
     "compute_economics_runtime_signature",
     "configure_runtime_environment",
     "config_overrides_for_fields",
+    "create_financial_preset_record",
     "create_scenario_record",
     "default_scenario_name",
     "default_results_root",
@@ -274,6 +280,7 @@ __all__ = [
     "internal_runtime_root",
     "default_schematic_inspector",
     "delete_scenario",
+    "delete_financial_preset",
     "demand_profile_visibility",
     "derive_panel_count",
     "duplicate_scenario",
@@ -354,6 +361,7 @@ __all__ = [
     "run_scenario_scan",
     "select_candidate_and_sync_runtime_price",
     "set_active_scenario",
+    "add_financial_preset",
     "bind_workspace_draft_project",
     "set_comparison_scenarios",
     "set_design_comparison_candidates",
@@ -377,6 +385,7 @@ __all__ = [
     "user_root",
     "user_workbook_path",
     "update_config_table_values",
+    "update_financial_preset",
     "update_scenario_bundle",
     "update_scenario_risk_config",
     "update_selected_candidate",
@@ -390,4 +399,5 @@ __all__ = [
     "WorkspaceSectionPartition",
     "ResultsStatusDigest",
     "has_workspace_draft",
+    "FinancialPresetRecord",
 ]

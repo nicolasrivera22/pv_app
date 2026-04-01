@@ -93,6 +93,126 @@ def _economics_layers_panel(
     )
 
 
+def _economics_presets_panel(*, lang: str) -> html.Div:
+    return html.Div(
+        id="economics-presets-shell",
+        className="subpanel economics-presets-shell",
+        children=[
+            html.Div(
+                className="section-head economics-presets-head",
+                children=[
+                    html.Div(
+                        className="economics-editor-panel-copy",
+                        children=[
+                            html.H4(tr("workspace.admin.economics.presets.title", lang), id="economics-presets-title"),
+                            html.P(
+                                tr("workspace.admin.economics.presets.copy", lang),
+                                id="economics-presets-copy",
+                                className="section-copy economics-editor-panel-note",
+                            ),
+                        ],
+                    ),
+                    html.Div(
+                        className="economics-preset-chip-row",
+                        children=[
+                            html.Span(
+                                "",
+                                id="economics-preset-origin-badge",
+                                className="workbench-state-chip workbench-state-chip-info",
+                            ),
+                            html.Span(
+                                "",
+                                id="economics-preset-match-badge",
+                                className="workbench-state-chip workbench-state-chip-neutral",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            html.Div(
+                className="economics-preset-grid",
+                children=[
+                    html.Div(
+                        className="economics-candidate-control",
+                        children=[
+                            html.Label(
+                                tr("workspace.admin.economics.presets.selector.label", lang),
+                                htmlFor="economics-preset-dropdown",
+                                className="input-label",
+                            ),
+                            dcc.Dropdown(
+                                id="economics-preset-dropdown",
+                                options=[],
+                                value=None,
+                                clearable=True,
+                                placeholder=tr("workspace.admin.economics.presets.selector.placeholder", lang),
+                            ),
+                        ],
+                    ),
+                    html.Div(
+                        className="economics-preset-name-control",
+                        children=[
+                            html.Label(
+                                tr("workspace.admin.economics.presets.name.label", lang),
+                                htmlFor="economics-preset-name-input",
+                                className="input-label",
+                            ),
+                            dcc.Input(
+                                id="economics-preset-name-input",
+                                type="text",
+                                value="",
+                                placeholder=tr("workspace.admin.economics.presets.name.placeholder", lang),
+                                className="text-input",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            html.Div(id="economics-preset-summary", className="economics-preset-summary"),
+            html.Div(id="economics-preset-helper", className="status-line economics-preset-helper"),
+            html.Div(
+                className="controls economics-preset-actions",
+                children=[
+                    html.Button(
+                        tr("workspace.admin.economics.presets.apply", lang),
+                        id="apply-economics-preset-btn",
+                        n_clicks=0,
+                        className="action-btn tertiary",
+                    ),
+                    html.Button(
+                        tr("workspace.admin.economics.presets.save_current", lang),
+                        id="save-economics-preset-btn",
+                        n_clicks=0,
+                        className="action-btn tertiary",
+                    ),
+                    html.Button(
+                        tr("workspace.admin.economics.presets.duplicate", lang),
+                        id="duplicate-economics-preset-btn",
+                        n_clicks=0,
+                        className="action-btn tertiary",
+                    ),
+                    html.Button(
+                        tr("workspace.admin.economics.presets.rename", lang),
+                        id="rename-economics-preset-btn",
+                        n_clicks=0,
+                        className="action-btn tertiary",
+                    ),
+                    html.Button(
+                        tr("workspace.admin.economics.presets.delete", lang),
+                        id="delete-economics-preset-btn",
+                        n_clicks=0,
+                        className="action-btn tertiary",
+                    ),
+                ],
+            ),
+            dcc.ConfirmDialog(
+                id="economics-preset-delete-confirm",
+                message=tr("workspace.admin.economics.presets.delete_confirm", lang),
+            ),
+        ],
+    )
+
+
 def economics_editor_section(*, lang: str = "es") -> html.Div:
     return html.Div(
         className="panel secondary-panel",
@@ -156,6 +276,7 @@ def economics_editor_section(*, lang: str = "es") -> html.Div:
                             html.Div(id="economics-preview-content", className="economics-preview-stack"),
                         ],
                     ),
+                    _economics_presets_panel(lang=lang),
                     html.Div(
                         id="economics-editors-shell",
                         className="economics-editors-shell",
