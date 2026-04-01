@@ -83,6 +83,14 @@ def internal_entry_style(ui_mode: str | None) -> dict[str, str]:
     return VISIBLE_STYLE if should_show_internal_entry(ui_mode) else HIDDEN_STYLE
 
 
+def should_show_admin_surface(ui_mode: str | None) -> bool:
+    return normalize_ui_mode(ui_mode) == UI_MODE_ADMIN
+
+
+def admin_surface_style(ui_mode: str | None) -> dict[str, str]:
+    return VISIBLE_STYLE if should_show_admin_surface(ui_mode) else HIDDEN_STYLE
+
+
 def resolve_page_access(page_key: str, ui_mode: str | None) -> PageAccess:
     mode = normalize_ui_mode(ui_mode)
     if page_key in {PAGE_RESULTS, PAGE_ASSUMPTIONS, PAGE_HELP}:

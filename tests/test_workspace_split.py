@@ -187,10 +187,11 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(assumptions_layout, "inverter-table-editor") is None
     assert _find_component(assumptions_layout, "economics-editor-title") is None
 
-    assert _find_component(admin_layout, "admin-redirect-location") is not None
     assert _find_component(admin_layout, "admin-redirect-fallback") is not None
     assert _find_component(admin_layout, "admin-redirect-title") is not None
     assert _find_component(admin_layout, "admin-redirect-copy") is not None
+    assert _find_component(admin_layout, "admin-redirect-enter-btn") is not None
+    assert _find_component(admin_layout, "admin-redirect-location") is None
     assert _find_component(admin_layout, "admin-setup-pin-input") is None
     assert _find_component(admin_layout, "admin-pin-input") is None
     assert _find_component(admin_layout, "profile-editor-title") is None
@@ -249,6 +250,9 @@ def test_top_nav_exposes_results_and_assumptions_but_not_admin() -> None:
 
     assert _find_component(layout, "nav-results-label") is not None
     assert _find_component(layout, "nav-assumptions-label") is not None
+    assert _find_component(layout, "admin-mode-dialog-state") is not None
+    assert _find_component(layout, "admin-access-meta") is not None
+    assert _find_component(layout, "admin-mode-dialog") is not None
     assert _find_component(layout, "workspace-admin-link") is None
 
 
@@ -258,10 +262,10 @@ def test_admin_page_gracefully_handles_direct_access_without_active_scenario(mon
 
     rendered = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
 
-    redirect = _find_component(rendered, "admin-redirect-location")
-    assert redirect is not None
-    assert redirect.href == "/assumptions#advanced-tools"
-    assert _find_component(rendered, "admin-redirect-link") is not None
+    assert _find_component(rendered, "admin-redirect-location") is None
+    enter_btn = _find_component(rendered, "admin-redirect-enter-btn")
+    assert enter_btn is not None
+    assert enter_btn.children == "Entrar a Modo Admin"
     assert _find_component(rendered, "admin-setup-pin-input") is None
     assert payload["active_scenario_id"] is None
 

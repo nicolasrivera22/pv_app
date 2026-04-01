@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dash import dcc, html, register_page
+from dash import html, register_page
 
 from services.i18n import tr
 
@@ -12,11 +12,6 @@ def layout():
     return html.Div(
         className="page page-admin-redirect",
         children=[
-            dcc.Location(
-                id="admin-redirect-location",
-                href="/assumptions#advanced-tools",
-                refresh=True,
-            ),
             html.Div(
                 id="admin-redirect-fallback",
                 className="panel secondary-panel admin-redirect-fallback",
@@ -27,10 +22,10 @@ def layout():
                         id="admin-redirect-copy",
                         className="section-copy",
                     ),
-                    dcc.Link(
-                        tr("workspace.advanced.redirect.link", "es"),
-                        id="admin-redirect-link",
-                        href="/assumptions#advanced-tools",
+                    html.Button(
+                        tr("workspace.advanced.redirect.enter", "es"),
+                        id="admin-redirect-enter-btn",
+                        n_clicks=0,
                         className="action-btn tertiary",
                     ),
                 ],

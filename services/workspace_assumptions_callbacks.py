@@ -25,7 +25,7 @@ from .workspace_demand import (
 )
 from .workspace_drafts import bind_workspace_draft_project, upsert_workspace_draft
 from .workspace_partitions import partition_assumption_sections
-from .ui_mode import internal_entry_style, resolve_ui_mode_from_payload
+from .ui_mode import admin_surface_style, internal_entry_style, resolve_ui_mode_from_payload
 
 
 def _lang(value: str | None) -> str:
@@ -243,6 +243,16 @@ def translate_assumptions_page(language_value):
 
 def sync_workspace_internal_entry(session_payload):
     return internal_entry_style(resolve_ui_mode_from_payload(session_payload))
+
+
+@callback(
+    Output("assumptions-advanced-tools-entry-shell", "style"),
+    Output("advanced-tools", "style"),
+    Input("scenario-session-store", "data"),
+)
+def sync_assumptions_admin_surface_visibility(session_payload):
+    style = admin_surface_style(resolve_ui_mode_from_payload(session_payload))
+    return style, style
 
 
 @callback(

@@ -63,6 +63,7 @@ from .scenario_session import (
     update_selected_candidate,
 )
 from .session_state import commit_client_session, resolve_client_session
+from .ui_mode import should_show_admin_surface
 from .ui_schema import assumption_context_map, build_assumption_sections, build_table_display_columns, format_metric
 from .validation import (
     BATTERY_REQUIRED_COLUMNS,
@@ -141,7 +142,7 @@ def _admin_session(payload, language_value: str | None):
     return client_state, state, is_admin_session_unlocked(client_state.session_id)
 
 
-def _admin_locked_meta(message_key: str | None = None, *, tone: str = "neutral") -> dict[str, object]:
+def admin_access_meta(message_key: str | None = None, *, tone: str = "neutral") -> dict[str, object]:
     return {
         "revision": time.time(),
         "message_key": message_key,
@@ -200,11 +201,12 @@ def _validate_admin_setup_pin(pin_value, confirm_value) -> str:
     return pin
 
 
-def _resolve_admin_access_view_state(session_payload, language_value, access_meta=None) -> dict[str, object]:
+def resolve_admin_access_view_state(session_payload, language_value, access_meta=None) -> dict[str, object]:
     lang = _lang(language_value)
-    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    client_state, state, unlocked = _admin_session(session_payload, lang)
     configured = admin_pin_configured()
     active = state.get_scenario()
+    ui_mode = str(client_state.ui_mode or "").strip()
     if not configured:
         access_mode = "setup_required"
     elif unlocked:
@@ -221,6 +223,8 @@ def _resolve_admin_access_view_state(session_payload, language_value, access_met
         "configured": configured,
         "unlocked": unlocked,
         "access_mode": access_mode,
+        "ui_mode": ui_mode,
+        "show_admin_surface": should_show_admin_surface(ui_mode),
         "status_key": meta.get("message_key"),
         "tone": str(meta.get("tone") or "neutral"),
         "preview_state": preview_state,
@@ -1765,14 +1769,14 @@ ADMIN_EXCLUDED_FIELDS = {
 def setup_admin_session(_setup_clicks, session_payload, pin_value, confirm_value):
     client_state, _state, _unlocked = _admin_session(session_payload, None)
     if admin_pin_configured():
-        return _admin_locked_meta("workspace.advanced.setup.already_configured", tone="info")
+        return admin_access_meta("workspace.advanced.setup.already_configured", tone="info")
     try:
         pin = _validate_admin_setup_pin(pin_value, confirm_value)
     except ValueError as exc:
-        return _admin_locked_meta(str(exc), tone="error")
+        return admin_access_meta(str(exc), tone="error")
     set_admin_pin(pin)
     grant_admin_session_access(client_state.session_id)
-    return _admin_locked_meta("workspace.advanced.setup.success", tone="success")
+    return admin_access_meta("workspace.advanced.setup.success", tone="success")
 
 
 @callback(
@@ -1785,11 +1789,11 @@ def setup_admin_session(_setup_clicks, session_payload, pin_value, confirm_value
 def unlock_admin_session(_unlock_clicks, session_payload, pin_value):
     client_state, _state, _unlocked = _admin_session(session_payload, None)
     if not admin_pin_configured():
-        return _admin_locked_meta("workspace.advanced.setup.ready", tone="info")
+        return admin_access_meta("workspace.advanced.setup.ready", tone="info")
     if not verify_admin_pin(pin_value):
-        return _admin_locked_meta("workspace.advanced.locked.invalid", tone="error")
+        return admin_access_meta("workspace.advanced.locked.invalid", tone="error")
     grant_admin_session_access(client_state.session_id)
-    return _admin_locked_meta("workspace.advanced.locked.unlocked", tone="success")
+    return admin_access_meta("workspace.advanced.locked.unlocked", tone="success")
 
 
 @callback(
@@ -1799,7 +1803,9 @@ def unlock_admin_session(_unlock_clicks, session_payload, pin_value):
     Input("admin-access-meta", "data"),
 )
 def render_admin_access_summary(session_payload, language_value, access_meta):
-    view_state = _resolve_admin_access_view_state(session_payload, language_value, access_meta)
+    view_state = resolve_admin_access_view_state(session_payload, language_value, access_meta)
+    if not bool(view_state["show_admin_surface"]):
+        return []
     return build_admin_access_summary(
         lang=str(view_state["lang"]),
         access_mode=str(view_state["access_mode"]),
@@ -1818,7 +1824,9 @@ def render_admin_access_summary(session_payload, language_value, access_meta):
     Input("admin-access-meta", "data"),
 )
 def render_admin_access_shell(session_payload, language_value, access_meta):
-    view_state = _resolve_admin_access_view_state(session_payload, language_value, access_meta)
+    view_state = resolve_admin_access_view_state(session_payload, language_value, access_meta)
+    if not bool(view_state["show_admin_surface"]):
+        return []
     return build_admin_access_shell(
         lang=str(view_state["lang"]),
         access_mode=str(view_state["access_mode"]),

@@ -19,6 +19,7 @@ def admin_setup_card(
     lang: str = "es",
     status_key: str | None = None,
     tone: str = "neutral",
+    include_cancel: bool = False,
 ) -> html.Div:
     if status_key:
         message = tr(status_key, lang)
@@ -59,6 +60,18 @@ def admin_setup_card(
                         id="admin-setup-btn",
                         n_clicks=0,
                         className="action-btn",
+                    ),
+                    *(
+                        [
+                            html.Button(
+                                tr("workspace.advanced.dialog.cancel", lang),
+                                id="admin-mode-dialog-cancel-btn",
+                                n_clicks=0,
+                                className="action-btn tertiary",
+                            )
+                        ]
+                        if include_cancel
+                        else []
                     ),
                 ],
             ),
@@ -254,6 +267,7 @@ def admin_locked_card(
     lang: str = "es",
     status_key: str | None = None,
     tone: str = "neutral",
+    include_cancel: bool = False,
 ) -> html.Div:
     if status_key:
         message = tr(status_key, lang)
@@ -285,9 +299,61 @@ def admin_locked_card(
                         n_clicks=0,
                         className="action-btn",
                     ),
+                    *(
+                        [
+                            html.Button(
+                                tr("workspace.advanced.dialog.cancel", lang),
+                                id="admin-mode-dialog-cancel-btn",
+                                n_clicks=0,
+                                className="action-btn tertiary",
+                            )
+                        ]
+                        if include_cancel
+                        else []
+                    ),
                 ],
             ),
         ],
+    )
+
+
+def build_admin_mode_dialog(
+    *,
+    lang: str = "es",
+    access_mode: str,
+    status_key: str | None = None,
+    tone: str = "neutral",
+):
+    if access_mode == "setup_required":
+        content = admin_setup_card(
+            lang=lang,
+            status_key=status_key,
+            tone=tone,
+            include_cancel=True,
+        )
+    elif access_mode == "locked":
+        content = admin_locked_card(
+            lang=lang,
+            status_key=status_key,
+            tone=tone,
+            include_cancel=True,
+        )
+    else:
+        content = html.Div(
+            className="panel admin-lock-card",
+            children=[
+                html.H3(tr("workspace.advanced.dialog.ready_title", lang), id="admin-mode-dialog-ready-title"),
+                html.P(
+                    tr("workspace.advanced.dialog.ready_copy", lang),
+                    id="admin-mode-dialog-ready-copy",
+                    className="section-copy",
+                ),
+            ],
+        )
+    return html.Div(
+        id="admin-mode-dialog-card",
+        className="dialog-card admin-mode-dialog-card",
+        children=[content],
     )
 
 

@@ -172,12 +172,13 @@ def test_admin_page_defaults_to_internal_gate_shell(monkeypatch, tmp_path) -> No
 
     layout = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
 
-    redirect = _find_component(layout, "admin-redirect-location")
+    enter_btn = _find_component(layout, "admin-redirect-enter-btn")
     fallback_title = _find_component(layout, "admin-redirect-title")
     fallback_copy = _find_component(layout, "admin-redirect-copy")
-    assert redirect is not None
-    assert redirect.href == "/assumptions#advanced-tools"
     assert _find_component(layout, "admin-redirect-fallback") is not None
+    assert enter_btn is not None
+    assert enter_btn.children == tr("workspace.advanced.redirect.enter", "es")
+    assert _find_component(layout, "admin-redirect-location") is None
     assert fallback_title is not None
     assert fallback_title.children == tr("workspace.advanced.redirect.title", "es")
     assert fallback_copy is not None
@@ -435,10 +436,7 @@ def test_render_admin_access_shell_uses_setup_shell_in_simple_mode(monkeypatch, 
 
     rendered = render_admin_access_shell(bootstrap_client_session("es").to_payload(), "es", {"revision": 1})
 
-    assert _find_component(rendered, "admin-mode-gate") is None
-    assert _find_component(rendered, "admin-setup-shell") is not None
-    assert _find_component(rendered, "admin-setup-pin-input") is not None
-    assert _find_component(rendered, "admin-pin-input") is None
+    assert rendered == []
 
 
 def test_render_admin_access_shell_uses_locked_shell_in_pro_mode_when_pin_exists(monkeypatch, tmp_path) -> None:
@@ -449,9 +447,20 @@ def test_render_admin_access_shell_uses_locked_shell_in_pro_mode_when_pin_exists
 
     rendered = render_admin_access_shell(_pro_client_state("es").to_payload(), "es", {"revision": 1})
 
-    assert _find_component(rendered, "admin-mode-gate") is None
-    assert _find_component(rendered, "admin-setup-pin-input") is None
-    assert _find_component(rendered, "admin-pin-input") is not None
+    assert rendered == []
+
+
+def test_render_admin_access_summary_hides_outside_admin_mode(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+    set_admin_pin("2468")
+
+    simple_summary = render_admin_access_summary(bootstrap_client_session("es").to_payload(), "es", {"revision": 1})
+    pro_summary = render_admin_access_summary(_pro_client_state("es").to_payload(), "es", {"revision": 1})
+
+    assert simple_summary == []
+    assert pro_summary == []
 
 
 def test_admin_profile_table_activator_translation_matches_visible_cards() -> None:

@@ -35,7 +35,6 @@ layout = workspace_frame(
             data={"revision": 0, "message_key": None, "tone": "neutral"},
         ),
         dcc.Store(id="admin-draft-meta", storage_type="memory", data={}),
-        dcc.Store(id="admin-access-meta", storage_type="memory", data={"revision": 0, "message_key": None, "tone": "neutral"}),
     ],
     children=[
         run_scan_choice_dialog(),

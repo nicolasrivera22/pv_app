@@ -4,9 +4,19 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import app as app_module
-from app import create_app, sync_nav_visibility, update_ui_mode
+from dash import no_update
+
+from app import (
+    cancel_admin_mode_dialog,
+    create_app,
+    finalize_admin_mode_unlock,
+    sync_admin_mode_dialog,
+    sync_nav_visibility,
+    update_ui_mode,
+)
 from pages.compare import sync_compare_page_access
 from pages.risk import sync_risk_page_access
+from services import clear_all_admin_session_access, grant_admin_session_access, set_admin_pin
 from services.session_state import bootstrap_client_session
 from services.ui_mode import (
     PAGE_ADMIN,
@@ -20,9 +30,11 @@ from services.ui_mode import (
     is_nav_page_visible,
     normalize_ui_mode,
     resolve_page_access,
+    should_show_admin_surface,
     should_show_internal_entry,
 )
-from services.workspace_assumptions_callbacks import sync_workspace_internal_entry
+from services.workspace_admin_callbacks import admin_access_meta
+from services.workspace_assumptions_callbacks import sync_assumptions_admin_surface_visibility, sync_workspace_internal_entry
 
 
 def _payload(ui_mode: str = UI_MODE_SIMPLE) -> dict:
@@ -87,6 +99,9 @@ def test_ui_mode_helpers_define_expected_visibility_rules() -> None:
     assert should_show_internal_entry(UI_MODE_SIMPLE) is False
     assert should_show_internal_entry(UI_MODE_PRO) is False
     assert should_show_internal_entry(UI_MODE_ADMIN) is True
+    assert should_show_admin_surface(UI_MODE_SIMPLE) is False
+    assert should_show_admin_surface(UI_MODE_PRO) is False
+    assert should_show_admin_surface(UI_MODE_ADMIN) is True
 
     assert resolve_page_access(PAGE_COMPARE, UI_MODE_SIMPLE).allowed is False
     assert resolve_page_access(PAGE_COMPARE, UI_MODE_PRO).allowed is True
@@ -132,6 +147,12 @@ def test_internal_entry_visibility_callback_only_shows_in_admin() -> None:
     assert sync_workspace_internal_entry(_payload(UI_MODE_ADMIN)) == {}
 
 
+def test_assumptions_admin_surface_visibility_callback_only_shows_in_admin() -> None:
+    assert sync_assumptions_admin_surface_visibility(_payload(UI_MODE_SIMPLE)) == ({"display": "none"}, {"display": "none"})
+    assert sync_assumptions_admin_surface_visibility(_payload(UI_MODE_PRO)) == ({"display": "none"}, {"display": "none"})
+    assert sync_assumptions_admin_surface_visibility(_payload(UI_MODE_ADMIN)) == ({}, {})
+
+
 def test_compare_and_risk_gate_callbacks_only_gate_simple_mode() -> None:
     compare_gate, compare_gate_style, compare_body_style = sync_compare_page_access(_payload(UI_MODE_SIMPLE), "es")
     compare_allowed_gate, compare_allowed_style, compare_allowed_body = sync_compare_page_access(_payload(UI_MODE_PRO), "es")
@@ -152,16 +173,117 @@ def test_compare_and_risk_gate_callbacks_only_gate_simple_mode() -> None:
     assert risk_allowed_body == {}
 
 
-def test_update_ui_mode_callbacks_only_change_ui_mode(monkeypatch) -> None:
+def test_update_ui_mode_switches_between_client_and_pro_without_admin_side_effects(monkeypatch) -> None:
     payload = _payload(UI_MODE_SIMPLE)
 
     monkeypatch.setattr(app_module, "ctx", SimpleNamespace(triggered_id="ui-mode-selector"))
-    updated = update_ui_mode("pro", [], payload)
+    updated, dialog_state, meta, href = update_ui_mode("pro", [], None, payload, {})
     assert updated["session_id"] == payload["session_id"]
     assert updated["ui_mode"] == "pro"
     assert updated["active_scenario_id"] == payload["active_scenario_id"]
+    assert dialog_state["open"] is False
+    assert meta["message_key"] is None
+    assert href is no_update
 
-    monkeypatch.setattr(app_module, "ctx", SimpleNamespace(triggered_id={"type": "ui-mode-gate-cta", "page": "admin", "target_mode": "admin"}))
-    gated = update_ui_mode("pro", [1], updated)
-    assert gated["session_id"] == payload["session_id"]
-    assert gated["ui_mode"] == "admin"
+
+def test_update_ui_mode_attempting_admin_while_locked_opens_modal_without_changing_mode(monkeypatch) -> None:
+    clear_all_admin_session_access()
+    payload = _payload(UI_MODE_SIMPLE)
+
+    monkeypatch.setattr(app_module, "ctx", SimpleNamespace(triggered_id="ui-mode-selector"))
+    updated, dialog_state, meta, href = update_ui_mode("admin", [], None, payload, {})
+
+    assert updated is no_update
+    assert dialog_state["open"] is True
+    assert dialog_state["origin"] == "mode_selector"
+    assert dialog_state["return_mode"] == "simple"
+    assert dialog_state["post_unlock_href"] is None
+    assert meta["message_key"] is None
+    assert href is no_update
+
+
+def test_update_ui_mode_attempting_admin_when_unlocked_switches_directly(monkeypatch) -> None:
+    clear_all_admin_session_access()
+    payload = _payload(UI_MODE_SIMPLE)
+    grant_admin_session_access(payload["session_id"])
+
+    monkeypatch.setattr(app_module, "ctx", SimpleNamespace(triggered_id="ui-mode-selector"))
+    updated, dialog_state, meta, href = update_ui_mode("admin", [], None, payload, {})
+
+    assert updated["session_id"] == payload["session_id"]
+    assert updated["ui_mode"] == "admin"
+    assert dialog_state["open"] is False
+    assert meta["message_key"] is None
+    assert href is no_update
+
+
+def test_update_ui_mode_from_admin_route_keeps_attempt_origin_and_target(monkeypatch) -> None:
+    clear_all_admin_session_access()
+    payload = _payload(UI_MODE_PRO)
+
+    monkeypatch.setattr(app_module, "ctx", SimpleNamespace(triggered_id="admin-redirect-enter-btn"))
+    updated, dialog_state, meta, href = update_ui_mode("pro", [], 1, payload, {})
+
+    assert updated is no_update
+    assert dialog_state["open"] is True
+    assert dialog_state["origin"] == "admin_route"
+    assert dialog_state["return_mode"] == "pro"
+    assert dialog_state["post_unlock_href"] == "/assumptions#advanced-tools"
+    assert meta["message_key"] is None
+    assert href is no_update
+
+
+def test_sync_admin_mode_dialog_renders_setup_and_unlock_variants(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+    payload = _payload(UI_MODE_SIMPLE)
+    dialog_state = {"open": True, "origin": "mode_selector", "return_mode": "simple", "post_unlock_href": None}
+
+    setup_style, setup_children = sync_admin_mode_dialog(dialog_state, payload, "es", admin_access_meta())
+    assert setup_style == {"display": "flex"}
+    assert _find_component(setup_children, "admin-setup-pin-input") is not None
+    assert _find_component(setup_children, "admin-mode-dialog-cancel-btn") is not None
+
+    set_admin_pin("2468")
+    locked_style, locked_children = sync_admin_mode_dialog(dialog_state, payload, "es", admin_access_meta())
+    assert locked_style == {"display": "flex"}
+    assert _find_component(locked_children, "admin-pin-input") is not None
+    assert _find_component(locked_children, "admin-mode-dialog-cancel-btn") is not None
+
+
+def test_cancel_admin_mode_dialog_clears_attempt_and_feedback() -> None:
+    dialog_state, meta = cancel_admin_mode_dialog(1, _payload(UI_MODE_PRO))
+
+    assert dialog_state["open"] is False
+    assert dialog_state["return_mode"] == "pro"
+    assert meta["message_key"] is None
+
+
+def test_finalize_admin_mode_unlock_promotes_admin_without_navigation_for_dropdown_origin() -> None:
+    payload = _payload(UI_MODE_SIMPLE)
+
+    updated, dialog_state, meta, href = finalize_admin_mode_unlock(
+        admin_access_meta("workspace.advanced.locked.unlocked", tone="success"),
+        payload,
+        {"open": True, "origin": "mode_selector", "return_mode": "simple", "post_unlock_href": None},
+    )
+
+    assert updated["ui_mode"] == "admin"
+    assert dialog_state["open"] is False
+    assert meta["message_key"] is None
+    assert href is no_update
+
+
+def test_finalize_admin_mode_unlock_navigates_to_host_for_admin_route_origin() -> None:
+    payload = _payload(UI_MODE_SIMPLE)
+
+    updated, dialog_state, meta, href = finalize_admin_mode_unlock(
+        admin_access_meta("workspace.advanced.setup.success", tone="success"),
+        payload,
+        {"open": True, "origin": "admin_route", "return_mode": "simple", "post_unlock_href": "/assumptions#advanced-tools"},
+    )
+
+    assert updated["ui_mode"] == "admin"
+    assert dialog_state["open"] is False
+    assert meta["message_key"] is None
+    assert href == "/assumptions#advanced-tools"
