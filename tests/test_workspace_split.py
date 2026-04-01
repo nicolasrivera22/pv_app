@@ -214,6 +214,21 @@ def test_assumptions_layout_places_advanced_entry_near_top_before_real_host() ->
     assert child_ids.index("assumptions-advanced-tools-entry-shell") < child_ids.index("advanced-tools")
 
 
+def test_assumptions_tabs_define_explicit_base_and_selected_styles() -> None:
+    assumptions_layout = assumptions_page.layout() if callable(assumptions_page.layout) else assumptions_page.layout
+    general_tab = _find_component(assumptions_layout, "assumptions-general-tab")
+    demand_tab = _find_component(assumptions_layout, "assumptions-demand-tab")
+
+    assert general_tab is not None
+    assert demand_tab is not None
+    for tab in (general_tab, demand_tab):
+        assert tab.style["background"] == "rgba(255, 255, 255, 0.82)"
+        assert tab.style["border"] == "1px solid rgba(203, 213, 225, 0.95)"
+        assert tab.selected_style["background"].startswith("linear-gradient(")
+        assert tab.selected_style["border"] == "1px solid rgba(37, 99, 235, 0.92)"
+        assert tab.selected_style["boxShadow"] == "0 0 0 2px rgba(37, 99, 235, 0.14), 0 14px 28px rgba(37, 99, 235, 0.18)"
+
+
 def test_assumptions_page_registers_advanced_access_shell_callback() -> None:
     assert assumptions_page._workspace_admin_callbacks is not None
     assert assumptions_page._workspace_admin_callbacks.render_admin_access_shell is not None

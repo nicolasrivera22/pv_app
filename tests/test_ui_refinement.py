@@ -1051,6 +1051,8 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".profile-table-subsection" in css_source
     assert ".assumptions-subtabs" in css_source
     assert ".assumptions-subtab-selected" in css_source
+    assert ".assumptions-subtab-selected::after" in css_source
+    assert ".assumptions-subtab:focus-visible" in css_source
     assert ".demand-relocated-card" in css_source
     assert ".workbench-state-strip" in css_source
     assert ".workbench-state-chip" in css_source

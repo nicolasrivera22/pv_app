@@ -12,6 +12,33 @@ import services.workspace_shared_callbacks as _workspace_shared_callbacks  # noq
 register_page(__name__, path="/assumptions", name="Supuestos")
 
 
+ASSUMPTIONS_SUBTAB_STYLE = {
+    "display": "flex",
+    "alignItems": "center",
+    "justifyContent": "center",
+    "minHeight": "3rem",
+    "padding": "0.85rem 1.2rem",
+    "borderRadius": "16px",
+    "border": "1px solid rgba(203, 213, 225, 0.95)",
+    "background": "rgba(255, 255, 255, 0.82)",
+    "color": "#475569",
+    "fontWeight": 700,
+    "letterSpacing": "0.01em",
+    "boxShadow": "inset 0 1px 0 rgba(255, 255, 255, 0.88)",
+    "transition": "transform 140ms ease, border-color 140ms ease, background-color 140ms ease, color 140ms ease, box-shadow 140ms ease",
+}
+
+ASSUMPTIONS_SUBTAB_SELECTED_STYLE = {
+    **ASSUMPTIONS_SUBTAB_STYLE,
+    "background": "linear-gradient(180deg, rgba(37, 99, 235, 0.2) 0%, rgba(219, 234, 254, 0.98) 100%)",
+    "color": "#1d4ed8",
+    "fontWeight": 800,
+    "border": "1px solid rgba(37, 99, 235, 0.92)",
+    "boxShadow": "0 0 0 2px rgba(37, 99, 235, 0.14), 0 14px 28px rgba(37, 99, 235, 0.18)",
+    "transform": "translateY(-1px)",
+}
+
+
 layout = workspace_frame(
     page_class_name="page-advanced-host",
     grid_class_name="workbench-grid-advanced-host",
@@ -83,6 +110,8 @@ layout = workspace_frame(
                             value="general",
                             className="assumptions-subtab",
                             selected_className="assumptions-subtab-selected",
+                            style=ASSUMPTIONS_SUBTAB_STYLE,
+                            selected_style=ASSUMPTIONS_SUBTAB_SELECTED_STYLE,
                             children=[html.Div(id="assumptions-sections", className="assumptions-tab-body")],
                         ),
                         dcc.Tab(
@@ -91,6 +120,8 @@ layout = workspace_frame(
                             value="demand",
                             className="assumptions-subtab",
                             selected_className="assumptions-subtab-selected",
+                            style=ASSUMPTIONS_SUBTAB_STYLE,
+                            selected_style=ASSUMPTIONS_SUBTAB_SELECTED_STYLE,
                             children=[
                                 html.Div(
                                     className="assumptions-tab-body assumptions-demand-body",
