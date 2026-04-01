@@ -168,8 +168,44 @@ def test_update_selected_candidate_remains_selection_only() -> None:
 
     assert updated is not None
     assert updated.selected_candidate_key == non_best_key
+    assert updated.dirty is False
     assert float(updated.config_bundle.config["price_total_COP"]) == pytest.approx(original_price_total)
     assert updated.runtime_price_bridge == original_bridge
+    assert state.project_dirty is True
+
+
+def test_update_selected_candidate_stales_existing_bridge_without_mutating_runtime_fields() -> None:
+    state = _run_named_scenario("Selection stale bridge")
+    state = _bridge_selected_candidate(state)
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+    assert active.runtime_price_bridge is not None
+
+    previous_candidate = active.selected_candidate_key
+    original_pricing_mode = active.config_bundle.config["pricing_mode"]
+    original_price_total = float(active.config_bundle.config["price_total_COP"])
+    original_include_hw = active.config_bundle.config["include_hw_in_price"]
+    original_price_others = float(active.config_bundle.config["price_others_total"])
+    non_best_key = next(
+        key for key in active.scan_result.candidate_details if key != previous_candidate
+    )
+
+    state = update_selected_candidate(state, active.scenario_id, non_best_key)
+    updated = state.get_scenario()
+
+    assert updated is not None
+    assert updated.selected_candidate_key == non_best_key
+    assert updated.dirty is False
+    assert updated.runtime_price_bridge is not None
+    assert updated.runtime_price_bridge.candidate_key == previous_candidate
+    assert updated.runtime_price_bridge.stale is True
+    assert resolve_runtime_price_bridge_state(updated) == "stale"
+    assert updated.config_bundle.config["pricing_mode"] == original_pricing_mode
+    assert float(updated.config_bundle.config["price_total_COP"]) == pytest.approx(original_price_total)
+    assert updated.config_bundle.config["include_hw_in_price"] == original_include_hw
+    assert float(updated.config_bundle.config["price_others_total"]) == pytest.approx(original_price_others)
+    assert state.project_dirty is True
 
 
 def test_select_candidate_and_sync_runtime_price_updates_runtime_fields() -> None:

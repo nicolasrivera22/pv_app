@@ -690,4 +690,11 @@ def update_selected_candidate(state: ScenarioSessionState, scenario_id: str, can
     if scenario.scan_result is None:
         return state
     selected = candidate_key if candidate_key in scenario.scan_result.candidate_details else scenario.scan_result.best_candidate_key
-    return _mark_project_dirty(_replace_scenario(state, replace(scenario, selected_candidate_key=selected)))
+    if selected == scenario.selected_candidate_key:
+        return state
+    updated = replace(scenario, selected_candidate_key=selected)
+    updated = replace(
+        updated,
+        runtime_price_bridge=invalidate_runtime_price_bridge_if_needed(scenario.runtime_price_bridge, updated),
+    )
+    return _mark_project_dirty(_replace_scenario(state, updated))

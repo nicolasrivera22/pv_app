@@ -1888,6 +1888,7 @@ def test_graph_click_selection_updates_store_table_and_selected_marker() -> None
     active = next_state.get_scenario()
     assert active is not None
     assert active.selected_candidate_key == curve_key
+    assert active.dirty is False
     expected_bridge = prepare_economics_runtime_price_bridge(active)
     assert expected_bridge.applied is True
     assert active.runtime_price_bridge is None

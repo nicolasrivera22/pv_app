@@ -22,6 +22,8 @@ from .economics_tables import (
     economics_ui_label,
     economics_cost_items_rows_from_editor,
     economics_cost_items_rows_to_editor,
+    hydrate_economics_cost_items_table,
+    hydrate_economics_price_items_table,
     economics_price_items_rows_from_split_editors,
     economics_price_items_rows_to_section_editor,
 )
@@ -41,7 +43,9 @@ from .scenario_session import (
     PreparedEconomicsRuntimePriceBridge,
     apply_prepared_economics_runtime_price_bridge,
     prepare_economics_runtime_price_bridge,
+    resolve_runtime_bridge_candidate_key,
     resolve_runtime_price_bridge_state,
+    update_selected_candidate,
 )
 from .session_state import commit_client_session, resolve_client_session
 from .ui_schema import assumption_context_map, build_assumption_sections, build_table_display_columns, format_metric
@@ -107,8 +111,7 @@ PROFILE_TABLE_IDS = PROFILE_MAIN_TABLE_IDS
 PROFILE_ACTIVATOR_TABLE_IDS = PROFILE_MAIN_TABLE_IDS
 PROFILE_CARD_BASE_CLASS = "profile-table-card-shell"
 PROFILE_CARD_ACTIVE_CLASS = f"{PROFILE_CARD_BASE_CLASS} profile-table-card-active"
-ADMIN_PREVIEW_SOURCE_WORKBENCH = "workbench_seeded"
-ADMIN_PREVIEW_SOURCE_LOCAL = "admin_local"
+ADMIN_PREVIEW_SOURCE_SCENARIO = "scenario_selected"
 ADMIN_REQUIRED_TABLE_KEYS = (
     "inverter_catalog",
     "battery_catalog",
@@ -329,14 +332,14 @@ def _seed_admin_preview_candidate_state(active) -> dict[str, str | None]:
         return {
             "scenario_id": scenario_id,
             "candidate_key": str(active.selected_candidate_key),
-            "source": ADMIN_PREVIEW_SOURCE_WORKBENCH,
+            "source": ADMIN_PREVIEW_SOURCE_SCENARIO,
         }
     best_candidate_key = active.scan_result.best_candidate_key
     if best_candidate_key in active.scan_result.candidate_details:
         return {
             "scenario_id": scenario_id,
             "candidate_key": str(best_candidate_key),
-            "source": ADMIN_PREVIEW_SOURCE_WORKBENCH,
+            "source": ADMIN_PREVIEW_SOURCE_SCENARIO,
         }
     return {"scenario_id": scenario_id, "candidate_key": None, "source": None}
 
@@ -351,21 +354,10 @@ def _admin_preview_candidate_exists(active, candidate_key: str | None) -> bool:
 
 
 def _resolve_admin_preview_candidate_state(active, current_state: dict[str, object] | None = None) -> dict[str, str | None]:
+    _ = current_state
     if active is None:
         return _empty_admin_preview_candidate_state()
-
-    stored = current_state or {}
     scenario_id = str(active.scenario_id)
-    stored_scenario_id = str(stored.get("scenario_id") or "").strip() or None
-    stored_candidate_key = str(stored.get("candidate_key") or "").strip() or None
-    stored_source = str(stored.get("source") or "").strip() or None
-
-    if stored_scenario_id == scenario_id and stored_source == ADMIN_PREVIEW_SOURCE_LOCAL:
-        return {
-            "scenario_id": scenario_id,
-            "candidate_key": stored_candidate_key,
-            "source": ADMIN_PREVIEW_SOURCE_LOCAL,
-        }
 
     if active.scan_result is None or not active.scan_result.candidate_details:
         return {"scenario_id": scenario_id, "candidate_key": None, "source": None}
@@ -387,13 +379,36 @@ def _resolve_admin_preview_candidate_key(active, current_state: dict[str, object
 def _admin_preview_selector_state_key(active) -> str:
     if active is None:
         return PREVIEW_STATE_NO_SCAN
-    if active.dirty:
-        return PREVIEW_STATE_RERUN_REQUIRED
     if active.scan_result is None:
         return PREVIEW_STATE_NO_SCAN
+    if active.dirty:
+        return PREVIEW_STATE_RERUN_REQUIRED
     if not active.scan_result.candidate_details:
         return PREVIEW_STATE_CANDIDATE_MISSING
     return PREVIEW_STATE_READY
+
+
+def _admin_economics_tables_ready(
+    active,
+    *,
+    economics_cost_rows,
+    economics_tax_rows,
+    economics_adjustment_rows,
+) -> bool:
+    if active is None:
+        return False
+    try:
+        cost_source = active.config_bundle.economics_cost_items_table if economics_cost_rows is None else economics_cost_rows
+        if economics_tax_rows is None or economics_adjustment_rows is None:
+            price_source = active.config_bundle.economics_price_items_table
+        else:
+            price_source = economics_price_items_rows_from_split_editors(economics_tax_rows, economics_adjustment_rows)
+        cost_frame, _cost_issues = hydrate_economics_cost_items_table(cost_source)
+        price_frame, _price_issues = hydrate_economics_price_items_table(price_source)
+    except Exception:
+        logger.exception("No se pudieron resolver las tablas mínimas de Economics para Admin.")
+        return False
+    return not cost_frame.empty and not price_frame.empty
 
 
 def _admin_preview_candidate_option_label(candidate_key: str, detail: dict[str, object], *, lang: str) -> str:
@@ -1324,10 +1339,12 @@ def _render_runtime_price_bridge_status(scenario, *, lang: str):
         return []
     applied_at = _format_timestamp_text(record.applied_at)
     final_price = _format_cop(record.applied_price_total_COP, lang)
+    active_candidate_key = resolve_runtime_bridge_candidate_key(scenario) or "—"
     body = tr(
         f"workspace.admin.economics.bridge.status.{state_key}",
         lang,
         candidate_key=record.candidate_key,
+        current_candidate_key=active_candidate_key,
         final_price=final_price,
         applied_at=applied_at,
     )
@@ -1342,7 +1359,11 @@ def _render_runtime_price_bridge_status(scenario, *, lang: str):
         children=[
             html.H5(tr(f"workspace.admin.economics.bridge.status.{state_key}.title", lang), id="economics-bridge-status-title"),
             html.Div(body, id="economics-bridge-status-body", className="status-line"),
-            html.P(tr(detail_key, lang), id="economics-bridge-status-detail", className="section-copy"),
+            html.P(
+                tr(detail_key, lang, current_candidate_key=active_candidate_key),
+                id="economics-bridge-status-detail",
+                className="section-copy",
+            ),
         ],
     )
 ADMIN_EXCLUDED_FIELDS = {
@@ -1620,14 +1641,13 @@ def sync_admin_preview_candidate_state(session_payload, current_state):
 
 
 @callback(
-    Output("admin-preview-candidate-key", "data", allow_duplicate=True),
+    Output("scenario-session-store", "data", allow_duplicate=True),
     Input("admin-preview-candidate-dropdown", "value", allow_optional=True),
     State("scenario-session-store", "data"),
-    State("admin-preview-candidate-key", "data"),
     prevent_initial_call=True,
 )
-def update_admin_preview_candidate_state(dropdown_value, session_payload, current_state):
-    _client_state, state, unlocked = _admin_session(session_payload, None)
+def update_admin_preview_candidate_state(dropdown_value, session_payload):
+    client_state, state, unlocked = _admin_session(session_payload, None)
     if not unlocked:
         raise PreventUpdate
     active = state.get_scenario()
@@ -1636,14 +1656,11 @@ def update_admin_preview_candidate_state(dropdown_value, session_payload, curren
     selected_candidate_key = str(dropdown_value or "").strip() or None
     if selected_candidate_key not in active.scan_result.candidate_details:
         raise PreventUpdate
-    next_state = {
-        "scenario_id": active.scenario_id,
-        "candidate_key": selected_candidate_key,
-        "source": ADMIN_PREVIEW_SOURCE_LOCAL,
-    }
-    if next_state == (current_state or {}):
+    if selected_candidate_key == active.selected_candidate_key:
         raise PreventUpdate
-    return next_state
+    state = update_selected_candidate(state, active.scenario_id, selected_candidate_key)
+    client_state = commit_client_session(client_state, state)
+    return client_state.to_payload()
 
 
 @callback(
@@ -1665,23 +1682,14 @@ def render_admin_preview_candidate_selector(session_payload, preview_candidate_s
     if active is None:
         return [], None, True, "", ""
 
-    resolved_state = _resolve_admin_preview_candidate_state(active, preview_candidate_state)
-    requested_candidate_key = str(resolved_state.get("candidate_key") or "").strip() or None
     selected_candidate_key = _resolve_admin_preview_candidate_key(active, preview_candidate_state)
     state_key = _admin_preview_selector_state_key(active)
-    local_candidate_missing = bool(
-        resolved_state.get("source") == ADMIN_PREVIEW_SOURCE_LOCAL
-        and requested_candidate_key is not None
-        and selected_candidate_key is None
-    )
     helper_key = {
         PREVIEW_STATE_READY: "workspace.admin.economics.preview.selector.state.ready",
         PREVIEW_STATE_RERUN_REQUIRED: "workspace.admin.economics.preview.selector.state.rerun_required",
         PREVIEW_STATE_CANDIDATE_MISSING: "workspace.admin.economics.preview.selector.state.candidate_missing",
         PREVIEW_STATE_NO_SCAN: "workspace.admin.economics.preview.selector.state.no_scan",
     }.get(state_key, "workspace.admin.economics.preview.selector.state.no_scan")
-    if local_candidate_missing:
-        helper_key = "workspace.admin.economics.preview.selector.state.candidate_missing"
     if active.scan_result is None:
         return [], None, True, tr(helper_key, lang), ""
 
@@ -1802,26 +1810,19 @@ def sync_economics_editor_visibility(
     active = state.get_scenario()
     if active is None:
         return "economics-editors-shell economics-editors-shell-gated", "", {"display": "none"}, {"display": "none"}
-    preview = _resolve_admin_economics_preview(
+    if not _admin_economics_tables_ready(
         active,
         economics_cost_rows=economics_cost_rows,
         economics_tax_rows=economics_tax_rows,
         economics_adjustment_rows=economics_adjustment_rows,
-        admin_preview_candidate_state=admin_preview_candidate_state,
-    )
-    if preview.state == PREVIEW_STATE_READY and preview.result is not None:
-        return "economics-editors-shell", "", {"display": "none"}, {}
-    note_key = {
-        PREVIEW_STATE_NO_SCAN: "workspace.admin.economics.editors.gated.no_scan",
-        PREVIEW_STATE_RERUN_REQUIRED: "workspace.admin.economics.editors.gated.rerun_required",
-        PREVIEW_STATE_CANDIDATE_MISSING: "workspace.admin.economics.editors.gated.candidate_missing",
-    }.get(preview.state or PREVIEW_STATE_NO_SCAN, "workspace.admin.economics.editors.gated.no_scan")
-    return (
-        "economics-editors-shell economics-editors-shell-gated",
-        tr(note_key, lang),
-        {"display": "block"},
-        {"display": "none"},
-    )
+    ):
+        return (
+            "economics-editors-shell economics-editors-shell-gated",
+            tr("workspace.admin.economics.editors.gated.loading", lang),
+            {"display": "block"},
+            {"display": "none"},
+        )
+    return "economics-editors-shell", "", {"display": "none"}, {}
 
 
 @callback(
