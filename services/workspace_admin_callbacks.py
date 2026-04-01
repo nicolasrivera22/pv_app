@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
+import math
 import time
 
-from dash import ALL, Input, Output, State, callback, ctx, dash_table, html, no_update
+from dash import ALL, Input, Output, State, callback, ctx, dash_table, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 import pandas as pd
 import plotly.graph_objects as go
@@ -80,6 +81,51 @@ from .workspace_drafts import bind_workspace_draft_project, upsert_workspace_dra
 from .workspace_partitions import partition_assumption_sections
 
 logger = logging.getLogger(__name__)
+
+_ECONOMICS_CASCADE_STEP_SPECS = (
+    (
+        "technical_subtotal_COP",
+        "workspace.admin.economics.preview.summary.technical",
+        "workspace.admin.economics.preview.flow.formula.technical",
+        "relative",
+    ),
+    (
+        "installed_subtotal_COP",
+        "workspace.admin.economics.preview.summary.installed",
+        "workspace.admin.economics.preview.flow.formula.installed",
+        "relative",
+    ),
+    (
+        "cost_total_COP",
+        "workspace.admin.economics.preview.summary.cost_total",
+        "workspace.admin.economics.preview.flow.formula.cost_total",
+        "total",
+    ),
+    (
+        "tax_total_COP",
+        "workspace.admin.economics.preview.summary.tax_total",
+        "workspace.admin.economics.preview.flow.formula.tax_total",
+        "relative",
+    ),
+    (
+        "subtotal_with_tax_COP",
+        "workspace.admin.economics.preview.summary.subtotal_with_tax",
+        "workspace.admin.economics.preview.flow.formula.subtotal_with_tax",
+        "total",
+    ),
+    (
+        "post_tax_adjustments_total_COP",
+        "workspace.admin.economics.preview.summary.post_tax_adjustments_total",
+        "workspace.admin.economics.preview.flow.formula.post_tax_adjustments_total",
+        "relative",
+    ),
+    (
+        "final_price_COP",
+        "workspace.admin.economics.preview.summary.final_price",
+        "workspace.admin.economics.preview.flow.formula.final_price",
+        "total",
+    ),
+)
 
 
 def _lang(value: str | None) -> str:
@@ -759,6 +805,44 @@ def _format_cop_per_kwp(value: float | None, lang: str) -> str:
     return f"{_format_cop(value, lang)} / kWp"
 
 
+def _economics_result_value(result, field: str) -> float | None:
+    raw_value = getattr(result, field, None)
+    if raw_value in (None, ""):
+        return None
+    try:
+        numeric_value = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+    return numeric_value if math.isfinite(numeric_value) else None
+
+
+def _economics_result_rows(result, field: str):
+    rows = getattr(result, field, ()) or ()
+    try:
+        return tuple(rows)
+    except TypeError:
+        return ()
+
+
+def _resolve_economics_cascade_steps(result, *, lang: str) -> list[dict[str, object]] | None:
+    steps: list[dict[str, object]] = []
+    for field, label_key, formula_key, measure in _ECONOMICS_CASCADE_STEP_SPECS:
+        value = _economics_result_value(result, field)
+        if value is None:
+            return None
+        steps.append(
+            {
+                "field": field,
+                "label": tr(label_key, lang),
+                "formula": tr(formula_key, lang),
+                "measure": measure,
+                "value": value,
+                "formatted_value": _format_cop(value, lang),
+            }
+        )
+    return steps
+
+
 def _format_number(value: float | int | None, *, decimals: int = 3) -> str:
     if value is None:
         return "-"
@@ -1131,49 +1215,49 @@ def _economics_preview_flow(result, *, lang: str) -> html.Div:
             "economics-preview-flow-technical",
             tr("workspace.admin.economics.preview.summary.technical", lang),
             tr("workspace.admin.economics.preview.flow.formula.technical", lang),
-            _format_cop(result.technical_subtotal_COP, lang),
+            _format_cop(_economics_result_value(result, "technical_subtotal_COP"), lang),
         ),
         (
             "economics-preview-flow-installed",
             tr("workspace.admin.economics.preview.summary.installed", lang),
             tr("workspace.admin.economics.preview.flow.formula.installed", lang),
-            _format_cop(result.installed_subtotal_COP, lang),
+            _format_cop(_economics_result_value(result, "installed_subtotal_COP"), lang),
         ),
         (
             "economics-preview-flow-cost-total",
             tr("workspace.admin.economics.preview.summary.cost_total", lang),
             tr("workspace.admin.economics.preview.flow.formula.cost_total", lang),
-            _format_cop(result.cost_total_COP, lang),
+            _format_cop(_economics_result_value(result, "cost_total_COP"), lang),
         ),
         (
             "economics-preview-flow-tax-total",
             tr("workspace.admin.economics.preview.summary.tax_total", lang),
             tr("workspace.admin.economics.preview.flow.formula.tax_total", lang),
-            _format_cop(result.tax_total_COP, lang),
+            _format_cop(_economics_result_value(result, "tax_total_COP"), lang),
         ),
         (
             "economics-preview-flow-subtotal-with-tax",
             tr("workspace.admin.economics.preview.summary.subtotal_with_tax", lang),
             tr("workspace.admin.economics.preview.flow.formula.subtotal_with_tax", lang),
-            _format_cop(result.subtotal_with_tax_COP, lang),
+            _format_cop(_economics_result_value(result, "subtotal_with_tax_COP"), lang),
         ),
         (
             "economics-preview-flow-post-tax-adjustments-total",
             tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
             tr("workspace.admin.economics.preview.flow.formula.post_tax_adjustments_total", lang),
-            _format_cop(result.post_tax_adjustments_total_COP, lang),
+            _format_cop(_economics_result_value(result, "post_tax_adjustments_total_COP"), lang),
         ),
         (
             "economics-preview-flow-final-price",
             tr("workspace.admin.economics.preview.summary.final_price", lang),
             tr("workspace.admin.economics.preview.flow.formula.final_price", lang),
-            _format_cop(result.final_price_COP, lang),
+            _format_cop(_economics_result_value(result, "final_price_COP"), lang),
         ),
         (
             "economics-preview-flow-final-price-per-kwp",
             tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
             tr("workspace.admin.economics.preview.flow.formula.final_price_per_kwp", lang),
-            _format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
+            _format_cop_per_kwp(_economics_result_value(result, "final_price_per_kwp_COP"), lang),
         ),
     ]
     return html.Div(
@@ -1206,33 +1290,33 @@ def _economics_preview_summary_shell(result, *, lang: str) -> html.Div:
         children=[
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.cost_total", lang),
-                _format_cop(result.cost_total_COP, lang),
+                _format_cop(_economics_result_value(result, "cost_total_COP"), lang),
                 component_id="economics-summary-card-cost-total",
                 emphasized=True,
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.tax_total", lang),
-                _format_cop(result.tax_total_COP, lang),
+                _format_cop(_economics_result_value(result, "tax_total_COP"), lang),
                 component_id="economics-summary-card-tax-total",
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.subtotal_with_tax", lang),
-                _format_cop(result.subtotal_with_tax_COP, lang),
+                _format_cop(_economics_result_value(result, "subtotal_with_tax_COP"), lang),
                 component_id="economics-summary-card-subtotal-with-tax",
                 emphasized=True,
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
-                _format_cop(result.post_tax_adjustments_total_COP, lang),
+                _format_cop(_economics_result_value(result, "post_tax_adjustments_total_COP"), lang),
                 component_id="economics-summary-card-post-tax-adjustments",
             ),
             _economics_summary_card(
                 tr("workspace.admin.economics.preview.summary.final_price", lang),
-                _format_cop(result.final_price_COP, lang),
+                _format_cop(_economics_result_value(result, "final_price_COP"), lang),
                 component_id="economics-summary-card-final-price",
                 emphasized=True,
                 secondary_label=tr("workspace.admin.economics.preview.summary.final_price_per_kwp", lang),
-                secondary_value=_format_cop_per_kwp(result.final_price_per_kwp_COP, lang),
+                secondary_value=_format_cop_per_kwp(_economics_result_value(result, "final_price_per_kwp_COP"), lang),
             ),
         ],
     )
@@ -1250,56 +1334,119 @@ def _economics_preview_summary_shell(result, *, lang: str) -> html.Div:
     )
 
 
-def _economics_closing_rows(result, *, lang: str) -> list[dict[str, object]]:
-    rows = [
-        {
-            "metric": tr("workspace.admin.economics.preview.summary.technical", lang),
-            "value": _format_cop(result.technical_subtotal_COP, lang),
-        },
-        {
-            "metric": tr("workspace.admin.economics.preview.summary.installed", lang),
-            "value": _format_cop(result.installed_subtotal_COP, lang),
-        },
-        {
-            "metric": tr("workspace.admin.economics.preview.summary.cost_total", lang),
-            "value": _format_cop(result.cost_total_COP, lang),
-        },
-        {
-            "metric": tr("workspace.admin.economics.preview.summary.tax_total", lang),
-            "value": _format_cop(result.tax_total_COP, lang),
-        },
-        {
-            "metric": tr("workspace.admin.economics.preview.summary.subtotal_with_tax", lang),
-            "value": _format_cop(result.subtotal_with_tax_COP, lang),
-        },
-        {
-            "metric": tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
-            "value": _format_cop(result.post_tax_adjustments_total_COP, lang),
-        },
-        {
-            "metric": tr("workspace.admin.economics.preview.summary.final_price", lang),
-            "value": _format_cop(result.final_price_COP, lang),
-        },
+def _economics_closing_rows(result, *, lang: str) -> list[dict[str, object]] | None:
+    steps = _resolve_economics_cascade_steps(result, lang=lang)
+    if steps is None:
+        return None
+    return [{"metric": step["label"], "value": step["formatted_value"]} for step in steps]
+
+
+def _economics_waterfall_figure(cascade_steps: list[dict[str, object]], *, lang: str) -> go.Figure:
+    figure = go.Figure(
+        data=[
+            go.Waterfall(
+                x=[step["label"] for step in cascade_steps],
+                y=[step["value"] for step in cascade_steps],
+                measure=[step["measure"] for step in cascade_steps],
+                customdata=[[step["formula"], step["formatted_value"]] for step in cascade_steps],
+                connector={"line": {"color": "rgba(148, 163, 184, 0.78)", "width": 1.2}},
+                increasing={"marker": {"color": "#0f766e"}},
+                decreasing={"marker": {"color": "#b45309"}},
+                totals={"marker": {"color": "#1d4ed8"}},
+                hovertemplate="%{x}<br>%{customdata[0]}<br>%{customdata[1]}<extra></extra>",
+            )
+        ]
+    )
+    figure.update_layout(
+        template="plotly_white",
+        showlegend=False,
+        height=360,
+        margin={"l": 36, "r": 18, "t": 14, "b": 28},
+        paper_bgcolor="rgba(255,255,255,0)",
+        plot_bgcolor="rgba(255,255,255,0)",
+        waterfallgap=0.32,
+        hoverlabel={"namelength": -1},
+    )
+    figure.update_xaxes(fixedrange=True, automargin=True, tickfont={"size": 11})
+    figure.update_yaxes(
+        fixedrange=True,
+        automargin=True,
+        gridcolor="rgba(148, 163, 184, 0.2)",
+        zeroline=True,
+        zerolinecolor="rgba(148, 163, 184, 0.4)",
+        tickformat=",.0f",
+    )
+    return figure
+
+
+def _economics_waterfall_shell(result, *, lang: str) -> html.Div:
+    cascade_steps = _resolve_economics_cascade_steps(result, lang=lang)
+    children: list[object] = [
+        html.Div(
+            className="section-head",
+            children=[html.H5(tr("workspace.admin.economics.preview.waterfall.title", lang), id="economics-waterfall-title")],
+        ),
+        html.P(
+            tr("workspace.admin.economics.preview.waterfall.copy", lang),
+            id="economics-waterfall-copy",
+            className="section-copy",
+        ),
     ]
-    return rows
+    if cascade_steps is None:
+        children.append(
+            html.Div(
+                tr("workspace.admin.economics.preview.cascade.unavailable", lang),
+                id="economics-waterfall-fallback",
+                className="status-line economics-waterfall-fallback",
+            )
+        )
+    else:
+        children.append(
+            html.Div(
+                className="economics-waterfall-graph-wrap",
+                children=[
+                    dcc.Graph(
+                        id="economics-waterfall-graph",
+                        figure=_economics_waterfall_figure(cascade_steps, lang=lang),
+                        config={"displayModeBar": False},
+                        responsive=True,
+                        className="economics-waterfall-graph",
+                    )
+                ],
+            )
+        )
+    return html.Div(
+        id="economics-waterfall-shell",
+        className="subpanel economics-waterfall-shell",
+        children=children,
+    )
 
 
 def _economics_closing_shell(result, *, lang: str) -> html.Div:
-    return html.Div(
-        id="economics-closing-shell",
-        className="subpanel economics-closing-shell",
-        children=[
+    closing_rows = _economics_closing_rows(result, lang=lang)
+    children: list[object] = [
+        html.Div(
+            className="section-head",
+            children=[html.H5(tr("workspace.admin.economics.preview.closing.title", lang), id="economics-closing-title")],
+        ),
+        html.P(tr("workspace.admin.economics.preview.closing.copy", lang), id="economics-closing-copy", className="section-copy"),
+    ]
+    if closing_rows is None:
+        children.append(
             html.Div(
-                className="section-head",
-                children=[html.H5(tr("workspace.admin.economics.preview.closing.title", lang), id="economics-closing-title")],
-            ),
-            html.P(tr("workspace.admin.economics.preview.closing.copy", lang), id="economics-closing-copy", className="section-copy"),
+                tr("workspace.admin.economics.preview.cascade.unavailable", lang),
+                id="economics-closing-fallback",
+                className="status-line economics-closing-fallback",
+            )
+        )
+    else:
+        children.append(
             html.Div(
                 className="economics-table-wrap economics-table-wrap-dense",
                 children=[
                     dash_table.DataTable(
                         id="economics-closing-table",
-                        data=_economics_closing_rows(result, lang=lang),
+                        data=closing_rows,
                         columns=[
                             {"name": tr("workspace.admin.economics.preview.closing.metric", lang), "id": "metric"},
                             {"name": tr("workspace.admin.economics.preview.closing.value", lang), "id": "value"},
@@ -1326,8 +1473,12 @@ def _economics_closing_shell(result, *, lang: str) -> html.Div:
                         ],
                     )
                 ],
-            ),
-        ],
+            )
+        )
+    return html.Div(
+        id="economics-closing-shell",
+        className="subpanel economics-closing-shell",
+        children=children,
     )
 
 
@@ -1377,6 +1528,8 @@ def _economics_breakdown_group(
 
 
 def _economics_breakdown_advanced_details(result, *, lang: str) -> html.Details:
+    cost_rows = _economics_result_rows(result, "cost_rows")
+    price_rows = _economics_result_rows(result, "price_rows")
     return html.Details(
         id="economics-breakdown-advanced-details",
         className="subpanel economics-breakdown-advanced-details economics-collapsible-section",
@@ -1407,8 +1560,8 @@ def _economics_breakdown_advanced_details(result, *, lang: str) -> html.Details:
                         title=tr("workspace.admin.economics.preview.breakdown.group.technical", lang),
                         description=tr("workspace.admin.economics.preview.breakdown.group.technical.copy", lang),
                         subtotal_label=tr("workspace.admin.economics.preview.summary.technical", lang),
-                        subtotal_value=result.technical_subtotal_COP,
-                        rows=[row for row in result.cost_rows if row.stage_or_layer == "technical"],
+                        subtotal_value=_economics_result_value(result, "technical_subtotal_COP"),
+                        rows=[row for row in cost_rows if row.stage_or_layer == "technical"],
                         lang=lang,
                         advanced=True,
                         show_stage=True,
@@ -1418,8 +1571,8 @@ def _economics_breakdown_advanced_details(result, *, lang: str) -> html.Details:
                         title=tr("workspace.admin.economics.preview.breakdown.group.installed", lang),
                         description=tr("workspace.admin.economics.preview.breakdown.group.installed.copy", lang),
                         subtotal_label=tr("workspace.admin.economics.preview.summary.installed", lang),
-                        subtotal_value=result.installed_subtotal_COP,
-                        rows=[row for row in result.cost_rows if row.stage_or_layer == "installed"],
+                        subtotal_value=_economics_result_value(result, "installed_subtotal_COP"),
+                        rows=[row for row in cost_rows if row.stage_or_layer == "installed"],
                         lang=lang,
                         advanced=True,
                         show_stage=True,
@@ -1429,8 +1582,8 @@ def _economics_breakdown_advanced_details(result, *, lang: str) -> html.Details:
                         title=tr("workspace.admin.economics.preview.breakdown.group.tax", lang),
                         description=tr("workspace.admin.economics.preview.breakdown.group.tax.copy", lang),
                         subtotal_label=tr("workspace.admin.economics.preview.summary.tax_total", lang),
-                        subtotal_value=result.tax_total_COP,
-                        rows=[row for row in result.price_rows if row.stage_or_layer == "tax"],
+                        subtotal_value=_economics_result_value(result, "tax_total_COP"),
+                        rows=[row for row in price_rows if row.stage_or_layer == "tax"],
                         lang=lang,
                         advanced=True,
                         show_stage=True,
@@ -1440,8 +1593,8 @@ def _economics_breakdown_advanced_details(result, *, lang: str) -> html.Details:
                         title=tr("workspace.admin.economics.preview.breakdown.group.adjustments", lang),
                         description=tr("workspace.admin.economics.preview.breakdown.group.adjustments.copy", lang),
                         subtotal_label=tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
-                        subtotal_value=result.post_tax_adjustments_total_COP,
-                        rows=[row for row in result.price_rows if row.stage_or_layer in {"commercial", "sale"}],
+                        subtotal_value=_economics_result_value(result, "post_tax_adjustments_total_COP"),
+                        rows=[row for row in price_rows if row.stage_or_layer in {"commercial", "sale"}],
                         lang=lang,
                         advanced=True,
                         show_stage=True,
@@ -1489,6 +1642,8 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
         return [state_block]
 
     result = preview.result
+    cost_rows = _economics_result_rows(result, "cost_rows")
+    price_rows = _economics_result_rows(result, "price_rows")
     warnings_block = _economics_preview_warning_block(live_warnings, lang=lang)
     breakdown_shell = html.Div(
         id="economics-breakdown-shell",
@@ -1504,8 +1659,8 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
                 title=tr("workspace.admin.economics.preview.breakdown.group.technical", lang),
                 description=tr("workspace.admin.economics.preview.breakdown.group.technical.copy", lang),
                 subtotal_label=tr("workspace.admin.economics.preview.summary.technical", lang),
-                subtotal_value=result.technical_subtotal_COP,
-                rows=[row for row in result.cost_rows if row.stage_or_layer == "technical"],
+                subtotal_value=_economics_result_value(result, "technical_subtotal_COP"),
+                rows=[row for row in cost_rows if row.stage_or_layer == "technical"],
                 lang=lang,
                 show_stage=False,
             ),
@@ -1514,8 +1669,8 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
                 title=tr("workspace.admin.economics.preview.breakdown.group.installed", lang),
                 description=tr("workspace.admin.economics.preview.breakdown.group.installed.copy", lang),
                 subtotal_label=tr("workspace.admin.economics.preview.summary.installed", lang),
-                subtotal_value=result.installed_subtotal_COP,
-                rows=[row for row in result.cost_rows if row.stage_or_layer == "installed"],
+                subtotal_value=_economics_result_value(result, "installed_subtotal_COP"),
+                rows=[row for row in cost_rows if row.stage_or_layer == "installed"],
                 lang=lang,
                 show_stage=False,
             ),
@@ -1524,8 +1679,8 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
                 title=tr("workspace.admin.economics.preview.breakdown.group.tax", lang),
                 description=tr("workspace.admin.economics.preview.breakdown.group.tax.copy", lang),
                 subtotal_label=tr("workspace.admin.economics.preview.summary.tax_total", lang),
-                subtotal_value=result.tax_total_COP,
-                rows=[row for row in result.price_rows if row.stage_or_layer == "tax"],
+                subtotal_value=_economics_result_value(result, "tax_total_COP"),
+                rows=[row for row in price_rows if row.stage_or_layer == "tax"],
                 lang=lang,
                 show_stage=False,
             ),
@@ -1534,8 +1689,8 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
                 title=tr("workspace.admin.economics.preview.breakdown.group.adjustments", lang),
                 description=tr("workspace.admin.economics.preview.breakdown.group.adjustments.copy", lang),
                 subtotal_label=tr("workspace.admin.economics.preview.summary.post_tax_adjustments_total", lang),
-                subtotal_value=result.post_tax_adjustments_total_COP,
-                rows=[row for row in result.price_rows if row.stage_or_layer in {"commercial", "sale"}],
+                subtotal_value=_economics_result_value(result, "post_tax_adjustments_total_COP"),
+                rows=[row for row in price_rows if row.stage_or_layer in {"commercial", "sale"}],
                 lang=lang,
                 show_stage=True,
             ),
@@ -1546,6 +1701,7 @@ def _render_economics_preview(preview: EconomicsPreviewResult, *, live_warnings:
         state_block,
         *( [warnings_block] if warnings_block is not None else [] ),
         _economics_preview_summary_shell(result, lang=lang),
+        _economics_waterfall_shell(result, lang=lang),
         _economics_closing_shell(result, lang=lang),
         breakdown_shell,
         _economics_preview_advanced_details(preview, result, lang=lang),

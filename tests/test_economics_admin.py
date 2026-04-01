@@ -119,6 +119,43 @@ def _find_component(node, component_id: str):
     return _find_component(children, component_id)
 
 
+def _component_figure_json(component):
+    figure = getattr(component, "figure", None)
+    if figure is None:
+        return None
+    return figure.to_plotly_json() if hasattr(figure, "to_plotly_json") else figure
+
+
+def _stub_economics_result(**overrides) -> EconomicsResult:
+    result = EconomicsResult(
+        quantities=EconomicsQuantities(
+            candidate_key="12.000::None",
+            kWp=12.0,
+            panel_count=24,
+            inverter_count=1,
+            battery_kwh=0.0,
+            battery_name="",
+            inverter_name="INV-BASE",
+            panel_name="PANEL-BASE",
+        ),
+        cost_rows=(),
+        price_rows=(),
+        technical_subtotal_COP=10_000_000.0,
+        installed_subtotal_COP=2_000_000.0,
+        cost_total_COP=12_000_000.0,
+        taxable_base_COP=12_000_000.0,
+        tax_total_COP=2_280_000.0,
+        subtotal_with_tax_COP=14_280_000.0,
+        commercial_adjustment_COP=1_000_000.0,
+        post_tax_adjustments_total_COP=1_500_000.0,
+        commercial_offer_COP=15_280_000.0,
+        sale_adjustment_COP=500_000.0,
+        final_price_COP=15_780_000.0,
+        final_price_per_kwp_COP=1_315_000.0,
+    )
+    return replace(result, **overrides)
+
+
 def _bridge_args(
     active,
     *,
@@ -731,6 +768,52 @@ def test_apply_financial_preset_loads_editor_rows_without_mutating_stored_preset
     )
     assert state.financial_presets[0].economics_cost_items_rows == custom_preset.economics_cost_items_rows
     assert state.financial_presets[0].economics_price_items_rows == custom_preset.economics_price_items_rows
+
+
+def test_apply_financial_preset_updates_waterfall_through_normal_preview_route(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    assert active.scan_result is not None
+    selected_candidate = active.selected_candidate_key or active.scan_result.best_candidate_key
+    assert selected_candidate is not None
+
+    cost_rows, tax_rows, adjustment_rows, _meta, _status = apply_financial_preset(
+        1,
+        payload,
+        {"preset_id": "system:industrial_aggressive"},
+        "es",
+    )
+    preview_children = _render_preview_call(
+        payload,
+        economics_cost_rows=cost_rows,
+        economics_price_rows=[*tax_rows, *adjustment_rows],
+        economics_price_rows_are_editor=True,
+        lang="es",
+    )
+    waterfall_graph = _find_component(preview_children, "economics-waterfall-graph")
+    figure = _component_figure_json(waterfall_graph)
+    assert figure is not None
+
+    normalized_cost_rows = economics_cost_items_rows_from_editor(cost_rows)
+    normalized_price_rows = economics_price_items_rows_from_split_editors(tax_rows, adjustment_rows)
+    snapshot = build_candidate_financial_snapshot(
+        active,
+        selected_candidate,
+        economics_cost_items=normalized_cost_rows,
+        economics_price_items=normalized_price_rows,
+        use_cache=False,
+    )
+    trace = figure["data"][0]
+    expected_values = [
+        snapshot.economics_result.technical_subtotal_COP,
+        snapshot.economics_result.installed_subtotal_COP,
+        snapshot.economics_result.cost_total_COP,
+        snapshot.economics_result.tax_total_COP,
+        snapshot.economics_result.subtotal_with_tax_COP,
+        snapshot.economics_result.post_tax_adjustments_total_COP,
+        snapshot.economics_result.final_price_COP,
+    ]
+
+    assert list(trace["y"]) == pytest.approx(expected_values)
 
 
 def test_financial_preset_divergence_is_visible_after_manual_editor_change(monkeypatch, tmp_path) -> None:
@@ -1472,6 +1555,7 @@ def test_results_selection_syncs_admin_selector_and_preview(monkeypatch, tmp_pat
     )
     preview_children = _render_preview_call(next_payload, lang="es", admin_preview_candidate_state=synced_state)
     preview_candidate = _find_component(preview_children, "economics-preview-quantity-candidate")
+    waterfall_graph = _find_component(preview_children, "economics-waterfall-graph")
 
     assert options
     assert dropdown_value == selected_candidate
@@ -1480,6 +1564,11 @@ def test_results_selection_syncs_admin_selector_and_preview(monkeypatch, tmp_pat
     assert meta != ""
     assert preview_candidate is not None
     assert selected_candidate in str(preview_candidate.children)
+    figure = _component_figure_json(waterfall_graph)
+    assert figure is not None
+    trace = figure["data"][0]
+    snapshot = build_candidate_financial_snapshot(updated_active, selected_candidate, use_cache=False)
+    assert list(trace["y"])[-1] == pytest.approx(snapshot.economics_result.final_price_COP)
 
 
 def test_admin_preview_candidate_selector_reports_non_ready_states_without_mutating_state(monkeypatch, tmp_path) -> None:
@@ -1550,6 +1639,7 @@ def test_pre_scan_economics_editors_stay_visible_while_preview_reports_no_scan(m
     preview_children = _render_preview_call(payload, lang="es", admin_preview_candidate_state=synced_state)
     preview_status = _find_component(preview_children, "economics-preview-status")
     preview_summary = _find_component(preview_children, "economics-summary-cards")
+    preview_waterfall = _find_component(preview_children, "economics-waterfall-shell")
     preview_closing = _find_component(preview_children, "economics-closing-shell")
     preview_breakdown = _find_component(preview_children, "economics-breakdown-shell")
     editors_class, editors_note, editors_note_style, editors_panels_style = admin_callbacks.sync_economics_editor_visibility(
@@ -1573,6 +1663,7 @@ def test_pre_scan_economics_editors_stay_visible_while_preview_reports_no_scan(m
     assert preview_status is not None
     assert "Ejecuta el escaneo determinístico" in str(preview_status.children)
     assert preview_summary is None
+    assert preview_waterfall is None
     assert preview_closing is None
     assert preview_breakdown is None
     assert editors_class == "economics-editors-shell"
@@ -1605,6 +1696,9 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
 
     status = _find_component(children, "economics-preview-status")
     summary_shell = _find_component(children, "economics-summary-shell")
+    waterfall_shell = _find_component(children, "economics-waterfall-shell")
+    waterfall_graph = _find_component(children, "economics-waterfall-graph")
+    waterfall_fallback = _find_component(children, "economics-waterfall-fallback")
     quantities_shell = _find_component(children, "economics-preview-quantities-shell")
     flow_shell = _find_component(children, "economics-preview-flow-shell")
     advanced_preview = _find_component(children, "economics-preview-advanced-details")
@@ -1633,9 +1727,14 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert status is not None
     assert "diseño determinístico vigente" in str(status.children)
     assert child_ids.index("economics-summary-shell") < child_ids.index("economics-closing-shell")
+    assert child_ids.index("economics-summary-shell") < child_ids.index("economics-waterfall-shell")
+    assert child_ids.index("economics-waterfall-shell") < child_ids.index("economics-closing-shell")
     assert child_ids.index("economics-closing-shell") < child_ids.index("economics-breakdown-shell")
     assert child_ids.index("economics-breakdown-shell") < child_ids.index("economics-preview-advanced-details")
     assert summary_shell is not None
+    assert waterfall_shell is not None
+    assert waterfall_graph is not None
+    assert waterfall_fallback is None
     assert quantities_shell is not None
     assert flow_shell is not None
     assert advanced_preview is not None
@@ -1687,6 +1786,108 @@ def test_render_economics_preview_ready_state_shows_cards_and_breakdown(monkeypa
     assert "Precio final por kWp" not in {
         row["metric"] for row in closing_table.data
     }
+    waterfall_figure = _component_figure_json(waterfall_graph)
+    assert waterfall_figure is not None
+    waterfall_trace = waterfall_figure["data"][0]
+    expected_values = [
+        snapshot.economics_result.technical_subtotal_COP,
+        snapshot.economics_result.installed_subtotal_COP,
+        snapshot.economics_result.cost_total_COP,
+        snapshot.economics_result.tax_total_COP,
+        snapshot.economics_result.subtotal_with_tax_COP,
+        snapshot.economics_result.post_tax_adjustments_total_COP,
+        snapshot.economics_result.final_price_COP,
+    ]
+    assert list(waterfall_trace["measure"]) == [
+        "relative",
+        "relative",
+        "total",
+        "relative",
+        "total",
+        "relative",
+        "total",
+    ]
+    assert list(waterfall_trace["y"]) == pytest.approx(expected_values)
+    assert [row["value"] for row in closing_table.data] == [
+        admin_callbacks._format_cop(value, "es") for value in expected_values
+    ]
+
+
+def test_render_economics_preview_waterfall_handles_zero_steps_and_negative_adjustments(monkeypatch, tmp_path) -> None:
+    _client_state, _state, _active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    result = _stub_economics_result(
+        installed_subtotal_COP=0.0,
+        cost_total_COP=10_000_000.0,
+        tax_total_COP=0.0,
+        subtotal_with_tax_COP=10_000_000.0,
+        commercial_adjustment_COP=-1_000_000.0,
+        post_tax_adjustments_total_COP=-1_500_000.0,
+        commercial_offer_COP=9_000_000.0,
+        sale_adjustment_COP=-500_000.0,
+        final_price_COP=8_500_000.0,
+        final_price_per_kwp_COP=708_333.33,
+    )
+
+    def _fake_preview(_scenario, *, economics_cost_items, economics_price_items, **_kwargs):
+        _ = economics_cost_items, economics_price_items
+        return EconomicsPreviewResult(
+            state="ready",
+            candidate_key="12.000::None",
+            candidate_source="selected",
+            message_key="workspace.admin.economics.preview.state.ready",
+            result=result,
+        )
+
+    monkeypatch.setattr(admin_callbacks, "resolve_economics_preview", _fake_preview)
+
+    children = _render_preview_call(payload, lang="es")
+    waterfall_graph = _find_component(children, "economics-waterfall-graph")
+    closing_table = _find_component(children, "economics-closing-table")
+    figure = _component_figure_json(waterfall_graph)
+
+    assert figure is not None
+    trace = figure["data"][0]
+    expected_values = [10_000_000.0, 0.0, 10_000_000.0, 0.0, 10_000_000.0, -1_500_000.0, 8_500_000.0]
+    assert list(trace["y"]) == pytest.approx(expected_values)
+    assert trace["measure"][5] == "relative"
+    assert trace["y"][5] < 0
+    assert trace["y"][1] == 0
+    assert trace["y"][3] == 0
+    assert closing_table is not None
+    assert [row["value"] for row in closing_table.data] == [
+        admin_callbacks._format_cop(value, "es") for value in expected_values
+    ]
+
+
+def test_render_economics_preview_waterfall_fails_closed_when_cascade_totals_are_incomplete(monkeypatch, tmp_path) -> None:
+    _client_state, _state, _active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    result = _stub_economics_result(tax_total_COP=None, subtotal_with_tax_COP=None, final_price_COP=None)
+
+    def _fake_preview(_scenario, *, economics_cost_items, economics_price_items, **_kwargs):
+        _ = economics_cost_items, economics_price_items
+        return EconomicsPreviewResult(
+            state="ready",
+            candidate_key="12.000::None",
+            candidate_source="selected",
+            message_key="workspace.admin.economics.preview.state.ready",
+            result=result,
+        )
+
+    monkeypatch.setattr(admin_callbacks, "resolve_economics_preview", _fake_preview)
+
+    children = _render_preview_call(payload, lang="es")
+    waterfall_shell = _find_component(children, "economics-waterfall-shell")
+    waterfall_graph = _find_component(children, "economics-waterfall-graph")
+    waterfall_fallback = _find_component(children, "economics-waterfall-fallback")
+    closing_table = _find_component(children, "economics-closing-table")
+    closing_fallback = _find_component(children, "economics-closing-fallback")
+
+    assert waterfall_shell is not None
+    assert waterfall_graph is None
+    assert waterfall_fallback is not None
+    assert "totales canónicos" in str(waterfall_fallback.children).lower()
+    assert closing_table is None
+    assert closing_fallback is not None
 
 
 def test_render_economics_preview_reports_no_scan_after_scan_invalidating_change(monkeypatch, tmp_path) -> None:
@@ -2259,6 +2460,7 @@ def test_candidate_change_keeps_preview_live_and_marks_bridge_historical(monkeyp
     preview_children = _render_preview_call(selected_payload, lang="es", admin_preview_candidate_state=synced_state)
     preview_status = _find_component(preview_children, "economics-preview-status")
     preview_candidate = _find_component(preview_children, "economics-preview-quantity-candidate")
+    waterfall_graph = _find_component(preview_children, "economics-waterfall-graph")
     bridge_status = render_runtime_price_bridge_ui(selected_payload, "es")
 
     assert updated_active is not None
@@ -2275,6 +2477,11 @@ def test_candidate_change_keeps_preview_live_and_marks_bridge_historical(monkeyp
     assert "diseño determinístico vigente" in str(preview_status.children)
     assert preview_candidate is not None
     assert next_candidate in str(preview_candidate.children)
+    figure = _component_figure_json(waterfall_graph)
+    assert figure is not None
+    trace = figure["data"][0]
+    expected_snapshot = build_candidate_financial_snapshot(updated_active, next_candidate, use_cache=False)
+    assert list(trace["y"])[-1] == pytest.approx(expected_snapshot.economics_result.final_price_COP)
     assert previous_candidate in str(bridge_status)
     assert next_candidate in str(bridge_status)
     assert "histórico" in str(bridge_status).lower()

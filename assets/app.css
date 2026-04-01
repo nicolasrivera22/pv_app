@@ -1824,6 +1824,29 @@ body {
     margin-bottom: 0;
 }
 
+.economics-waterfall-shell {
+    min-width: 0;
+}
+
+.economics-waterfall-graph-wrap {
+    min-width: 0;
+}
+
+.economics-waterfall-graph {
+    min-width: 0;
+    height: 360px;
+}
+
+.economics-waterfall-shell .js-plotly-plot,
+.economics-waterfall-shell .plot-container {
+    width: 100%;
+}
+
+.economics-waterfall-fallback,
+.economics-closing-fallback {
+    color: var(--color-text-secondary);
+}
+
 .economics-flow-card {
     position: relative;
     min-height: 100%;
