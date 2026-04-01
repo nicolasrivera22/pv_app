@@ -1,5 +1,5 @@
 {
-  "format_version": 1,
+  "format_version": 2,
   "name": "Mi Demo 1",
   "slug": "mi_demo_1",
   "active_scenario_id": "scenario-03c5b6de",
@@ -76,6 +76,7 @@
       }
     }
   ],
+  "financial_presets": [],
   "ui_prefs": {
     "language": "es"
   }

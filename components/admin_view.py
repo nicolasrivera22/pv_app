@@ -183,6 +183,8 @@ def build_admin_access_summary(
             context_line = tr("workspace.advanced.entry.context.no_scenario", lang)
 
     meta_message = _status_message(status_key, lang=lang)
+    if access_mode == "unlocked" and status_key == "workspace.advanced.locked.unlocked":
+        meta_message = None
     children = [
         html.Div(tr("workspace.advanced.entry.eyebrow", lang), className="assumptions-advanced-entry-eyebrow"),
         html.Div(
@@ -217,13 +219,20 @@ def build_admin_access_summary(
         )
     children.append(
         html.Div(
+            id="assumptions-advanced-tools-entry-footer",
             className="assumptions-advanced-entry-footer",
             children=[
-                html.A(
-                    tr(cta_key, lang),
-                    id="assumptions-advanced-tools-entry-link",
-                    href="#advanced-tools",
-                    className="action-btn tertiary assumptions-advanced-entry-link",
+                html.Div(
+                    id="assumptions-advanced-tools-entry-cta-row",
+                    className="assumptions-advanced-entry-cta-row",
+                    children=[
+                        html.A(
+                            tr(cta_key, lang),
+                            id="assumptions-advanced-tools-entry-link",
+                            href="#advanced-tools",
+                            className="action-btn tertiary assumptions-advanced-entry-link",
+                        )
+                    ],
                 ),
                 html.Div(
                     context_line or "",

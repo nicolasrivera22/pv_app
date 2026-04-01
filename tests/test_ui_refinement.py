@@ -1015,6 +1015,8 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".candidate-selection-helper" in css_source
     assert ".candidate-horizon-toolbar" in css_source
     assert ".assumptions-advanced-entry-card" in css_source
+    assert ".assumptions-advanced-entry-cta-row" in css_source
+    assert ".assumptions-advanced-entry-context:empty" in css_source
     assert "#advanced-tools:target" in css_source
     assert "scroll-margin-top" in css_source
     assert ":root {" in css_source

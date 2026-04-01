@@ -211,12 +211,16 @@ def test_render_admin_access_summary_shows_setup_when_pin_missing(monkeypatch, t
 
     status = _find_component(rendered, "assumptions-advanced-tools-entry-status")
     link = _find_component(rendered, "assumptions-advanced-tools-entry-link")
+    footer = _find_component(rendered, "assumptions-advanced-tools-entry-footer")
+    cta_row = _find_component(rendered, "assumptions-advanced-tools-entry-cta-row")
 
     assert status is not None
     assert status.children == tr("workspace.advanced.entry.status.setup_required", "es")
     assert link is not None
     assert link.children == tr("workspace.advanced.entry.cta.setup_required", "es")
     assert link.href == "#advanced-tools"
+    assert footer is not None
+    assert cta_row is not None
     assert _find_component(rendered, "admin-setup-pin-input") is None
     assert _find_component(rendered, "admin-pin-input") is None
     assert _find_component(rendered, "economics-editor-title") is None
@@ -248,11 +252,15 @@ def test_render_admin_access_summary_shows_locked_when_pin_is_configured(monkeyp
 
     status = _find_component(rendered, "assumptions-advanced-tools-entry-status")
     link = _find_component(rendered, "assumptions-advanced-tools-entry-link")
+    footer = _find_component(rendered, "assumptions-advanced-tools-entry-footer")
+    cta_row = _find_component(rendered, "assumptions-advanced-tools-entry-cta-row")
 
     assert status is not None
     assert status.children == tr("workspace.advanced.entry.status.locked", "es")
     assert link is not None
     assert link.children == tr("workspace.advanced.entry.cta.locked", "es")
+    assert footer is not None
+    assert cta_row is not None
     assert _find_component(rendered, "admin-setup-pin-input") is None
     assert _find_component(rendered, "admin-pin-input") is None
     assert _find_component(rendered, "economics-editor-title") is None
@@ -303,14 +311,20 @@ def test_render_admin_access_summary_shows_active_scenario_and_candidate_when_un
     status = _find_component(rendered, "assumptions-advanced-tools-entry-status")
     context = _find_component(rendered, "assumptions-advanced-tools-entry-context")
     meta = _find_component(rendered, "assumptions-advanced-tools-entry-meta")
+    footer = _find_component(rendered, "assumptions-advanced-tools-entry-footer")
+    cta_row = _find_component(rendered, "assumptions-advanced-tools-entry-cta-row")
+    link = _find_component(rendered, "assumptions-advanced-tools-entry-link")
 
     assert status is not None
     assert status.children == tr("workspace.advanced.entry.status.unlocked", "es")
+    assert link is not None
+    assert link.children == tr("workspace.advanced.entry.cta.unlocked", "es")
+    assert footer is not None
+    assert cta_row is not None
     assert context is not None
     assert active.name in context.children
     assert active.selected_candidate_key in context.children
-    assert meta is not None
-    assert meta.children == tr("workspace.advanced.locked.unlocked", "es")
+    assert meta is None
     assert _find_component(rendered, "admin-setup-pin-input") is None
     assert _find_component(rendered, "admin-pin-input") is None
     assert _find_component(rendered, "economics-editor-title") is None
@@ -330,8 +344,12 @@ def test_render_admin_access_summary_shows_prescan_note_without_fake_candidate(m
     grant_admin_session_access(client_state.session_id)
     rendered = render_admin_access_summary(_admin_payload_for_state(state, client_state), "es", {"revision": 1})
 
+    footer = _find_component(rendered, "assumptions-advanced-tools-entry-footer")
+    cta_row = _find_component(rendered, "assumptions-advanced-tools-entry-cta-row")
     context = _find_component(rendered, "assumptions-advanced-tools-entry-context")
 
+    assert footer is not None
+    assert cta_row is not None
     assert context is not None
     assert active.name in context.children
     assert tr("workspace.advanced.entry.context.pre_scan", "es", scenario_name=active.name) == context.children
