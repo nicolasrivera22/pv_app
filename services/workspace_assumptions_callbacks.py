@@ -146,35 +146,210 @@ def _assumptions_draft_payload(
     return overrides, owned_fields, rows_payload, owned_tables
 
 
-def _empty_demand_outputs(lang: str):
-    empty = ([], [], {})
+ASSUMPTIONS_PAGE_RESPONSE_KEYS = (
+    "sections",
+    "validation",
+    "apply_disabled",
+    "scan_disabled",
+    "mode_options",
+    "mode_value",
+    "type_options",
+    "type_value",
+    "alpha_value",
+    "energy_value",
+    "alpha_disabled",
+    "energy_disabled",
+    "mode_note",
+    "weekday_rows",
+    "weekday_columns",
+    "weekday_tooltips",
+    "total_rows",
+    "total_columns",
+    "total_tooltips",
+    "total_preview_rows",
+    "total_preview_columns",
+    "total_preview_tooltips",
+    "relative_rows",
+    "relative_columns",
+    "relative_tooltips",
+    "relative_preview_rows",
+    "relative_preview_columns",
+    "relative_preview_tooltips",
+    "panel_style",
+    "general_panel_style",
+    "general_preview_panel_style",
+    "weights_panel_style",
+    "weights_preview_panel_style",
+    "energy_shell_style",
+    "alpha_shell_style",
+    "type_shell_style",
+    "relative_grid_style",
+    "secondary_grid_style",
+    "chart_panel_style",
+    "chart_title",
+    "chart_subtitle",
+    "chart_figure",
+)
+
+
+def _build_empty_assumptions_chart(lang: str, *, message: str) -> go.Figure:
+    figure = go.Figure()
+    figure.update_layout(
+        template="plotly_white",
+        margin={"l": 44, "r": 18, "t": 20, "b": 36},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+        annotations=[
+            {
+                "text": message,
+                "xref": "paper",
+                "yref": "paper",
+                "x": 0.5,
+                "y": 0.5,
+                "showarrow": False,
+                "font": {"size": 13, "color": "#475569"},
+            }
+        ],
+    )
+    return figure
+
+
+def _build_assumptions_response(
+    *,
+    lang: str,
+    sections: list[dict],
+    validation_issues,
+    apply_disabled: bool,
+    scan_disabled: bool,
+    show_all: bool,
+    empty_message: str,
+    demand_state: dict[str, object] | None = None,
+    demand_chart: dict[str, object] | None = None,
+    empty_chart_title: str = "",
+):
     hidden = {"display": "none"}
-    return (
-        demand_mode_options(lang),
-        "perfil general",
-        relative_profile_type_options(lang),
-        "mixta",
-        0.5,
-        0,
-        True,
-        True,
-        tr("workbench.profiles.mode.note.total", lang),
-        *empty,
-        *empty,
-        *empty,
-        *empty,
-        *empty,
-        hidden,
-        hidden,
-        hidden,
-        hidden,
-        hidden,
-        hidden,
-        hidden,
-        hidden,
-        "",
-        "",
-        go.Figure(),
+    mode_options = demand_mode_options(lang)
+    type_options = relative_profile_type_options(lang)
+    fallback_mode = mode_options[1]["value"] if len(mode_options) > 1 else "perfil general"
+    fallback_type = type_options[-1]["value"] if type_options else "mixta"
+    resolved_demand_state = demand_state or {
+        "profile_mode": fallback_mode,
+        "profile_type": fallback_type,
+        "alpha_mix": 0.5,
+        "e_month_kwh": 0,
+        "alpha_disabled": True,
+        "energy_disabled": True,
+        "mode_note": tr("workbench.profiles.mode.note.total", lang),
+        "weekday_source_rows": [],
+        "weekday_columns": [],
+        "weekday_tooltips": {},
+        "total_source_rows": [],
+        "total_columns": [],
+        "total_tooltips": {},
+        "total_preview_rows": [],
+        "total_preview_columns": [],
+        "total_preview_tooltips": {},
+        "relative_source_rows": [],
+        "relative_columns": [],
+        "relative_tooltips": {},
+        "relative_preview_rows": [],
+        "relative_preview_columns": [],
+        "relative_preview_tooltips": {},
+        "visibility": {
+            "demand-profile-panel": hidden,
+            "demand-profile-general-panel": hidden,
+            "demand-profile-general-preview-panel": hidden,
+            "demand-profile-weights-panel": hidden,
+        },
+        "weights_preview_style": hidden,
+        "energy_shell_style": hidden,
+        "alpha_shell_style": hidden,
+        "type_shell_style": hidden,
+        "relative_grid_style": hidden,
+        "secondary_grid_style": hidden,
+    }
+    resolved_chart = demand_chart or {
+        "style": {"display": "grid"},
+        "title": empty_chart_title,
+        "copy": empty_message,
+        "figure": _build_empty_assumptions_chart(lang, message=empty_message),
+    }
+    response = {
+        "sections": render_assumption_sections(
+            sections,
+            show_all=show_all,
+            empty_message=empty_message,
+            advanced_label=tr("workbench.assumptions.advanced", lang),
+            input_id_type="assumptions-input",
+            field_card_type="assumptions-field-card",
+            context_note_type="assumptions-context-note",
+        ),
+        "validation": render_validation_panel(validation_issues, lang=lang),
+        "apply_disabled": apply_disabled,
+        "scan_disabled": scan_disabled,
+        "mode_options": mode_options,
+        "mode_value": resolved_demand_state["profile_mode"],
+        "type_options": type_options,
+        "type_value": resolved_demand_state["profile_type"],
+        "alpha_value": resolved_demand_state["alpha_mix"],
+        "energy_value": resolved_demand_state["e_month_kwh"],
+        "alpha_disabled": resolved_demand_state["alpha_disabled"],
+        "energy_disabled": resolved_demand_state["energy_disabled"],
+        "mode_note": resolved_demand_state["mode_note"],
+        "weekday_rows": resolved_demand_state["weekday_source_rows"],
+        "weekday_columns": resolved_demand_state["weekday_columns"],
+        "weekday_tooltips": resolved_demand_state["weekday_tooltips"],
+        "total_rows": resolved_demand_state["total_source_rows"],
+        "total_columns": resolved_demand_state["total_columns"],
+        "total_tooltips": resolved_demand_state["total_tooltips"],
+        "total_preview_rows": resolved_demand_state["total_preview_rows"],
+        "total_preview_columns": resolved_demand_state["total_preview_columns"],
+        "total_preview_tooltips": resolved_demand_state["total_preview_tooltips"],
+        "relative_rows": resolved_demand_state["relative_source_rows"],
+        "relative_columns": resolved_demand_state["relative_columns"],
+        "relative_tooltips": resolved_demand_state["relative_tooltips"],
+        "relative_preview_rows": resolved_demand_state["relative_preview_rows"],
+        "relative_preview_columns": resolved_demand_state["relative_preview_columns"],
+        "relative_preview_tooltips": resolved_demand_state["relative_preview_tooltips"],
+        "panel_style": resolved_demand_state["visibility"]["demand-profile-panel"],
+        "general_panel_style": resolved_demand_state["visibility"]["demand-profile-general-panel"],
+        "general_preview_panel_style": resolved_demand_state["visibility"]["demand-profile-general-preview-panel"],
+        "weights_panel_style": resolved_demand_state["visibility"]["demand-profile-weights-panel"],
+        "weights_preview_panel_style": resolved_demand_state["weights_preview_style"],
+        "energy_shell_style": resolved_demand_state["energy_shell_style"],
+        "alpha_shell_style": resolved_demand_state["alpha_shell_style"],
+        "type_shell_style": resolved_demand_state["type_shell_style"],
+        "relative_grid_style": resolved_demand_state["relative_grid_style"],
+        "secondary_grid_style": resolved_demand_state["secondary_grid_style"],
+        "chart_panel_style": resolved_chart["style"],
+        "chart_title": resolved_chart["title"],
+        "chart_subtitle": resolved_chart["copy"],
+        "chart_figure": resolved_chart["figure"],
+    }
+    missing = [key for key in ASSUMPTIONS_PAGE_RESPONSE_KEYS if key not in response]
+    if missing:
+        raise ValueError(f"Missing assumptions response keys: {missing}")
+    return tuple(response[key] for key in ASSUMPTIONS_PAGE_RESPONSE_KEYS)
+
+
+def _build_empty_assumptions_response(*, state, lang: str):
+    if _project_is_bound(state):
+        empty_title = tr("workspace.results_digest.no_active.title", lang)
+        empty_message = tr("workspace.results_digest.no_active.body", lang)
+    else:
+        empty_title = tr("workspace.assumptions.empty.no_project_title", lang)
+        empty_message = tr("workspace.assumptions.empty.no_project_body", lang)
+    return _build_assumptions_response(
+        lang=lang,
+        sections=[],
+        validation_issues=[],
+        apply_disabled=True,
+        scan_disabled=True,
+        show_all=False,
+        empty_message=empty_message,
+        empty_chart_title=empty_title,
     )
 
 
@@ -307,21 +482,7 @@ def populate_assumptions_page(session_payload, show_all_values, language_value):
     client_state, state = _session(session_payload, lang)
     active = state.get_scenario()
     if active is None:
-        return (
-            render_assumption_sections(
-                [],
-                show_all=False,
-                empty_message=tr("workbench.assumptions.none", lang),
-                advanced_label=tr("workbench.assumptions.advanced", lang),
-                input_id_type="assumptions-input",
-                field_card_type="assumptions-field-card",
-                context_note_type="assumptions-context-note",
-            ),
-            render_validation_panel([], lang=lang),
-            True,
-            True,
-            *_empty_demand_outputs(lang),
-        )
+        return _build_empty_assumptions_response(state=state, lang=lang)
 
     display_bundle = resolve_workspace_bundle_for_display(client_state.session_id, active.scenario_id, active.config_bundle)
     all_sections = build_assumption_sections(
@@ -333,58 +494,16 @@ def populate_assumptions_page(session_payload, show_all_values, language_value):
     partition = partition_assumption_sections(all_sections)
     demand_state = build_demand_profile_ui_state(bundle=display_bundle, lang=lang)
     demand_chart = build_active_demand_chart(lang=lang, demand_state=demand_state)
-    has_errors = any(issue.level == "error" for issue in active.config_bundle.issues)
-    return (
-        render_assumption_sections(
-            partition.client_safe_sections,
-            show_all="all" in (show_all_values or []),
-            empty_message=tr("workbench.assumptions.none", lang),
-            advanced_label=tr("workbench.assumptions.advanced", lang),
-            input_id_type="assumptions-input",
-            field_card_type="assumptions-field-card",
-            context_note_type="assumptions-context-note",
-        ),
-        render_validation_panel(active.config_bundle.issues, lang=lang),
-        False,
-        has_errors,
-        demand_mode_options(lang),
-        demand_state["profile_mode"],
-        relative_profile_type_options(lang),
-        demand_state["profile_type"],
-        demand_state["alpha_mix"],
-        demand_state["e_month_kwh"],
-        demand_state["alpha_disabled"],
-        demand_state["energy_disabled"],
-        demand_state["mode_note"],
-        demand_state["weekday_source_rows"],
-        demand_state["weekday_columns"],
-        demand_state["weekday_tooltips"],
-        demand_state["total_source_rows"],
-        demand_state["total_columns"],
-        demand_state["total_tooltips"],
-        demand_state["total_preview_rows"],
-        demand_state["total_preview_columns"],
-        demand_state["total_preview_tooltips"],
-        demand_state["relative_source_rows"],
-        demand_state["relative_columns"],
-        demand_state["relative_tooltips"],
-        demand_state["relative_preview_rows"],
-        demand_state["relative_preview_columns"],
-        demand_state["relative_preview_tooltips"],
-        demand_state["visibility"]["demand-profile-panel"],
-        demand_state["visibility"]["demand-profile-general-panel"],
-        demand_state["visibility"]["demand-profile-general-preview-panel"],
-        demand_state["visibility"]["demand-profile-weights-panel"],
-        demand_state["weights_preview_style"],
-        demand_state["energy_shell_style"],
-        demand_state["alpha_shell_style"],
-        demand_state["type_shell_style"],
-        demand_state["relative_grid_style"],
-        demand_state["secondary_grid_style"],
-        demand_chart["style"],
-        demand_chart["title"],
-        demand_chart["copy"],
-        demand_chart["figure"],
+    return _build_assumptions_response(
+        lang=lang,
+        sections=partition.client_safe_sections,
+        validation_issues=active.config_bundle.issues,
+        apply_disabled=False,
+        scan_disabled=_bundle_has_errors(active.config_bundle),
+        show_all="all" in (show_all_values or []),
+        empty_message=tr("workbench.assumptions.none", lang),
+        demand_state=demand_state,
+        demand_chart=demand_chart,
     )
 
 

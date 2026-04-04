@@ -201,9 +201,11 @@ def build_admin_access_summary(
     children = [
         html.Div(tr("workspace.advanced.entry.eyebrow", lang), className="assumptions-advanced-entry-eyebrow"),
         html.Div(
+            id="assumptions-advanced-tools-entry-head",
             className="assumptions-advanced-entry-head",
             children=[
                 html.Div(
+                    id="assumptions-advanced-tools-entry-copy",
                     className="assumptions-advanced-entry-copy",
                     children=[
                         html.H3(tr("workspace.advanced.title", lang), id="assumptions-advanced-tools-entry-title"),
@@ -214,11 +216,17 @@ def build_admin_access_summary(
                         ),
                     ],
                 ),
+            ],
+        ),
+        html.Div(
+            id="assumptions-advanced-tools-entry-status-row",
+            className="assumptions-advanced-entry-status-row",
+            children=[
                 html.Span(
                     tr(status_label_key, lang),
                     id="assumptions-advanced-tools-entry-status",
                     className=f"workbench-state-chip {status_class}",
-                ),
+                )
             ],
         ),
     ]

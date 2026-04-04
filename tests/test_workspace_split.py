@@ -23,9 +23,15 @@ from services import (
     partition_assumption_sections,
     resolve_client_session,
     resolve_results_status_digest,
+    tr,
     upsert_workspace_draft,
 )
-from services.workspace_assumptions_callbacks import mutate_assumptions_state, sync_assumptions_demand_profile_views
+from services.workspace_assumptions_callbacks import (
+    ASSUMPTIONS_PAGE_RESPONSE_KEYS,
+    mutate_assumptions_state,
+    populate_assumptions_page,
+    sync_assumptions_demand_profile_views,
+)
 
 
 def _fast_bundle():
@@ -70,6 +76,11 @@ def _find_matching_component(node, predicate):
                 return found
         return None
     return _find_matching_component(children, predicate)
+
+
+def _assumptions_response(outputs):
+    assert len(outputs) == len(ASSUMPTIONS_PAGE_RESPONSE_KEYS)
+    return dict(zip(ASSUMPTIONS_PAGE_RESPONSE_KEYS, outputs))
 
 
 def test_partition_assumption_sections_routes_safe_and_internal_groups() -> None:
@@ -285,6 +296,37 @@ def test_admin_page_gracefully_handles_direct_access_without_active_scenario(mon
     assert payload["active_scenario_id"] is None
 
 
+def test_populate_assumptions_page_handles_clean_session_without_active_project() -> None:
+    response = _assumptions_response(populate_assumptions_page(None, [], "es"))
+
+    assert len(response) == 42
+    assert response["apply_disabled"] is True
+    assert response["scan_disabled"] is True
+    assert response["sections"][0].children == tr("workspace.assumptions.empty.no_project_body", "es")
+    assert response["relative_grid_style"]["display"] == "none"
+    assert response["secondary_grid_style"]["display"] == "none"
+    assert response["chart_panel_style"]["display"] == "grid"
+    assert response["chart_title"] == tr("workspace.assumptions.empty.no_project_title", "es")
+    assert response["chart_subtitle"] == tr("workspace.assumptions.empty.no_project_body", "es")
+    assert not response["chart_figure"].data
+    assert response["chart_figure"].layout.annotations[0].text == tr("workspace.assumptions.empty.no_project_body", "es")
+
+
+def test_populate_assumptions_page_guard_clause_returns_full_empty_response() -> None:
+    payload = commit_client_session(bootstrap_client_session("es"), ScenarioSessionState.empty()).to_payload()
+
+    response = _assumptions_response(populate_assumptions_page(payload, ["all"], "es"))
+
+    assert len(response) == 42
+    assert response["apply_disabled"] is True
+    assert response["scan_disabled"] is True
+    assert response["weekday_rows"] == []
+    assert response["total_rows"] == []
+    assert response["relative_rows"] == []
+    assert response["panel_style"]["display"] == "none"
+    assert response["chart_subtitle"] == tr("workspace.assumptions.empty.no_project_body", "es")
+
+
 def test_assumptions_demand_tab_reacts_with_preview_and_chart() -> None:
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     payload = commit_client_session(bootstrap_client_session("es"), state).to_payload()
@@ -318,6 +360,20 @@ def test_assumptions_demand_tab_reacts_with_preview_and_chart() -> None:
     assert energy_disabled is True
     assert chart_style["display"] == "grid"
     assert len(chart_figure.data) == 1
+
+
+def test_populate_assumptions_page_returns_full_response_for_active_scenario() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = commit_client_session(bootstrap_client_session("es"), state).to_payload()
+
+    response = _assumptions_response(populate_assumptions_page(payload, [], "es"))
+
+    assert len(response) == 42
+    assert response["apply_disabled"] is False
+    assert response["scan_disabled"] is False
+    assert response["sections"]
+    assert response["chart_panel_style"]["display"] == "grid"
+    assert response["chart_figure"].data
 
 
 def test_apply_assumptions_persists_demand_mode_and_keeps_run_flow(monkeypatch) -> None:

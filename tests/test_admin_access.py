@@ -267,6 +267,29 @@ def test_render_admin_access_summary_shows_locked_when_pin_is_configured(monkeyp
     assert _find_component(rendered, "economics-editor-title") is None
 
 
+def test_render_admin_access_summary_stacks_head_status_meta_and_cta_in_order(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+    set_admin_pin("2468")
+
+    rendered = render_admin_access_summary(
+        _admin_client_state("es").to_payload(),
+        "es",
+        {"revision": 1, "message_key": "workspace.advanced.locked.invalid", "tone": "error"},
+    )
+
+    child_ids = [getattr(child, "id", None) for child in rendered.children]
+
+    assert "assumptions-advanced-tools-entry-head" in child_ids
+    assert "assumptions-advanced-tools-entry-status-row" in child_ids
+    assert "assumptions-advanced-tools-entry-meta" in child_ids
+    assert "assumptions-advanced-tools-entry-footer" in child_ids
+    assert child_ids.index("assumptions-advanced-tools-entry-head") < child_ids.index("assumptions-advanced-tools-entry-status-row")
+    assert child_ids.index("assumptions-advanced-tools-entry-status-row") < child_ids.index("assumptions-advanced-tools-entry-meta")
+    assert child_ids.index("assumptions-advanced-tools-entry-meta") < child_ids.index("assumptions-advanced-tools-entry-footer")
+
+
 def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
