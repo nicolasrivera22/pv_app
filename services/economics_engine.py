@@ -192,6 +192,17 @@ def resolve_battery_energy(detail: dict[str, Any]) -> ResolvedBatteryEnergy:
     )
 
 
+def battery_not_applicable(detail: dict[str, Any]) -> bool:
+    battery = detail.get("battery") or {}
+    if not isinstance(battery, dict):
+        battery = {}
+    battery_name = str(detail.get("battery_name") or battery.get("name") or "").strip()
+    battery_energy = resolve_battery_energy(detail).battery_kwh
+    if str(battery.get("name") or "").strip() == "BAT-0" and battery_energy <= 0:
+        return True
+    return battery_name.casefold() in {"", "none"} and battery_energy <= 0
+
+
 def resolve_battery_kwh(detail: dict[str, Any]) -> float:
     return resolve_battery_energy(detail).battery_kwh
 
@@ -259,6 +270,13 @@ def resolve_inverter_hardware_price(detail: dict[str, Any], inverter_catalog: pd
 
 def resolve_battery_hardware_price(detail: dict[str, Any], battery_catalog: pd.DataFrame) -> ResolvedHardwarePrice:
     battery = detail.get("battery") or {}
+    if battery_not_applicable(detail):
+        return ResolvedHardwarePrice(
+            value_source="not_applicable",
+            hardware_binding="battery",
+            hardware_name="",
+            unit_rate_COP=0.0,
+        )
     hardware_name = str(battery.get("name") or detail.get("battery_name") or "").strip()
     unit_rate = _positive_price(battery.get("price_COP"))
     if unit_rate is None and hardware_name:

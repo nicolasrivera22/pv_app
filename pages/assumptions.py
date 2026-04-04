@@ -43,7 +43,7 @@ layout = workspace_frame(
     page_class_name="page-advanced-host",
     grid_class_name="workbench-grid-advanced-host",
     stores=[
-        dcc.Store(id="run-scan-choice-state", storage_type="memory", data={"open": False}),
+        dcc.Store(id="run-scan-choice-state", storage_type="memory", data={"open": False, "suggested_project_name": ""}),
         dcc.Store(id="assumptions-draft-meta", storage_type="memory", data={}),
         dcc.Store(id="active-profile-table-state", storage_type="memory", data={"table_id": None}),
         dcc.Store(

@@ -5,6 +5,7 @@ from dash import dcc, html
 from services.i18n import tr
 
 from .catalog_editor import catalog_editor_section
+from .collapsible_section import collapsible_section
 from .economics_editor import economics_editor_section
 from .profile_editor import resource_profile_editor_section
 
@@ -100,37 +101,28 @@ def admin_secure_content(*, lang: str = "es") -> html.Div:
                     ),
                 ],
             ),
-            economics_editor_section(lang=lang),
-            html.Details(
-                id="admin-assumptions-details",
-                className="panel secondary-panel admin-auxiliary-details",
-                open=False,
-                children=[
-                    html.Summary(
-                        id="admin-assumptions-summary",
-                        className="admin-auxiliary-summary",
-                        children=[
-                            html.Div(
-                                className="admin-auxiliary-summary-copy",
-                                children=[
-                                    html.H3(tr("workspace.advanced.fields.title", lang), id="admin-assumptions-title"),
-                                    html.P(
-                                        tr("workspace.advanced.fields.copy", lang),
-                                        id="admin-assumptions-copy",
-                                        className="section-copy",
-                                    ),
-                                ],
-                            )
-                        ],
+            collapsible_section(
+                section_id="admin-assumptions-details",
+                summary_id="admin-assumptions-summary",
+                title_id="admin-assumptions-title",
+                title=tr("workspace.advanced.fields.title", lang),
+                open=True,
+                title_level="h3",
+                variant="primary",
+                class_name="panel secondary-panel admin-auxiliary-details",
+                body_class_name="assumption-editor-panel admin-auxiliary-body",
+                body=[
+                    html.P(
+                        tr("workspace.advanced.fields.copy", lang),
+                        id="admin-assumptions-copy",
+                        className="section-copy section-copy-wide",
                     ),
-                    html.Div(
-                        className="assumption-editor-panel admin-auxiliary-body",
-                        children=[html.Div(id="admin-assumption-sections")],
-                    ),
+                    html.Div(id="admin-assumption-sections"),
                 ],
             ),
             resource_profile_editor_section(lang=lang),
             catalog_editor_section(lang=lang),
+            economics_editor_section(lang=lang),
         ],
     )
 

@@ -415,7 +415,7 @@ def test_admin_access_summary_and_shell_share_same_state_resolution(monkeypatch,
     assert _find_component(unlocked_shell, "admin-unlocked-shell") is not None
 
 
-def test_render_admin_access_shell_orders_economics_before_profiles_and_catalogs(monkeypatch, tmp_path) -> None:
+def test_render_admin_access_shell_orders_admin_sections_by_scenario_workflow(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
@@ -446,7 +446,11 @@ def test_render_admin_access_shell_orders_economics_before_profiles_and_catalogs
     candidate_selector = _find_component(unlocked_shell.children[economics_index], "admin-preview-candidate-dropdown")
 
     assert economics_editor is not None
-    assert economics_index < assumptions_index < resource_index < catalog_index
+    assert assumptions_index < resource_index < catalog_index < economics_index
+    assert getattr(unlocked_shell.children[assumptions_index], "open", None) is True
+    assert getattr(unlocked_shell.children[resource_index], "open", None) is False
+    assert getattr(unlocked_shell.children[catalog_index], "open", None) is False
+    assert getattr(unlocked_shell.children[economics_index], "open", None) is False
     assert resource_profiles is not None
     assert catalog_editor is not None
     assert candidate_selector is not None

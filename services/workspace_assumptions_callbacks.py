@@ -9,7 +9,7 @@ from pv_product.panel_catalog import PANEL_DERIVED_CONFIG_FIELDS, PANEL_SELECTIO
 
 from components import render_assumption_sections, render_validation_panel
 from .i18n import tr
-from .project_io import save_project
+from .project_io import list_projects, save_project, slugify_project_name
 from .scenario_session import run_scenario_scan
 from .session_state import commit_client_session, resolve_client_session
 from .ui_schema import assumption_context_map, build_assumption_sections, display_assumption_value
@@ -40,16 +40,48 @@ def _project_is_bound(state) -> bool:
     return bool(str(state.project_slug or "").strip())
 
 
-def _resolved_project_name(project_name_value, state) -> str:
-    return (project_name_value or state.project_name or state.project_slug or "").strip()
+def _clean_project_name_seed(value) -> str:
+    cleaned = str(value or "").strip().replace("_", " ").replace("-", " ")
+    normalized = " ".join(cleaned.split())
+    return "" if normalized.casefold() in {"", "none", "nan", "null"} else normalized
+
+
+def _resolved_project_name(project_name_value, state, *, suggested_name: str | None = None) -> str:
+    typed_name = str(project_name_value or "").strip()
+    return typed_name or (suggested_name or state.project_name or state.project_slug or "").strip()
 
 
 def _join_status_parts(*parts: str) -> str:
     return " ".join(part.strip() for part in parts if part and part.strip())
 
 
-def _run_choice_state(*, open_dialog: bool = False) -> dict[str, bool]:
-    return {"open": open_dialog}
+def _run_choice_state(*, open_dialog: bool = False, suggested_project_name: str | None = None) -> dict[str, object]:
+    return {
+        "open": open_dialog,
+        "suggested_project_name": str(suggested_project_name or "").strip(),
+    }
+
+
+def _suggest_run_project_name(state, active, *, lang: str) -> str:
+    preferred_name = _clean_project_name_seed(getattr(active, "name", ""))
+    existing_slugs = {manifest.slug for manifest in list_projects()}
+    if preferred_name:
+        if slugify_project_name(preferred_name) not in existing_slugs:
+            return preferred_name
+        suffix = 2
+        while True:
+            candidate = f"{preferred_name} {suffix}"
+            if slugify_project_name(candidate) not in existing_slugs:
+                return candidate
+            suffix += 1
+
+    base_name = tr("workbench.run_dialog.default_project_base", lang)
+    index = 1
+    while True:
+        candidate = f"{base_name} {index}"
+        if slugify_project_name(candidate) not in existing_slugs:
+            return candidate
+        index += 1
 
 
 def _bundle_has_errors(bundle) -> bool:
@@ -740,7 +772,8 @@ def sync_assumptions_demand_profile_views(
 )
 def sync_run_scan_choice_dialog(dialog_state, project_name_value, language_value):
     lang = _lang(language_value)
-    project_name = str(project_name_value or "").strip()
+    suggested_name = str((dialog_state or {}).get("suggested_project_name") or "").strip()
+    project_name = str(project_name_value or "").strip() or suggested_name
     copy = (
         tr("workbench.run_dialog.body_named", lang, name=project_name)
         if project_name
@@ -756,6 +789,24 @@ def sync_run_scan_choice_dialog(dialog_state, project_name_value, language_value
         tr("workbench.run_dialog.run_without_saving", lang),
         tr("workbench.run_dialog.cancel", lang),
     )
+
+
+@callback(
+    Output("project-name-input", "value", allow_duplicate=True),
+    Input("run-scan-choice-state", "data"),
+    Input("scenario-session-store", "data"),
+    State("project-name-input", "value"),
+    prevent_initial_call=True,
+)
+def sync_run_scan_suggested_project_name(dialog_state, _session_payload, project_name_value):
+    if not (dialog_state or {}).get("open"):
+        raise PreventUpdate
+    if _clean_project_name_seed(project_name_value):
+        raise PreventUpdate
+    suggested_name = str((dialog_state or {}).get("suggested_project_name") or "").strip()
+    if not suggested_name:
+        raise PreventUpdate
+    return suggested_name
 
 
 def _sync_current_assumptions_slice(
@@ -910,7 +961,14 @@ def mutate_assumptions_state(
                 tr("workbench.run_flow.applied", lang),
                 tr("workbench.run_flow.choose_save", lang),
             )
-            return client_state.to_payload(), status, _run_choice_state(open_dialog=True)
+            return (
+                client_state.to_payload(),
+                status,
+                _run_choice_state(
+                    open_dialog=True,
+                    suggested_project_name=_suggest_run_project_name(state, updated_active, lang=lang),
+                ),
+            )
     except PreventUpdate:
         raise
     except Exception as exc:
@@ -947,6 +1005,7 @@ def resolve_run_scan_choice(
     trigger = ctx.triggered_id
     client_state, state = _session(session_payload, lang)
     closed_dialog = _run_choice_state()
+    suggested_name = str((dialog_state or {}).get("suggested_project_name") or "").strip()
 
     if not (dialog_state or {}).get("open"):
         raise PreventUpdate
@@ -965,7 +1024,7 @@ def resolve_run_scan_choice(
             return client_state.to_payload(), status, closed_dialog
 
         if trigger == "run-scan-save-and-run-btn":
-            resolved_name = _resolved_project_name(project_name_value, state)
+            resolved_name = _resolved_project_name(project_name_value, state, suggested_name=suggested_name)
             if not resolved_name:
                 return no_update, tr("workbench.run_dialog.name_required", lang), dialog_state
             state = save_project(state, project_name=resolved_name, language=lang)

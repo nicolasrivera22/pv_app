@@ -4,6 +4,8 @@ from dash import dcc, dash_table, html
 
 from services.i18n import tr
 
+from .collapsible_section import collapsible_section
+
 
 def _component_id(id_prefix: str | None, base_id: str) -> str:
     prefix = str(id_prefix or "").strip()
@@ -504,15 +506,28 @@ def _resource_profile_editor_children(*, lang: str = "es") -> list:
     ]
 
 
-def resource_profile_editor_section(*, lang: str = "es") -> html.Div:
-    return html.Div(
-        className="panel secondary-panel",
-        children=[
-            html.Div(className="section-head", children=[html.H3(tr("workspace.admin.resource_profiles.title", lang), id="resource-profile-editor-title")]),
-            html.Div(tr("workspace.admin.resource_profiles.note", lang), id="resource-profile-editor-note", className="section-copy section-copy-wide"),
+def resource_profile_editor_section(*, lang: str = "es") -> html.Details:
+    return collapsible_section(
+        section_id="resource-profile-editor-section",
+        summary_id="resource-profile-editor-summary",
+        title_id="resource-profile-editor-title",
+        title=tr("workspace.admin.resource_profiles.title", lang),
+        open=False,
+        title_level="h3",
+        variant="primary",
+        class_name="panel secondary-panel resource-profile-editor-section",
+        body_class_name="resource-profile-editor-body",
+        body=[
+            html.Div(
+                tr("workspace.admin.resource_profiles.note", lang),
+                id="resource-profile-editor-note",
+                className="section-copy section-copy-wide",
+            ),
             *_resource_profile_editor_children(lang=lang),
         ],
     )
+
+
 def profile_editor_section(*, lang: str = "es") -> html.Div:
     return html.Div(
         className="panel secondary-panel",

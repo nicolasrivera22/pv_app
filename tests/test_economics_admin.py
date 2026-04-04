@@ -975,11 +975,12 @@ def test_economics_columns_mark_enum_fields_as_dropdowns() -> None:
 
 def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> None:
     section = economics_editor_section(lang="es")
-    content = section.children[2]
 
+    assert getattr(section, "open", None) is False
     note = _find_component(section, "economics-editor-note")
     preview_copy = _find_component(section, "economics-preview-copy")
     candidate_shell = _find_component(section, "admin-preview-candidate-shell")
+    presets_shell = _find_component(section, "economics-presets-shell")
     editors_shell = _find_component(section, "economics-editors-shell")
     editors_panels = _find_component(section, "economics-editors-panels")
     cost_details = _find_component(section, "economics-cost-items-details")
@@ -1000,18 +1001,26 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     assert "flujo principal de pricing" in str(note.children).lower()
     assert "compatibilidad" in str(note.children).lower()
     assert preview_copy is not None
-    assert "diseño activo del escenario" in str(preview_copy.children).lower()
+    assert "cadena financiera viva" in str(preview_copy.children).lower()
     assert candidate_shell is not None
+    assert getattr(_find_component(section, "economics-preview-shell"), "open", None) is True
+    assert getattr(candidate_shell, "open", None) is False
+    assert presets_shell is not None
+    assert getattr(presets_shell, "open", None) is False
+    assert _find_component(_find_component(section, "economics-presets-summary"), "apply-economics-preset-btn") is None
     assert editors_shell is not None
     assert editors_panels is not None
     assert cost_details is not None
+    assert getattr(cost_details, "open", None) is False
     assert tax_details is not None
+    assert getattr(tax_details, "open", None) is False
     assert adjustment_details is not None
+    assert getattr(adjustment_details, "open", None) is False
     assert compatibility_shell is not None
     assert getattr(compatibility_shell, "open", None) is False
     assert compatibility_summary is not None
     assert compatibility_summary_copy is not None
-    assert "alinea el total runtime legacy" in str(compatibility_summary_copy.children).lower()
+    assert compatibility_summary_copy.children == tr("workspace.admin.economics.bridge.compat.summary", "es")
     assert compatibility_compact_status is not None
     assert compatibility_compact_status.children == tr("workspace.admin.economics.bridge.summary.none", "es")
     assert compatibility_body is not None
@@ -1021,7 +1030,6 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     assert compatibility_cta_row is not None
     assert _find_component(compatibility_summary, "economics-bridge-btn") is None
     assert _find_component(compatibility_body, "economics-bridge-btn") is not None
-    assert getattr(content.children[-1], "id", None) == "economics-compatibility-shell"
     assert cost_table is not None
     assert tax_table is not None
     assert adjustment_table is not None
@@ -1071,20 +1079,56 @@ def test_bridge_summary_chip_tracks_none_active_and_stale_states(monkeypatch, tm
     assert "workbench-state-chip-warning" in stale_class
 
 
-def test_admin_secure_content_places_economics_before_collapsed_assumptions() -> None:
+def test_bridge_copy_and_labels_are_localized_without_internal_jargon_in_summary() -> None:
+    for lang in ("es", "en"):
+        summary = tr("workspace.admin.economics.bridge.compat.summary", lang)
+        body = tr("workspace.admin.economics.bridge.compat.copy", lang)
+        button = tr("workspace.admin.economics.bridge.button", lang)
+        none_label = tr("workspace.admin.economics.bridge.summary.none", lang)
+        active_label = tr("workspace.admin.economics.bridge.summary.active", lang)
+        stale_label = tr("workspace.admin.economics.bridge.summary.stale", lang)
+
+        assert summary
+        assert body
+        assert button
+        assert none_label
+        assert active_label
+        assert stale_label
+
+    assert "legacy" not in tr("workspace.admin.economics.bridge.compat.summary", "en").lower()
+    assert "runtime" not in tr("workspace.admin.economics.bridge.compat.summary", "en").lower()
+    assert "snapshot" not in tr("workspace.admin.economics.bridge.summary.none", "en").lower()
+    assert "legacy" not in tr("workspace.admin.economics.bridge.compat.summary", "es").lower()
+    assert "runtime" not in tr("workspace.admin.economics.bridge.compat.summary", "es").lower()
+    assert "snapshot" not in tr("workspace.admin.economics.bridge.summary.none", "es").lower()
+
+
+def test_admin_secure_content_orders_sections_by_scenario_workflow() -> None:
     content = admin_secure_content(lang="es")
     assumptions_details = _find_component(content, "admin-assumptions-details")
     assumptions_sections = _find_component(content, "admin-assumption-sections")
+    resource_details = _find_component(content, "resource-profile-editor-section")
+    catalog_details = _find_component(content, "catalog-editor-section")
     economics_index = next(
         index for index, child in enumerate(content.children) if _find_component(child, "economics-editor-title") is not None
     )
     assumptions_index = next(
         index for index, child in enumerate(content.children) if getattr(child, "id", None) == "admin-assumptions-details"
     )
+    resource_index = next(
+        index for index, child in enumerate(content.children) if getattr(child, "id", None) == "resource-profile-editor-section"
+    )
+    catalog_index = next(
+        index for index, child in enumerate(content.children) if getattr(child, "id", None) == "catalog-editor-section"
+    )
 
-    assert assumptions_index > economics_index
+    assert assumptions_index < resource_index < catalog_index < economics_index
     assert assumptions_details is not None
-    assert getattr(assumptions_details, "open", None) is False
+    assert getattr(assumptions_details, "open", None) is True
+    assert resource_details is not None
+    assert getattr(resource_details, "open", None) is False
+    assert catalog_details is not None
+    assert getattr(catalog_details, "open", None) is False
     assert assumptions_sections is not None
 
 
@@ -1585,6 +1629,30 @@ def test_admin_preview_candidate_selector_updates_global_scenario_selection(monk
     assert selected_candidate in str(preview_candidate.children)
     assert candidate_source is not None
     assert "selección activa del escenario" in str(candidate_source.children).lower()
+
+
+def test_admin_preview_candidate_selector_uses_clean_labels_and_keeps_technical_reference_visible(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    assert active.scan_result is not None
+
+    synced_state = admin_callbacks.sync_admin_preview_candidate_state(payload, {})
+    options, dropdown_value, disabled, helper, meta = admin_callbacks.render_admin_preview_candidate_selector(
+        payload,
+        synced_state,
+        "es",
+    )
+    no_battery_option = next(option for option in options if str(option["value"]).endswith("::None"))
+    meta_key = _find_component(meta, "admin-preview-candidate-meta-key")
+
+    assert dropdown_value is not None
+    assert disabled is False
+    assert "None" not in " ".join(str(option["label"]) for option in options)
+    assert no_battery_option["label"].endswith("Sin batería")
+    assert "::None" not in no_battery_option["label"]
+    assert meta_key is not None
+    assert meta_key.children[0].children == tr("workspace.admin.economics.preview.selector.meta.candidate", "es")
+    assert str(meta_key.children[1].children).strip() == str(dropdown_value).strip()
+    assert helper
 
 
 def test_results_selection_syncs_admin_selector_and_preview(monkeypatch, tmp_path) -> None:
@@ -2157,6 +2225,26 @@ def test_selected_hardware_none_keeps_line_unavailable_without_fallback(monkeypa
     assert float(technical_table.data[0]["line_amount_COP"]) == pytest.approx(0.0)
 
 
+def test_preview_without_battery_marks_battery_line_as_not_applicable_without_warning(monkeypatch, tmp_path) -> None:
+    _client_state, _state, active, payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    assert active.scan_result is not None
+    no_battery_candidate = next(candidate_key for candidate_key in active.scan_result.candidate_details if candidate_key.endswith("::None"))
+
+    selected_payload = admin_callbacks.update_admin_preview_candidate_state(no_battery_candidate, payload)
+    synced_state = admin_callbacks.sync_admin_preview_candidate_state(selected_payload, {})
+    preview_children = _render_preview_call(selected_payload, lang="es", admin_preview_candidate_state=synced_state)
+    warnings_shell = _find_component(preview_children, "economics-preview-warnings-shell")
+    technical_table = _find_component(preview_children, "economics-breakdown-technical-table")
+
+    assert warnings_shell is None or "BAT-0" not in str(warnings_shell.children)
+    assert technical_table is not None
+    battery_row = next(row for row in technical_table.data if row["hardware_binding"] == "Batería")
+    assert battery_row["value_source"] == "No aplica"
+    assert battery_row["hardware_name"] == "No aplica"
+    assert battery_row["calculation"] == "No aplica"
+    assert float(battery_row["line_amount_COP"]) == pytest.approx(0.0)
+
+
 def test_preview_selected_battery_hardware_uses_one_battery_not_energy_kwh(monkeypatch, tmp_path) -> None:
     client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
     state, active = _replace_selected_battery_detail(
@@ -2541,7 +2629,7 @@ def test_candidate_change_keeps_preview_live_and_marks_bridge_historical(monkeyp
     assert list(trace["y"])[-1] == pytest.approx(expected_snapshot.economics_result.final_price_COP)
     assert previous_candidate in str(bridge_status)
     assert next_candidate in str(bridge_status)
-    assert "histórico" in str(bridge_status).lower()
+    assert "desactualizado" in str(bridge_status).lower()
 
 
 def test_bridge_callback_aborts_cleanly_if_preview_becomes_ineligible(monkeypatch, tmp_path) -> None:
@@ -2654,7 +2742,7 @@ def test_bridge_persists_active_provenance_and_updates_runtime_note(monkeypatch,
     bridge_status = render_runtime_price_bridge_ui(next_payload, "es")
 
     assert bridge_status is not None
-    assert "total vigente del runtime proviene de economics".lower() in str(bridge_status).lower()
+    assert "el total del proyecto que usa el flujo anterior ahora viene de esta vista".lower() in str(bridge_status).lower()
 
 
 @pytest.mark.parametrize(
@@ -2698,7 +2786,7 @@ def test_bridge_goes_stale_when_legacy_runtime_fields_diverge(field, value, monk
     assert resolve_runtime_price_bridge_state(stale_active) == "stale"
 
     bridge_status = render_runtime_price_bridge_ui(stale_payload, "es")
-    assert "histórico" in str(bridge_status).lower()
+    assert "desactualizado" in str(bridge_status).lower()
 
 
 def test_bridge_goes_stale_when_economics_signature_changes_for_same_design(monkeypatch, tmp_path) -> None:

@@ -34,7 +34,9 @@ from .economics_engine import (
     PREVIEW_STATE_READY,
     PREVIEW_STATE_RERUN_REQUIRED,
     EconomicsPreviewResult,
+    battery_not_applicable,
     economics_preview_warning_messages,
+    resolve_battery_energy,
     resolve_economics_preview,
 )
 from .financial_presets import (
@@ -683,14 +685,28 @@ def _admin_economics_tables_ready(
 
 def _admin_preview_candidate_option_label(candidate_key: str, detail: dict[str, object], *, lang: str) -> str:
     k_wp = _format_number(detail.get("kWp"), decimals=3)
-    battery_name = str(detail.get("battery_name") or "").strip() or tr("common.no_battery", lang)
+    battery_name = _admin_preview_candidate_battery_display(detail, lang=lang)
     return tr(
         "workspace.admin.economics.preview.selector.option",
         lang,
-        candidate_key=candidate_key,
         kWp=k_wp,
         battery_name=battery_name,
     )
+
+
+def _admin_preview_candidate_battery_display(detail: dict[str, object], *, lang: str) -> str:
+    if battery_not_applicable(detail):
+        return tr("common.no_battery", lang)
+    battery_energy = resolve_battery_energy(detail).battery_kwh
+    if battery_energy > 0:
+        return tr(
+            "workspace.admin.economics.preview.selector.battery_capacity",
+            lang,
+            kWh=_format_number(battery_energy, decimals=1),
+        )
+    battery = detail.get("battery") or {}
+    battery_name = str(detail.get("battery_name") or (battery.get("name") if isinstance(battery, dict) else "") or "").strip()
+    return battery_name or tr("common.no_battery", lang)
 
 
 def _admin_preview_candidate_meta(active, candidate_key: str | None, *, lang: str):
@@ -701,7 +717,7 @@ def _admin_preview_candidate_meta(active, candidate_key: str | None, *, lang: st
     ):
         return ""
     detail = active.scan_result.candidate_details[candidate_key]
-    battery_name = str(detail.get("battery_name") or "").strip() or tr("common.no_battery", lang)
+    battery_name = _admin_preview_candidate_battery_display(detail, lang=lang)
     inverter_name = str((((detail.get("inv_sel") or {}).get("inverter") or {}).get("name")) or "").strip()
     panel_name = str(detail.get("panel_name") or active.config_bundle.config.get("panel_name") or "").strip()
     if panel_name.startswith("__"):
@@ -919,6 +935,8 @@ def _economics_breakdown_formula(row: dict[str, object], *, lang: str) -> str:
             "unavailable_battery": "batería",
         },
     }
+    if value_source == "not_applicable":
+        return economics_ui_label("value_source", value_source, lang=lang)
     if rule in {"markup_pct", "tax_pct"}:
         return f"{_format_percent(unit_rate)} x {_format_cop(None if base_amount is None else float(base_amount), lang)}"
     if rule == "fixed_project":
@@ -940,7 +958,11 @@ def _economics_breakdown_rows(rows, *, lang: str) -> list[dict[str, object]]:
         hardware_name = str(row.hardware_name or "").strip()
         if hardware_name:
             return hardware_name
-        if str(row.hardware_binding or "").strip() or str(row.value_source or "").strip() == "unavailable":
+        if str(row.value_source or "").strip() == "not_applicable":
+            return tr("workspace.admin.economics.preview.placeholder.not_available", lang)
+        if str(row.value_source or "").strip() == "unavailable":
+            return economics_ui_label("value_source", row.value_source, lang=lang)
+        if str(row.hardware_binding or "").strip():
             return tr("workspace.admin.economics.preview.placeholder.not_available", lang)
         return ""
 

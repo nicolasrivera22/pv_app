@@ -261,6 +261,17 @@ def test_resolve_battery_hardware_price_falls_back_to_catalog_lookup() -> None:
     assert resolved.unit_rate_COP == pytest.approx(12_500_000.0)
 
 
+def test_resolve_battery_hardware_price_marks_placeholder_battery_as_not_applicable() -> None:
+    bundle = load_example_config()
+    detail = {"battery_name": "None", "battery": {"name": "BAT-0", "nom_kWh": 0.0}}
+
+    resolved = resolve_battery_hardware_price(detail, bundle.battery_catalog)
+
+    assert resolved.value_source == "not_applicable"
+    assert resolved.hardware_name == ""
+    assert resolved.unit_rate_COP == pytest.approx(0.0)
+
+
 def test_resolve_economics_quantities_prefers_nominal_energy_over_power_fields() -> None:
     detail = {
         "kWp": 12.0,
@@ -546,6 +557,27 @@ def test_selected_battery_hardware_uses_one_unit_not_energy_kwh() -> None:
     assert result.cost_rows[0].multiplier == pytest.approx(1.0)
     assert result.cost_rows[0].unit_rate_COP == pytest.approx(12_500_000.0)
     assert result.cost_rows[0].line_amount_COP == pytest.approx(12_500_000.0)
+
+
+def test_preview_without_battery_does_not_emit_missing_battery_price_warning() -> None:
+    bundle = _fast_bundle()
+    scan_result = resolve_deterministic_scan(bundle, allow_parallel=False)
+    candidate_key = next(key for key in scan_result.candidate_details if key.endswith("::None"))
+    scenario = create_scenario_record("Sin batería", bundle, source_name="example")
+    scenario = replace(scenario, scan_result=scan_result, selected_candidate_key=candidate_key, dirty=False)
+
+    preview = resolve_economics_preview(
+        scenario,
+        economics_cost_items=bundle.economics_cost_items_table,
+        economics_price_items=bundle.economics_price_items_table,
+    )
+
+    assert preview.state == PREVIEW_STATE_READY
+    assert preview.result is not None
+    battery_row = next(row for row in preview.result.cost_rows if row.hardware_binding == "battery")
+    assert battery_row.value_source == "not_applicable"
+    assert battery_row.line_amount_COP == pytest.approx(0.0)
+    assert economics_preview_warning_messages(preview) == ()
 
 
 def test_preview_battery_energy_warning_does_not_turn_selected_battery_price_into_per_kw_cost() -> None:

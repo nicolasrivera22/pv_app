@@ -20,6 +20,10 @@ def _slugify(value: str) -> str:
     return collapsed or "proyecto"
 
 
+def slugify_project_name(value: str) -> str:
+    return _slugify(value)
+
+
 def _manifest_path(slug: str) -> Path:
     return project_root(slug) / "project.json"
 

@@ -12,6 +12,7 @@ import pytest
 
 from app import _nav_link_class_name, create_app
 import services.workspace_shared_callbacks as shared_callbacks
+import services.workspace_assumptions_callbacks as assumptions_callbacks
 import services.workspace_results_callbacks as results_callbacks
 from components.risk_controls import risk_controls_section
 from components.risk_charts import risk_charts_section
@@ -21,7 +22,7 @@ from components.risk_charts import build_histogram_figure
 from components.assumption_editor import render_assumption_sections
 from components.candidate_explorer import candidate_explorer_section
 from components.selected_candidate_deep_dive import selected_candidate_deep_dive_section
-from components.profile_editor import profile_editor_section
+from components.profile_editor import profile_editor_section, resource_profile_editor_section
 from components.catalog_editor import catalog_editor_section
 from components.workspace_frame import workspace_frame
 from pages import risk as risk_page
@@ -413,9 +414,11 @@ def test_table_display_schema_covers_editable_tables_and_immediate_tooltips() ->
 
 def test_catalog_editor_stacks_inverter_then_battery_tables() -> None:
     section = catalog_editor_section()
-    stack = section.children[1]
+    body = section.children[1]
+    stack = body.children
     first_panel, second_panel, third_panel = stack.children
 
+    assert getattr(section, "open", None) is False
     assert "catalog-stack" in str(getattr(stack, "className", "")).split()
     assert len(stack.children) == 3
     assert _find_component(first_panel, "inverter-editor-title") is not None
@@ -471,6 +474,18 @@ def test_profile_editor_uses_main_row_layout_title_tooltips_and_only_resource_pr
     assert _find_component(workbench_page.layout, "run-scan-save-and-run-btn") is not None
     assert _find_component(workbench_page.layout, "run-scan-run-unsaved-btn") is not None
     assert _find_component(workbench_page.layout, "run-scan-cancel-btn") is not None
+
+
+def test_resource_profile_editor_section_uses_collapsible_wrapper_without_moving_inner_ids() -> None:
+    section = resource_profile_editor_section()
+    body = section.children[1]
+
+    assert getattr(section, "open", None) is False
+    assert getattr(section, "id", None) == "resource-profile-editor-section"
+    assert _find_component(section, "resource-profile-editor-summary") is not None
+    assert _find_component(body, "resource-profile-editor-note") is not None
+    assert _find_component(body, "profile-main-grid") is not None
+    assert _find_component(body, "profile-main-chart-panel") is not None
 
 
 def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
@@ -1068,7 +1083,8 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".economics-breakdown-advanced-details" in css_source
     assert ".economics-editors-shell-gated" in css_source
     assert ".economics-table-wrap" in css_source
-    assert ".economics-compatibility-summary-main" in css_source
+    assert ".ui-collapsible-summary-main" in css_source
+    assert ".ui-collapsible-caret" in css_source
     assert ".economics-compatibility-summary-line" in css_source
     assert ".economics-compatibility-status-chip" in css_source
     assert ".economics-compatibility-cta-row" in css_source
@@ -1150,20 +1166,65 @@ def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
 
     assert float(rebuilt.month_profile_table.loc[0, "Demand_month"]) == 1.15
     assert float(rebuilt.demand_month_factor[0]) == 1.15
-def test_run_scan_choice_dialog_disables_save_until_project_name_exists() -> None:
-    style, title, copy, save_label, disabled, unsaved_label, cancel_label = workbench_page.sync_run_scan_choice_dialog({"open": True}, "", "en")
-    named = workbench_page.sync_run_scan_choice_dialog({"open": True}, "Demo", "es")
+def test_run_scan_choice_dialog_uses_suggested_name_without_dead_primary_cta() -> None:
+    style, title, copy, save_label, disabled, unsaved_label, cancel_label = workbench_page.sync_run_scan_choice_dialog(
+        {"open": True, "suggested_project_name": "Project 1"},
+        "",
+        "en",
+    )
+    named = workbench_page.sync_run_scan_choice_dialog({"open": True, "suggested_project_name": "Demo FV"}, "", "es")
 
     assert style["display"] == "flex"
     assert title == "Save before running?"
-    assert "Enter a project name" in copy
+    assert "Save it as 'Project 1'" in copy
     assert save_label == "Save and run"
-    assert disabled is True
+    assert disabled is False
     assert unsaved_label == "Run without saving"
     assert cancel_label == "Cancel"
     assert named[0]["display"] == "flex"
     assert named[4] is False
-    assert "Guárdala como 'Demo'" in named[2]
+    assert "Guárdala como 'Demo FV'" in named[2]
+
+
+def test_run_scan_choice_dialog_prefers_user_edited_name_over_suggestion() -> None:
+    dialog = {"open": True, "suggested_project_name": "Proyecto 1"}
+
+    rendered = workbench_page.sync_run_scan_choice_dialog(dialog, "Proyecto Cliente", "es")
+
+    assert rendered[4] is False
+    assert "Guárdala como 'Proyecto Cliente'" in rendered[2]
+
+
+def test_run_scan_choice_dialog_autofills_blank_sidebar_name_only_when_needed() -> None:
+    assert assumptions_callbacks.sync_run_scan_suggested_project_name(
+        {"open": True, "suggested_project_name": "Proyecto 2"},
+        None,
+        "",
+    ) == "Proyecto 2"
+
+    with pytest.raises(PreventUpdate):
+        assumptions_callbacks.sync_run_scan_suggested_project_name(
+            {"open": True, "suggested_project_name": "Proyecto 2"},
+            None,
+            "Proyecto Cliente",
+        )
+
+
+def test_run_scan_project_name_suggestion_cleans_labels_and_avoids_conflicts(monkeypatch) -> None:
+    monkeypatch.setattr(
+        assumptions_callbacks,
+        "list_projects",
+        lambda: [
+            SimpleNamespace(slug="escenario_demo"),
+            SimpleNamespace(slug="proyecto_1"),
+        ],
+    )
+
+    cleaned = assumptions_callbacks._suggest_run_project_name(None, SimpleNamespace(name="Escenario_demo"), lang="es")
+    fallback = assumptions_callbacks._suggest_run_project_name(None, SimpleNamespace(name="___"), lang="es")
+
+    assert cleaned == "Escenario demo 2"
+    assert fallback == "Proyecto 2"
 
 
 def test_profile_table_activator_translation_uses_current_language() -> None:
@@ -1454,7 +1515,7 @@ def test_cancel_run_scan_choice_closes_dialog_without_running() -> None:
 
     assert "Current edits applied." in status
     assert "Run cancelled." in status
-    assert dialog == {"open": False}
+    assert dialog == {"open": False, "suggested_project_name": ""}
 
 
 def test_price_table_normalizer_ignores_fully_blank_draft_rows_and_preserves_bundle_shape() -> None:

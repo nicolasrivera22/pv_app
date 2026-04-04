@@ -61,6 +61,7 @@ _ECONOMICS_UI_LABELS: dict[str, dict[str, dict[str, str]]] = {
         "selected_panel_catalog": {"es": "Catálogo de panel seleccionado", "en": "Selected panel catalog"},
         "selected_inverter_catalog": {"es": "Catálogo de inversor seleccionado", "en": "Selected inverter catalog"},
         "selected_battery_catalog": {"es": "Catálogo de batería seleccionada", "en": "Selected battery catalog"},
+        "not_applicable": {"es": "No aplica", "en": "Not applicable"},
         "unavailable": {"es": "No disponible", "en": "Unavailable"},
     },
 }
