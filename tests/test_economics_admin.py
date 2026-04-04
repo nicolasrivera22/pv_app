@@ -73,8 +73,9 @@ from services.workspace_admin_callbacks import (
     render_runtime_price_bridge_ui,
     save_current_financial_preset,
     sync_admin_draft,
-    sync_financial_preset_name_input,
     sync_economics_bridge_cta,
+    sync_economics_bridge_summary_status,
+    sync_financial_preset_name_input,
 )
 
 COST_COLUMNS = ["stage", "name", "basis", "amount_COP", "source_mode", "hardware_binding", "enabled", "notes"]
@@ -974,6 +975,7 @@ def test_economics_columns_mark_enum_fields_as_dropdowns() -> None:
 
 def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> None:
     section = economics_editor_section(lang="es")
+    content = section.children[2]
 
     note = _find_component(section, "economics-editor-note")
     preview_copy = _find_component(section, "economics-preview-copy")
@@ -984,6 +986,12 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     tax_details = _find_component(section, "economics-tax-items-details")
     adjustment_details = _find_component(section, "economics-adjustment-items-details")
     compatibility_shell = _find_component(section, "economics-compatibility-shell")
+    compatibility_summary = _find_component(section, "economics-compatibility-summary")
+    compatibility_summary_copy = _find_component(section, "economics-compatibility-summary-copy")
+    compatibility_compact_status = _find_component(section, "economics-compatibility-compact-status")
+    compatibility_body = _find_component(section, "economics-compatibility-body")
+    compatibility_body_copy = _find_component(section, "economics-compatibility-copy")
+    compatibility_cta_row = _find_component(section, "economics-compatibility-cta-row")
     cost_table = _find_component(section, "economics-cost-items-editor")
     tax_table = _find_component(section, "economics-tax-items-editor")
     adjustment_table = _find_component(section, "economics-adjustment-items-editor")
@@ -1001,6 +1009,19 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     assert adjustment_details is not None
     assert compatibility_shell is not None
     assert getattr(compatibility_shell, "open", None) is False
+    assert compatibility_summary is not None
+    assert compatibility_summary_copy is not None
+    assert "alinea el total runtime legacy" in str(compatibility_summary_copy.children).lower()
+    assert compatibility_compact_status is not None
+    assert compatibility_compact_status.children == tr("workspace.admin.economics.bridge.summary.none", "es")
+    assert compatibility_body is not None
+    assert compatibility_body_copy is not None
+    assert compatibility_body_copy.children == tr("workspace.admin.economics.bridge.compat.copy", "es")
+    assert compatibility_summary_copy.children != compatibility_body_copy.children
+    assert compatibility_cta_row is not None
+    assert _find_component(compatibility_summary, "economics-bridge-btn") is None
+    assert _find_component(compatibility_body, "economics-bridge-btn") is not None
+    assert getattr(content.children[-1], "id", None) == "economics-compatibility-shell"
     assert cost_table is not None
     assert tax_table is not None
     assert adjustment_table is not None
@@ -1012,6 +1033,42 @@ def test_economics_editor_section_uses_cleaner_copy_and_dropdown_labels() -> Non
     assert "Ajuste porcentual" in {option["label"] for option in adjustment_table.dropdown["method"]["options"]}
     assert {"Sí", "No"} == {option["label"] for option in tax_table.dropdown["enabled"]["options"]}
     assert {"Sí", "No"} == {option["label"] for option in adjustment_table.dropdown["enabled"]["options"]}
+
+
+def test_bridge_summary_chip_tracks_none_active_and_stale_states(monkeypatch, tmp_path) -> None:
+    no_snapshot_label, no_snapshot_class = sync_economics_bridge_summary_status(None, "es")
+
+    assert no_snapshot_label == tr("workspace.admin.economics.bridge.summary.none", "es")
+    assert "workbench-state-chip-neutral" in no_snapshot_class
+
+    client_state, state, active, _payload = _scanned_admin_payload(monkeypatch, tmp_path)
+    assert active is not None
+    payload = commit_client_session(client_state, state).to_payload()
+
+    active_payload, _status = apply_economics_runtime_price_bridge(
+        1,
+        payload,
+        "",
+        *_bridge_args(active),
+    )
+    active_label, active_class = sync_economics_bridge_summary_status(active_payload, "es")
+
+    assert active_label == tr("workspace.admin.economics.bridge.summary.active", "es")
+    assert "workbench-state-chip-success" in active_class
+
+    active_client, active_state = resolve_client_session(active_payload, language="es")
+    bridged_active = active_state.get_scenario()
+    assert bridged_active is not None
+    changed_bundle = replace(
+        bridged_active.config_bundle,
+        config={**bridged_active.config_bundle.config, "price_total_COP": 12_345_678.0},
+    )
+    stale_state = update_scenario_bundle(active_state, bridged_active.scenario_id, changed_bundle)
+    stale_payload = commit_client_session(active_client, stale_state).to_payload()
+    stale_label, stale_class = sync_economics_bridge_summary_status(stale_payload, "es")
+
+    assert stale_label == tr("workspace.admin.economics.bridge.summary.stale", "es")
+    assert "workbench-state-chip-warning" in stale_class
 
 
 def test_admin_secure_content_places_economics_before_collapsed_assumptions() -> None:

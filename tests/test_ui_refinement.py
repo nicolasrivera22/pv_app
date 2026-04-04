@@ -1068,6 +1068,10 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".economics-breakdown-advanced-details" in css_source
     assert ".economics-editors-shell-gated" in css_source
     assert ".economics-table-wrap" in css_source
+    assert ".economics-compatibility-summary-main" in css_source
+    assert ".economics-compatibility-summary-line" in css_source
+    assert ".economics-compatibility-status-chip" in css_source
+    assert ".economics-compatibility-cta-row" in css_source
 
 
 def test_workspace_frame_accepts_advanced_host_layout_hooks() -> None:

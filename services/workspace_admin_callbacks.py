@@ -1735,7 +1735,7 @@ def _render_runtime_price_bridge_status(scenario, *, lang: str):
     )
     return html.Div(
         id="economics-bridge-status-card",
-        className=f"subpanel economics-bridge-status-card economics-bridge-status-{state_key}",
+        className=f"economics-bridge-status-card economics-bridge-status-{state_key}",
         children=[
             html.H5(tr(f"workspace.admin.economics.bridge.status.{state_key}.title", lang), id="economics-bridge-status-title"),
             html.Div(body, id="economics-bridge-status-body", className="status-line"),
@@ -1746,6 +1746,18 @@ def _render_runtime_price_bridge_status(scenario, *, lang: str):
             ),
         ],
     )
+
+
+def _economics_bridge_summary_chip_state(state_key: str, lang: str) -> tuple[str, str]:
+    normalized_state = state_key if state_key in {"none", "active", "stale"} else "none"
+    tone_class = {
+        "none": "workbench-state-chip-neutral",
+        "active": "workbench-state-chip-success",
+        "stale": "workbench-state-chip-warning",
+    }[normalized_state]
+    label = tr(f"workspace.admin.economics.bridge.summary.{normalized_state}", lang)
+    class_name = f"workbench-state-chip {tone_class} economics-compatibility-status-chip"
+    return label, class_name
 ADMIN_EXCLUDED_FIELDS = {
     "use_excel_profile",
     "alpha_mix",
@@ -2801,6 +2813,20 @@ def sync_economics_bridge_cta(
         applied_at=None,
     )
     return (not bool(bridge_context["eligible"])), _economics_bridge_cta_text(bridge_context, lang=lang)
+
+
+@callback(
+    Output("economics-compatibility-compact-status", "children"),
+    Output("economics-compatibility-compact-status", "className"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+)
+def sync_economics_bridge_summary_status(session_payload, language_value):
+    lang = _lang(language_value)
+    _client_state, state, unlocked = _admin_session(session_payload, lang)
+    active = state.get_scenario() if unlocked else None
+    state_key = "none" if active is None else resolve_runtime_price_bridge_state(active)
+    return _economics_bridge_summary_chip_state(state_key, lang)
 
 
 @callback(

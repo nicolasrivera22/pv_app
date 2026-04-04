@@ -325,51 +325,60 @@ def economics_editor_section(*, lang: str = "es") -> html.Div:
                     ),
                     html.Details(
                         id="economics-compatibility-shell",
-                        className="subpanel economics-compatibility-shell economics-collapsible-section",
+                        className="economics-compatibility-shell economics-collapsible-section",
                         open=False,
                         children=[
                             html.Summary(
                                 id="economics-compatibility-summary",
-                                className="economics-collapsible-summary",
+                                className="economics-collapsible-summary economics-compatibility-summary",
                                 children=[
                                     html.Div(
-                                        className="economics-collapsible-summary-copy",
+                                        className="economics-compatibility-summary-main",
                                         children=[
-                                            html.H4(
-                                                tr("workspace.admin.economics.bridge.compat.title", lang),
-                                                id="economics-compatibility-title",
+                                            html.Div(
+                                                className="economics-collapsible-summary-copy economics-compatibility-summary-copy",
+                                                children=[
+                                                    html.H5(
+                                                        tr("workspace.admin.economics.bridge.compat.title", lang),
+                                                        id="economics-compatibility-title",
+                                                    ),
+                                                    html.P(
+                                                        tr("workspace.admin.economics.bridge.compat.summary", lang),
+                                                        id="economics-compatibility-summary-copy",
+                                                        className="economics-compatibility-summary-line",
+                                                    ),
+                                                ],
                                             ),
-                                            html.P(
-                                                tr("workspace.admin.economics.bridge.compat.copy", lang),
-                                                id="economics-compatibility-copy",
-                                                className="section-copy",
+                                            html.Span(
+                                                tr("workspace.admin.economics.bridge.summary.none", lang),
+                                                id="economics-compatibility-compact-status",
+                                                className="workbench-state-chip workbench-state-chip-neutral economics-compatibility-status-chip",
                                             ),
                                         ],
-                                    )
+                                    ),
                                 ],
                             ),
                             html.Div(
                                 id="economics-compatibility-body",
-                                className="economics-collapsible-body",
+                                className="economics-collapsible-body economics-compatibility-body",
                                 children=[
+                                    html.P(
+                                        tr("workspace.admin.economics.bridge.compat.copy", lang),
+                                        id="economics-compatibility-copy",
+                                        className="section-copy economics-compatibility-body-copy",
+                                    ),
                                     html.Div(
-                                        className="section-head",
+                                        id="economics-compatibility-cta-row",
+                                        className="economics-compatibility-cta-row",
                                         children=[
-                                            html.H4(tr("workspace.admin.economics.bridge.compat.title", lang)),
-                                            html.Div(
-                                                className="profile-table-actions",
-                                                children=[
-                                                    html.Button(
-                                                        tr("workspace.admin.economics.bridge.button", lang),
-                                                        id="economics-bridge-btn",
-                                                        n_clicks=0,
-                                                        className="action-btn tertiary profile-inline-btn",
-                                                    ),
-                                                ],
+                                            html.Button(
+                                                tr("workspace.admin.economics.bridge.button", lang),
+                                                id="economics-bridge-btn",
+                                                n_clicks=0,
+                                                className="action-btn tertiary profile-inline-btn",
                                             ),
                                         ],
                                     ),
-                                    html.P(tr("workspace.admin.economics.bridge.compat.copy", lang), className="section-copy"),
                                     html.Div(id="economics-bridge-cta-note", className="status-line economics-bridge-cta-note"),
                                     html.Div(id="economics-bridge-status-shell", className="economics-bridge-status-shell"),
                                 ],

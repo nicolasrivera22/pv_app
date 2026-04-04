@@ -1616,9 +1616,60 @@ body {
 
 .economics-compatibility-shell {
     display: grid;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+    padding: 0.8rem 0.95rem;
+    border: 1px dashed rgba(148, 163, 184, 0.7);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.86) 0%, rgba(255, 255, 255, 0.94) 100%);
+    box-shadow: none;
+}
+
+.economics-compatibility-summary {
+    display: block;
+}
+
+.economics-compatibility-summary-main {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
     gap: 0.75rem;
-    border-left: 4px solid rgba(148, 163, 184, 0.6);
-    background: linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(255, 255, 255, 0.98) 100%);
+    min-width: 0;
+}
+
+.economics-compatibility-summary-copy {
+    min-width: 0;
+}
+
+.economics-compatibility-summary-line {
+    margin: 0;
+    color: var(--color-text-secondary);
+    font-size: 0.84rem;
+    line-height: 1.45;
+    max-width: 58ch;
+}
+
+.economics-compatibility-status-chip {
+    flex-shrink: 0;
+    align-self: flex-start;
+}
+
+.economics-compatibility-body {
+    gap: 0.75rem;
+    padding-top: 0.15rem;
+    border-top: 1px solid rgba(203, 213, 225, 0.75);
+}
+
+.economics-compatibility-body-copy {
+    margin: 0;
+    max-width: 70ch;
+}
+
+.economics-compatibility-cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
 }
 
 .economics-editor-panel {
@@ -1662,6 +1713,11 @@ body {
 .economics-bridge-status-card {
     display: grid;
     gap: 0.55rem;
+    padding: 0.75rem 0.85rem;
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(248, 250, 252, 0.92);
+    box-shadow: none;
     border-left: 4px solid rgba(37, 99, 235, 0.35);
 }
 
@@ -1671,6 +1727,21 @@ body {
 
 .economics-bridge-status-stale {
     border-left-color: rgba(245, 158, 11, 0.7);
+}
+
+@media (max-width: 720px) {
+    .economics-compatibility-shell {
+        padding: 0.75rem 0.8rem;
+    }
+
+    .economics-compatibility-summary-main {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .economics-compatibility-status-chip {
+        width: fit-content;
+    }
 }
 
 .economics-editor-note {
