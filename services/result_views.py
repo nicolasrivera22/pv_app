@@ -979,6 +979,16 @@ def _financial_chart_title(metric_key: str, *, lang: str) -> str:
     return "VPN vs kWp" if lang == "es" else "NPV vs kWp"
 
 
+def _npv_legend_layout() -> dict[str, object]:
+    return {
+        "orientation": "h",
+        "yanchor": "bottom",
+        "y": 1.03,
+        "xanchor": "right",
+        "x": 1,
+    }
+
+
 def _curve_hover_lines(curve: pd.DataFrame, *, lang: str, display_metric_key: str, payback_label: str) -> list[str]:
     lines: list[str] = []
     for row in curve.to_dict("records"):
@@ -1182,7 +1192,8 @@ def build_npv_figure(
             template="plotly_white",
             title=full_title,
             hovermode="x unified",
-            margin={"t": 108 if horizon_years is not None else 88},
+            legend=_npv_legend_layout(),
+            margin={"t": 130 if horizon_years is not None else 110},
         )
         figure.update_yaxes(title=_financial_axis_label(resolved_display_metric, lang=lang), tickformat=",.0f", secondary_y=False)
         figure.update_yaxes(title=resolved_payback_label, secondary_y=True)
@@ -1259,7 +1270,8 @@ def build_npv_figure(
         template="plotly_white",
         title=full_title,
         hovermode="x unified",
-        margin={"t": 108 if horizon_years is not None else 88},
+        legend=_npv_legend_layout(),
+        margin={"t": 130 if horizon_years is not None else 110},
     )
     figure.update_yaxes(title=_financial_axis_label(resolved_display_metric, lang=lang), tickformat=",.0f", row=1, col=1, secondary_y=False)
     figure.update_yaxes(title=resolved_payback_label, row=1, col=1, secondary_y=True)

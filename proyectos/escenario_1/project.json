@@ -12,8 +12,8 @@
       "source_name": "PV_inputs.xlsx",
       "selected_candidate_key": "24.600::BAT-20",
       "dirty": false,
-      "last_run_at": "2026-04-04T20:51:23",
-      "scan_fingerprint": "2b3b0eec3668548ad660209cdf557249cb8dca05d14daf12ff17767e7fa7abbb",
+      "last_run_at": "2026-04-04T23:11:59",
+      "scan_fingerprint": "a7775e4d2b6e60da944199330f1777d880fa988056bc67fdaaec08609ee99d0f",
       "runtime_price_bridge": null
     }
   ],

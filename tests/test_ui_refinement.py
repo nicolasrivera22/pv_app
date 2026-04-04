@@ -1635,6 +1635,11 @@ def test_npv_chart_adds_top_axis_for_panel_count() -> None:
     assert figure.layout.xaxis2.title.text == "Número de paneles"
     assert figure.layout.yaxis.title.text == "VPN [COP]"
     assert figure.layout.yaxis2.title.text == "Payback [años]"
+    assert figure.layout.legend.orientation == "h"
+    assert figure.layout.legend.x == pytest.approx(1.0)
+    assert figure.layout.legend.xanchor == "right"
+    assert figure.layout.legend.yanchor == "bottom"
+    assert figure.layout.legend.y == pytest.approx(1.03)
     assert list(figure.layout.xaxis2.ticktext) == ["20", "30"]
     assert list(figure.layout.xaxis2.tickvals) == pytest.approx([12.0, 18.0])
     assert list(figure.data[0].customdata[0][:2]) == ["12.000::None", 20]
