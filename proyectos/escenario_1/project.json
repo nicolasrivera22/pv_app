@@ -10,9 +10,9 @@
       "scenario_id": "scenario-b4cc4ff5",
       "name": "Escenario 1",
       "source_name": "PV_inputs.xlsx",
-      "selected_candidate_key": "24.600::BAT-20",
+      "selected_candidate_key": "4.200::BAT-20",
       "dirty": false,
-      "last_run_at": "2026-04-04T23:11:59",
+      "last_run_at": "2026-04-04T23:44:58",
       "scan_fingerprint": "a7775e4d2b6e60da944199330f1777d880fa988056bc67fdaaec08609ee99d0f",
       "runtime_price_bridge": null
     }

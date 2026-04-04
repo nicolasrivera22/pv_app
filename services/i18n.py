@@ -769,7 +769,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "risk.warning.no_payback": "No simulation reached payback within the project horizon.",
     },
     "es": {
-        "app.title": "Banco de trabajo FV determinístico",
+        "app.title": "Banco de Trabajo & Diseño FV",
         "app.subtitle": "Compara escenarios determinísticos, edita supuestos del Excel, inspecciona diseños y explora riesgo.",
         "app.language": "Idioma",
         "ui_mode.label": "Modo",

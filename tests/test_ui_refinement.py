@@ -1061,6 +1061,9 @@ def test_css_is_loaded_from_assets_instead_of_inline_app_block() -> None:
     assert ".active-summary-top" in css_source
     assert ".active-summary-actions" in css_source
     assert ".nav-link-active" in css_source
+    assert ".sidebar-panel" in css_source
+    assert "min-height: calc(100vh - 2rem);" in css_source
+    assert "max-height: calc(130vh - 2rem);" in css_source
     assert ".sidebar-start-card" in css_source
     assert ".upload-box-action" in css_source
     assert ".project-action-grid" in css_source
