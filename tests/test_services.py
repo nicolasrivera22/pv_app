@@ -18,10 +18,16 @@ from pv_product.utils import build_7x24_from_excel
 from services import collect_config_updates, ensure_template, load_config_from_excel, load_example_config, run_scan, run_scenario
 from services.io_excel import WorkbookContractError, _normalize_config_value
 from services.result_views import (
+    EXPLORER_SUBSET_KEY_NO_BATTERY,
+    EXPLORER_SUBSET_KEY_OPTIMAL,
     build_npv_figure,
+    build_results_explorer_options,
     build_kpis,
     build_visible_horizon_candidate_summary,
+    canonical_results_explorer_view,
     resolve_payback_display_state,
+    resolve_results_explorer_state,
+    resolve_nearest_candidate_key_in_subset,
     resolve_selected_candidate_key,
     resolve_selected_candidate_key_for_scenario,
     summarize_candidate_for_horizon,
@@ -591,7 +597,6 @@ def test_build_npv_figure_renders_selected_overlay_for_non_curve_candidate() -> 
     figure = build_npv_figure(table, selected_key="12.000::BAT-10", lang="es", module_power_w=600.0)
 
     selected_trace = next(trace for trace in figure.data if trace.name == "Diseño seleccionado")
-    best_trace = next(trace for trace in figure.data if trace.name == "Mejor diseño")
 
     assert list(selected_trace.x) == pytest.approx([12.0])
     assert list(selected_trace.y) == pytest.approx([9_000_000.0])
@@ -599,7 +604,165 @@ def test_build_npv_figure_renders_selected_overlay_for_non_curve_candidate() -> 
     assert selected_trace.marker.color == "#dc2626"
     assert selected_trace.marker.line.color == "#7f1d1d"
     assert selected_trace.marker.size == 18
-    assert list(best_trace.customdata[0]) == ["18.000::None", 30, "best_overlay"]
+    assert not any(trace.name == "Mejor diseño" for trace in figure.data)
+
+
+def test_build_results_explorer_options_orders_optimal_no_battery_and_battery_sizes() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery_family_key": EXPLORER_SUBSET_KEY_NO_BATTERY,
+                "battery_family_label": "Sin batería",
+                "battery_kwh": None,
+                "best_battery_for_kwp": True,
+            },
+            {
+                "candidate_key": "12.000::BAT-10",
+                "kWp": 12.0,
+                "battery_family_key": "battery:kwh:10.000",
+                "battery_family_label": "10.0 kWh batería",
+                "battery_kwh": 10.0,
+                "best_battery_for_kwp": False,
+            },
+            {
+                "candidate_key": "18.000::BAT-5",
+                "kWp": 18.0,
+                "battery_family_key": "battery:kwh:5.000",
+                "battery_family_label": "5.0 kWh batería",
+                "battery_kwh": 5.0,
+                "best_battery_for_kwp": True,
+            },
+        ]
+    )
+
+    options = build_results_explorer_options(table, lang="es")
+
+    assert [option["label"] for option in options] == ["Óptimos", "Sin batería", "5.0 kWh batería", "10.0 kWh batería"]
+    assert [option["value"] for option in options] == [
+        EXPLORER_SUBSET_KEY_OPTIMAL,
+        EXPLORER_SUBSET_KEY_NO_BATTERY,
+        "battery:kwh:5.000",
+        "battery:kwh:10.000",
+    ]
+
+
+def test_resolve_results_explorer_state_prioritizes_selected_family_then_optimal_then_deterministic_fallback() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::None",
+                "kWp": 12.0,
+                "battery_family_key": EXPLORER_SUBSET_KEY_NO_BATTERY,
+                "battery_family_label": "Sin batería",
+                "battery_kwh": None,
+                "best_battery_for_kwp": True,
+            },
+            {
+                "candidate_key": "12.000::BAT-10",
+                "kWp": 12.0,
+                "battery_family_key": "battery:kwh:10.000",
+                "battery_family_label": "10.0 kWh batería",
+                "battery_kwh": 10.0,
+                "best_battery_for_kwp": False,
+            },
+            {
+                "candidate_key": "18.000::BAT-5",
+                "kWp": 18.0,
+                "battery_family_key": "battery:kwh:5.000",
+                "battery_family_label": "5.0 kWh batería",
+                "battery_kwh": 5.0,
+                "best_battery_for_kwp": True,
+            },
+        ]
+    )
+
+    selected_family = resolve_results_explorer_state(
+        table,
+        scenario_id="scenario-1",
+        scan_fingerprint="scan-1",
+        selected_candidate_key="12.000::BAT-10",
+        current_state={"scenario_id": "scenario-1", "scan_fingerprint": "scan-1", "subset_key": EXPLORER_SUBSET_KEY_OPTIMAL},
+        lang="es",
+    )
+    fallback_to_optimal = resolve_results_explorer_state(
+        table,
+        scenario_id="scenario-1",
+        scan_fingerprint="scan-1",
+        selected_candidate_key=None,
+        current_state={"scenario_id": "scenario-1", "scan_fingerprint": "scan-1", "subset_key": "battery:kwh:10.000"},
+        lang="es",
+    )
+    no_optimal_table = table.assign(best_battery_for_kwp=False)
+    deterministic_fallback = resolve_results_explorer_state(
+        no_optimal_table,
+        scenario_id="scenario-1",
+        scan_fingerprint="scan-1",
+        selected_candidate_key=None,
+        current_state=None,
+        lang="es",
+    )
+
+    assert selected_family["subset_key"] == "battery:kwh:10.000"
+    assert selected_family["subset_mode"] == "battery"
+    assert fallback_to_optimal["subset_key"] == EXPLORER_SUBSET_KEY_OPTIMAL
+    assert fallback_to_optimal["subset_mode"] == "optimal"
+    assert deterministic_fallback["subset_key"] == EXPLORER_SUBSET_KEY_NO_BATTERY
+    assert deterministic_fallback["subset_label"] == "Sin batería"
+
+
+def test_results_explorer_reassigns_to_nearest_candidate_with_stable_tiebreakers() -> None:
+    table = pd.DataFrame(
+        [
+            {
+                "candidate_key": "12.000::REF",
+                "kWp": 12.0,
+                "NPV_COP": 8_000_000,
+                "scan_order": 9,
+                "battery_family_key": EXPLORER_SUBSET_KEY_NO_BATTERY,
+                "battery_family_label": "Sin batería",
+                "battery_kwh": None,
+                "best_battery_for_kwp": False,
+            },
+            {
+                "candidate_key": "10.000::BAT-A",
+                "kWp": 10.0,
+                "NPV_COP": 7_000_000,
+                "scan_order": 1,
+                "battery_family_key": "battery:kwh:10.000",
+                "battery_family_label": "10.0 kWh batería",
+                "battery_kwh": 10.0,
+                "best_battery_for_kwp": False,
+            },
+            {
+                "candidate_key": "14.000::BAT-Z",
+                "kWp": 14.0,
+                "NPV_COP": 7_500_000,
+                "scan_order": 1,
+                "battery_family_key": "battery:kwh:10.000",
+                "battery_family_label": "10.0 kWh batería",
+                "battery_kwh": 10.0,
+                "best_battery_for_kwp": False,
+            },
+        ]
+    )
+
+    nearest_key = resolve_nearest_candidate_key_in_subset(
+        table,
+        "12.000::REF",
+        "battery:kwh:10.000",
+    )
+    view = canonical_results_explorer_view(
+        table,
+        selected_candidate_key="12.000::REF",
+        subset_key="battery:kwh:10.000",
+    )
+
+    assert nearest_key == "10.000::BAT-A"
+    assert view["subset_key"] == "battery:kwh:10.000"
+    assert view["selected_candidate_key"] == "10.000::BAT-A"
+    assert view["highlight_keys"] == ("10.000::BAT-A", "14.000::BAT-Z")
 
 
 def test_scan_payload_round_trip_preserves_detail_fields() -> None:
@@ -922,10 +1085,15 @@ def test_selected_candidate_helper_ignores_discard_marker_clicks() -> None:
 
 
 def test_regression_against_preserved_legacy_artifacts() -> None:
+    summary_path = Path("Resultados/resumen_optimizacion.txt")
+    scan_path = Path("Resultados/resumen_valor_presente_neto.csv")
+    if not summary_path.exists() or not scan_path.exists():
+        pytest.skip("Legacy regression artifacts are not present in this workspace.")
+
     bundle = load_config_from_excel(Path("PV_inputs.xlsx"))
     scan = run_scan(bundle)
-    legacy_summary = _parse_legacy_summary(Path("Resultados/resumen_optimizacion.txt"))
-    legacy_scan = pd.read_csv("Resultados/resumen_valor_presente_neto.csv")
+    legacy_summary = _parse_legacy_summary(summary_path)
+    legacy_scan = pd.read_csv(scan_path)
     legacy_row = legacy_scan[(legacy_scan["kWp"] == legacy_summary["best_kwp"]) & (legacy_scan["battery"] == legacy_summary["battery"])].iloc[0]
     legacy_candidate_key = f"{legacy_summary['best_kwp']:.3f}::{legacy_summary['battery']}"
     legacy_detail = scan.candidate_details[legacy_candidate_key]

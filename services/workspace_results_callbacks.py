@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 
-from dash import Input, Output, State, callback, ctx, dcc, html
+from dash import Input, Output, State, callback, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 import pandas as pd
 import plotly.graph_objects as go
@@ -10,17 +10,15 @@ import plotly.graph_objects as go
 from pv_product.panel_catalog import MANUAL_PANEL_TOKEN, manual_panel_label, normalize_panel_name
 from pv_product.panel_technology import panel_technology_field_label, panel_technology_mode_label
 
-from .candidate_financials import (
-    attach_candidate_financial_snapshots,
-    resolve_financial_candidate_key,
-)
+from .candidate_financials import attach_candidate_financial_snapshots
 from .export_access import open_export_folder, publish_export_artifacts
 from .export_artifacts import export_deterministic_artifacts
 from .export_excel import export_scenario_workbook
 from .i18n import tr
 from .result_views import (
+    EXPLORER_SUBSET_KEY_OPTIMAL,
     build_annual_coverage_figure,
-    build_battery_load_figure,
+    build_results_explorer_options,
     build_cash_flow,
     build_cash_flow_figure,
     build_kpis,
@@ -29,9 +27,13 @@ from .result_views import (
     build_npv_figure,
     build_typical_day_figure,
     build_visible_horizon_candidate_summary,
+    canonical_results_explorer_view,
+    enrich_results_candidate_table,
     format_horizon_year_value,
+    resolve_results_explorer_state,
     resolve_selected_candidate_key_for_scenario,
     summarize_candidates_for_horizon,
+    subset_label_for_key,
     visible_financial_metric_key,
 )
 from .runtime_paths import internal_results_root, project_exports_root
@@ -73,21 +75,14 @@ def _empty_figure(title: str, message: str) -> go.Figure:
     return figure
 
 
-def _candidate_table_styles(selected_key: str, best_key: str) -> list[dict]:
-    styles = [
-        {
-            "if": {"filter_query": "{best_battery_for_kwp} = true"},
-            "backgroundColor": "#eff6ff",
-        }
-    ]
-    if best_key:
-        styles.insert(
-            0,
+def _candidate_table_styles(selected_key: str | None, highlight_keys) -> list[dict]:
+    styles: list[dict] = []
+    for candidate_key in [str(value) for value in (highlight_keys or ()) if str(value).strip()]:
+        styles.append(
             {
-                "if": {"filter_query": f'{{candidate_key}} = "{best_key}"'},
-                "backgroundColor": "#dcfce7",
-                "fontWeight": "bold",
-            },
+                "if": {"filter_query": f'{{candidate_key}} = "{candidate_key}"'},
+                "backgroundColor": "#fef3c7",
+            }
         )
     if selected_key:
         styles.append(
@@ -165,6 +160,23 @@ def _resolved_candidate_horizon(active, slider_value) -> int:
     except (TypeError, ValueError):
         requested_years = max_years
     return max(0, min(requested_years, max_years))
+
+
+def _explicit_selected_candidate_key(active) -> str | None:
+    if active is None or active.scan_result is None:
+        return None
+    candidate_key = str(active.selected_candidate_key or "").strip()
+    if candidate_key and candidate_key in active.scan_result.candidate_details:
+        return candidate_key
+    return None
+
+
+def _results_candidate_table(active, *, horizon_years: int, lang: str) -> tuple[pd.DataFrame, dict[str, dict]]:
+    attached_details = attach_candidate_financial_snapshots(active)
+    table = summarize_candidates_for_horizon(attached_details, horizon_years, require_financial_snapshot=True)
+    table = enrich_results_candidate_table(table, attached_details, lang=lang)
+    table["battery"] = table["battery"].replace({"None": tr("common.no_battery", lang)})
+    return table, attached_details
 
 
 def _candidate_horizon_marks(max_years: int) -> dict[int, str]:
@@ -310,10 +322,14 @@ def _scan_discard_explainer(scan_result, *, lang: str = "es") -> tuple[str, dict
     Output("candidate-explorer-intro", "children"),
     Output("candidate-horizon-label", "children"),
     Output("candidate-horizon-helper", "children"),
+    Output("results-battery-family-label", "children"),
     Output("selected-candidate-kpi-title", "children"),
     Output("candidate-selection-helper", "children"),
     Output("selected-candidate-deep-dive-title", "children"),
     Output("selected-candidate-deep-dive-note", "children"),
+    Output("selected-candidate-behavior-title", "children"),
+    Output("selected-candidate-behavior-note", "children"),
+    Output("unifilar-inspector-summary-text", "children"),
     Output("scenario-export-btn", "children"),
     Output("scenario-artifacts-btn", "children"),
     Output("scenario-open-exports-btn", "children"),
@@ -330,10 +346,14 @@ def translate_results_page(language_value):
         tr("workbench.candidate_explorer.intro", lang),
         tr("workbench.horizon.label", lang),
         tr("workbench.horizon.helper", lang),
+        tr("workbench.explorer.family.label", lang),
         tr("workbench.selected_design.summary", lang),
         tr("workbench.candidate_selection.helper", lang),
         tr("workbench.deep_dive.title", lang),
         tr("workbench.deep_dive.note", lang),
+        tr("workbench.results.behavior.title", lang),
+        tr("workbench.results.behavior.note", lang),
+        tr("workbench.schematic.inspector.summary", lang),
         tr("workbench.export_scenario", lang),
         tr("common.export_artifacts", lang),
         tr("common.open_exports_folder", lang),
@@ -417,29 +437,178 @@ def sync_candidate_horizon_slider(session_payload, language_value, current_value
 
 
 @callback(
+    Output("results-explorer-state", "data"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+    State("results-explorer-state", "data", allow_optional=True),
+)
+def sync_results_explorer_state(session_payload, language_value, current_state):
+    lang = _lang(language_value)
+    _, _, active = _session_with_scan(session_payload, lang)
+    if active is None or active.scan_result is None or not _has_viable_scan_result(active.scan_result):
+        return {
+            "scenario_id": None,
+            "scan_fingerprint": None,
+            "subset_mode": "optimal",
+            "subset_key": None,
+            "subset_label": "",
+        }
+    table, _ = _results_candidate_table(active, horizon_years=_scenario_horizon_years(active), lang=lang)
+    explicit_selected_key = _explicit_selected_candidate_key(active)
+    return resolve_results_explorer_state(
+        table,
+        scenario_id=active.scenario_id,
+        scan_fingerprint=active.scan_fingerprint,
+        selected_candidate_key=explicit_selected_key,
+        current_state=current_state,
+        lang=lang,
+    )
+
+
+@callback(
+    Output("results-battery-family-dropdown", "options"),
+    Output("results-battery-family-dropdown", "value"),
+    Output("results-battery-family-dropdown", "disabled"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+    Input("results-explorer-state", "data"),
+)
+def populate_results_explorer_controls(session_payload, language_value, explorer_state):
+    lang = _lang(language_value)
+    _, _, active = _session_with_scan(session_payload, lang)
+    if active is None or active.scan_result is None or not _has_viable_scan_result(active.scan_result):
+        return [], None, True
+    table, _ = _results_candidate_table(active, horizon_years=_scenario_horizon_years(active), lang=lang)
+    resolved_state = resolve_results_explorer_state(
+        table,
+        scenario_id=active.scenario_id,
+        scan_fingerprint=active.scan_fingerprint,
+        selected_candidate_key=_explicit_selected_candidate_key(active),
+        current_state=explorer_state,
+        lang=lang,
+    )
+    options = build_results_explorer_options(table, lang=lang)
+    return options, resolved_state.get("subset_key"), not bool(options)
+
+
+@callback(
+    Output("results-explorer-state", "data", allow_duplicate=True),
     Output("scenario-session-store", "data", allow_duplicate=True),
+    Input("results-battery-family-dropdown", "value"),
     Input("active-candidate-table", "selected_rows"),
     Input("active-npv-graph", "clickData"),
+    Input("candidate-horizon-slider", "value"),
+    State("results-explorer-state", "data", allow_optional=True),
     State("active-candidate-table", "data"),
     State("scenario-session-store", "data"),
+    State("language-selector", "value"),
     prevent_initial_call=True,
 )
-def persist_selected_candidate(selected_rows, click_data, table_rows, session_payload):
-    client_state, state, active = _session_with_scan(session_payload, None)
+def persist_selected_candidate(
+    subset_value,
+    selected_rows,
+    click_data,
+    horizon_slider_value,
+    explorer_state,
+    table_rows,
+    session_payload,
+    language_value,
+):
+    lang = _lang(language_value)
+    client_state, state, active = _session_with_scan(session_payload, lang)
     if active is None or active.scan_result is None:
         raise PreventUpdate
-    selected_key = resolve_selected_candidate_key_for_scenario(
-        active.scan_result,
-        active.selected_candidate_key,
-        table_rows=table_rows,
-        selected_rows=selected_rows,
-        click_data=click_data,
+    horizon_years = _resolved_candidate_horizon(active, horizon_slider_value)
+    table, _ = _results_candidate_table(active, horizon_years=horizon_years, lang=lang)
+    explicit_selected_key = _explicit_selected_candidate_key(active)
+    resolved_state = resolve_results_explorer_state(
+        table,
+        scenario_id=active.scenario_id,
+        scan_fingerprint=active.scan_fingerprint,
+        selected_candidate_key=explicit_selected_key,
+        current_state=explorer_state,
+        lang=lang,
     )
-    if selected_key == active.selected_candidate_key:
+    current_view = canonical_results_explorer_view(
+        table,
+        selected_candidate_key=explicit_selected_key,
+        subset_key=resolved_state.get("subset_key"),
+        display_metric_key=visible_financial_metric_key(horizon_years),
+    )
+    trigger = ctx.triggered_id
+    next_store = no_update
+    next_selected_key: str | None = None
+
+    if trigger == "results-battery-family-dropdown":
+        requested_subset_key = str(subset_value or "").strip() or None
+        if requested_subset_key == resolved_state.get("subset_key"):
+            raise PreventUpdate
+        next_view = canonical_results_explorer_view(
+            table,
+            selected_candidate_key=current_view.get("selected_candidate_key"),
+            subset_key=requested_subset_key,
+            display_metric_key=visible_financial_metric_key(horizon_years),
+        )
+        next_store = {
+            "scenario_id": active.scenario_id,
+            "scan_fingerprint": active.scan_fingerprint,
+            "subset_mode": "optimal" if next_view["subset_key"] == EXPLORER_SUBSET_KEY_OPTIMAL else "battery",
+            "subset_key": next_view["subset_key"],
+            "subset_label": subset_label_for_key(table, next_view["subset_key"], lang=lang),
+        }
+        next_selected_key = next_view["selected_candidate_key"]
+    elif trigger == "active-candidate-table":
+        if not selected_rows or not table_rows:
+            raise PreventUpdate
+        selected_index = int(selected_rows[0])
+        if selected_index < 0 or selected_index >= len(table_rows):
+            raise PreventUpdate
+        clicked_row = table_rows[selected_index] or {}
+        clicked_key = str(clicked_row.get("candidate_key") or "").strip()
+        if clicked_key not in active.scan_result.candidate_details:
+            raise PreventUpdate
+        clicked_subset_key = str(clicked_row.get("battery_family_key") or "").strip() or None
+        if clicked_key == current_view.get("selected_candidate_key") and clicked_subset_key in {resolved_state.get("subset_key"), None}:
+            raise PreventUpdate
+        if clicked_key in set(current_view.get("highlight_keys") or ()):
+            next_selected_key = clicked_key
+        else:
+            next_store = {
+                "scenario_id": active.scenario_id,
+                "scan_fingerprint": active.scan_fingerprint,
+                "subset_mode": "optimal" if clicked_subset_key == EXPLORER_SUBSET_KEY_OPTIMAL else "battery",
+                "subset_key": clicked_subset_key,
+                "subset_label": subset_label_for_key(table, clicked_subset_key, lang=lang),
+            }
+            next_selected_key = clicked_key
+    elif trigger == "active-npv-graph":
+        next_selected_key = resolve_selected_candidate_key_for_scenario(
+            active.scan_result,
+            explicit_selected_key,
+            table_rows=table_rows,
+            selected_rows=selected_rows,
+            click_data=click_data,
+        )
+        if next_selected_key == current_view.get("selected_candidate_key"):
+            raise PreventUpdate
+    elif trigger == "candidate-horizon-slider":
+        next_selected_key = current_view.get("selected_candidate_key")
+        if not explicit_selected_key or next_selected_key == explicit_selected_key:
+            raise PreventUpdate
+    else:
         raise PreventUpdate
-    state = update_selected_candidate(state, active.scenario_id, selected_key)
-    client_state = commit_client_session(client_state, state)
-    return client_state.to_payload()
+
+    if next_selected_key is None:
+        raise PreventUpdate
+
+    session_output = no_update
+    if next_selected_key != explicit_selected_key:
+        state = update_selected_candidate(state, active.scenario_id, next_selected_key)
+        client_state = commit_client_session(client_state, state)
+        session_output = client_state.to_payload()
+    if next_store is no_update and session_output is no_update:
+        raise PreventUpdate
+    return next_store, session_output
 
 
 @callback(
@@ -452,7 +621,7 @@ def persist_selected_candidate(selected_rows, click_data, table_rows, session_pa
     Output("active-monthly-balance-graph", "figure"),
     Output("active-cash-flow-graph", "figure"),
     Output("active-annual-coverage-graph", "figure"),
-    Output("active-battery-load-graph", "figure"),
+    Output("results-battery-family-helper", "children"),
     Output("active-typical-day-graph", "figure"),
     Output("active-candidate-table", "data"),
     Output("active-candidate-table", "columns"),
@@ -462,13 +631,14 @@ def persist_selected_candidate(selected_rows, click_data, table_rows, session_pa
     Input("scenario-session-store", "data"),
     Input("language-selector", "value"),
     Input("candidate-horizon-slider", "value"),
+    Input("results-explorer-state", "data", allow_optional=True),
 )
-def populate_results(session_payload, language_value, horizon_slider_value):
+def populate_results(session_payload, language_value, horizon_slider_value, explorer_state=None):
     lang = _lang(language_value)
     _, state, active = _session_with_scan(session_payload, lang)
     empty = _empty_figure(tr("common.results", lang), tr("workbench.results.empty", lang))
     if active is None or active.scan_result is None:
-        return [], "", {"display": "none"}, [], empty, [], empty, empty, empty, empty, empty, [], [], [], [], {}
+        return [], "", {"display": "none"}, [], empty, [], empty, empty, empty, "", empty, [], [], [], [], {}
 
     scan = active.scan_result
     horizon_years = _resolved_candidate_horizon(active, horizon_slider_value)
@@ -480,13 +650,30 @@ def populate_results(session_payload, language_value, horizon_slider_value):
         lang=lang,
     )
     discard_explainer, discard_explainer_style = _scan_discard_explainer(scan, lang=lang)
-    attached_details = attach_candidate_financial_snapshots(active)
-    selected_key = resolve_financial_candidate_key(active, active.selected_candidate_key) or resolve_selected_candidate_key_for_scenario(
-        scan,
-        active.selected_candidate_key,
+    table, attached_details = _results_candidate_table(active, horizon_years=horizon_years, lang=lang)
+    explicit_selected_key = _explicit_selected_candidate_key(active)
+    resolved_state = resolve_results_explorer_state(
+        table,
+        scenario_id=active.scenario_id,
+        scan_fingerprint=active.scan_fingerprint,
+        selected_candidate_key=explicit_selected_key,
+        current_state=explorer_state,
+        lang=lang,
     )
-    table = summarize_candidates_for_horizon(attached_details, horizon_years, require_financial_snapshot=True)
-    table["battery"] = table["battery"].replace({"None": tr("common.no_battery", lang)})
+    current_view = canonical_results_explorer_view(
+        table,
+        selected_candidate_key=explicit_selected_key,
+        subset_key=resolved_state.get("subset_key"),
+        display_metric_key=financial_metric_key,
+    )
+    selected_key = current_view["selected_candidate_key"]
+    subset_key = current_view["subset_key"]
+    table_view = current_view["subset_rows"]
+    family_helper = tr(
+        "workbench.explorer.family.helper",
+        lang,
+        subset_label=subset_label_for_key(table, subset_key, lang=lang),
+    )
     visible_columns = [
         "kWp",
         "battery",
@@ -507,17 +694,16 @@ def populate_results(session_payload, language_value, horizon_slider_value):
             {"name": "candidate_key", "id": "candidate_key"},
             {"name": "scan_order", "id": "scan_order"},
             {"name": "best_battery_for_kwp", "id": "best_battery_for_kwp"},
+            {"name": "battery_family_key", "id": "battery_family_key"},
+            {"name": "battery_family_label", "id": "battery_family_label"},
+            {"name": "battery_kwh", "id": "battery_kwh"},
         ]
     )
     selected_index = table.index[table["candidate_key"] == selected_key].tolist() if selected_key else []
-    value_ascending = financial_metric_key == "capex_client"
-    best_key = None if table.empty else str(
-        table.sort_values(by=["NPV_COP", "scan_order"], ascending=[value_ascending, True], kind="mergesort").iloc[0]["candidate_key"]
-    )
-    styles = _candidate_table_styles(selected_key, best_key)
+    styles = _candidate_table_styles(selected_key, current_view.get("highlight_keys") or ())
     module_power_w = float(active.config_bundle.config.get("P_mod_W", 0.0) or 0.0)
     npv_figure = build_npv_figure(
-        table,
+        table_view,
         selected_key=selected_key,
         lang=lang,
         horizon_years=horizon_years,
@@ -538,7 +724,7 @@ def populate_results(session_payload, language_value, horizon_slider_value):
             detail_empty,
             detail_empty,
             detail_empty,
-            detail_empty,
+            family_helper,
             detail_empty,
             table.to_dict("records"),
             columns,
@@ -574,7 +760,7 @@ def populate_results(session_payload, language_value, horizon_slider_value):
         build_monthly_balance_figure(monthly_balance, lang=lang),
         build_cash_flow_figure(cash_flow, lang=lang, k_wp=float(detail["kWp"]), module_power_w=module_power_w),
         build_annual_coverage_figure(detail, active.config_bundle.config, lang=lang),
-        build_battery_load_figure(detail, active.config_bundle.config, lang=lang),
+        family_helper,
         build_typical_day_figure(detail, active, lang=lang),
         table.to_dict("records"),
         columns,

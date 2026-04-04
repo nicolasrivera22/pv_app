@@ -491,11 +491,15 @@ def test_resource_profile_editor_section_uses_collapsible_wrapper_without_moving
 def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
     section = candidate_explorer_section()
     assert section.id == "candidate-selection-section"
+    assert getattr(section, "open", None) is True
+    assert _find_component(section, "candidate-selection-summary") is not None
     assert _find_component(section, "scan-summary-strip") is not None
     assert _find_component(section, "scan-discard-explainer") is not None
     assert _find_component(section, "active-kpi-cards") is not None
     assert _find_component(section, "candidate-horizon-toolbar") is not None
     assert _find_component(section, "candidate-horizon-slider") is not None
+    assert _find_component(section, "results-battery-family-dropdown") is not None
+    assert _find_component(section, "results-battery-family-helper") is not None
     assert _find_component(section, "active-npv-graph") is not None
     assert _find_component(section, "candidate-selection-helper") is not None
     assert _find_component(section, "selected-candidate-banner") is not None
@@ -505,11 +509,20 @@ def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
 
     deep_dive = selected_candidate_deep_dive_section()
     assert deep_dive.id == "selected-candidate-deep-dive-section"
+    analysis_section = _find_component(deep_dive, "selected-candidate-analysis-section")
+    unifilar_section = _find_component(deep_dive, "unifilar-diagram-section")
+    behavior_section = _find_component(deep_dive, "selected-candidate-behavior-section")
+    assert analysis_section is not None and getattr(analysis_section, "open", None) is False
+    assert unifilar_section is not None and getattr(unifilar_section, "open", None) is False
+    assert behavior_section is not None and getattr(behavior_section, "open", None) is False
+    assert _find_component(deep_dive, "selected-candidate-analysis-summary") is not None
+    assert _find_component(deep_dive, "unifilar-diagram-summary-trigger") is not None
+    assert _find_component(deep_dive, "selected-candidate-behavior-summary") is not None
     assert _find_component(deep_dive, "active-monthly-balance-graph") is not None
     assert _find_component(deep_dive, "active-cash-flow-graph") is not None
     assert _find_component(deep_dive, "unifilar-diagram-shell") is not None
     assert _find_component(deep_dive, "active-annual-coverage-graph") is not None
-    assert _find_component(deep_dive, "active-battery-load-graph") is not None
+    assert _find_component(deep_dive, "active-battery-load-graph") is None
     assert _find_component(deep_dive, "active-pv-destination-graph") is None
     assert _find_component(deep_dive, "active-typical-day-graph") is not None
 
@@ -525,11 +538,15 @@ def test_candidate_selection_affordances_and_styles_use_stable_candidate_keys() 
     section = candidate_explorer_section()
     assert _find_component(section, "selected-candidate-kpi-title").children == tr("workbench.selected_design.summary", "es")
     assert _find_component(section, "candidate-horizon-label").children == tr("workbench.horizon.label", "es")
+    assert _find_component(section, "results-battery-family-label").children == tr("workbench.explorer.family.label", "es")
     assert _find_component(section, "candidate-selection-helper").children == tr("workbench.candidate_selection.helper", "es")
 
-    styles = workbench_page._candidate_table_styles("18.000::BAT-10", "12.000::None")
+    styles = workbench_page._candidate_table_styles("18.000::BAT-10", ["12.000::None"])
+    assert styles[0]["if"]["filter_query"] == '{candidate_key} = "12.000::None"'
+    assert styles[0]["backgroundColor"] == "#fef3c7"
     assert styles[-1]["if"]["filter_query"] == '{candidate_key} = "18.000::BAT-10"'
     assert styles[-1]["backgroundColor"] == "#fee2e2"
+    assert len(styles) == 2
 
 
 def test_candidate_horizon_slider_defaults_to_scan_horizon_and_preserves_current_value() -> None:
@@ -1835,7 +1852,7 @@ def test_populate_results_year_zero_shows_project_price_in_main_ui() -> None:
     assert tr("workbench.project_price.axis_label", "es") in str(year_zero[3][2].to_plotly_json())
 
 
-def test_populate_results_year_zero_selected_overlay_uses_selected_candidate_snapshot_not_curve_best() -> None:
+def test_populate_results_year_zero_aligns_curve_and_helper_to_selected_candidate_family() -> None:
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     state = run_scenario_scan(state, state.active_scenario_id)
     scenario = state.get_scenario()
@@ -1853,25 +1870,26 @@ def test_populate_results_year_zero_selected_overlay_uses_selected_candidate_sna
         >= 2
     )
     ordered_rows = same_kwp_rows.sort_values(["NPV_COP", "scan_order"], ascending=[True, True], kind="mergesort").reset_index(drop=True)
-    curve_key = str(ordered_rows.iloc[0]["candidate_key"])
     selected_overlay_key = str(ordered_rows.iloc[1]["candidate_key"])
-    assert curve_key != selected_overlay_key
+    selected_row = year_zero_table.set_index("candidate_key").loc[selected_overlay_key]
+    assert bool(selected_row["best_battery_for_kwp"]) is False
 
     state = update_selected_candidate(state, scenario.scenario_id, selected_overlay_key)
     active = state.get_scenario()
     assert active is not None
     outputs = workbench_page.populate_results(_session_payload(state), "es", 0)
+    family_helper = outputs[9]
     npv_figure = outputs[4]
     selected_trace = next(trace for trace in npv_figure.data if list(trace.customdata[0])[2] == "selected_overlay")
     curve_trace = next(trace for trace in npv_figure.data if list(trace.customdata[0])[2] == "npv_curve")
-    curve_index = next(index for index, point in enumerate(curve_trace.customdata) if list(point)[0] == curve_key)
     selected_snapshot = build_candidate_financial_snapshot(active, selected_overlay_key)
-    curve_snapshot = build_candidate_financial_snapshot(active, curve_key)
+    visible_curve_keys = [list(point)[0] for point in curve_trace.customdata]
+    visible_rows = year_zero_table.set_index("candidate_key").loc[visible_curve_keys]
 
     assert list(selected_trace.customdata[0])[0] == selected_overlay_key
     assert float(selected_trace.y[0]) == pytest.approx(selected_snapshot.project_price_year0_COP)
-    assert float(curve_trace.y[curve_index]) == pytest.approx(curve_snapshot.project_price_year0_COP)
-    assert float(selected_trace.y[0]) != pytest.approx(float(curve_trace.y[curve_index]))
+    assert selected_row["battery_family_label"] in family_helper
+    assert set(visible_rows["battery_family_key"]) == {selected_row["battery_family_key"]}
 
 
 def test_populate_results_ignores_poisoned_legacy_finance_fields() -> None:
@@ -1936,7 +1954,7 @@ def test_populate_results_fails_closed_when_snapshot_attachment_builder_errors(m
         workbench_page.populate_results(payload, "es", 5)
 
 
-def test_graph_click_selection_updates_store_table_and_selected_marker() -> None:
+def test_graph_click_selection_updates_store_table_and_selected_marker(monkeypatch) -> None:
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     state = run_scenario_scan(state, state.active_scenario_id)
     scenario = state.get_scenario()
@@ -1956,19 +1974,28 @@ def test_graph_click_selection_updates_store_table_and_selected_marker() -> None
 
     state = update_selected_candidate(state, scenario.scenario_id, selected_overlay_key)
     payload = _session_payload(state)
-    table_rows = workbench_page.populate_results(payload, "es", 5)[11]
+    current_store = results_callbacks.sync_results_explorer_state(payload, "es", {})
+    outputs = workbench_page.populate_results(payload, "es", 5, current_store)
+    table_rows = outputs[11]
+    selected_rows = outputs[13]
+    monkeypatch.setattr(results_callbacks, "ctx", SimpleNamespace(triggered_id="active-npv-graph"))
 
-    next_payload = results_callbacks.persist_selected_candidate(
-        [],
+    next_store, next_payload = results_callbacks.persist_selected_candidate(
+        current_store["subset_key"],
+        selected_rows,
         {
             "points": [
                 {"customdata": [selected_overlay_key, None, "selected_overlay"]},
                 {"customdata": [curve_key, None, "npv_curve"]},
             ]
         },
+        5,
+        current_store,
         table_rows,
         payload,
+        "es",
     )
+    assert next_store is no_update
 
     _, next_state = resolve_client_session(next_payload, language="es")
     active = next_state.get_scenario()
@@ -1984,7 +2011,7 @@ def test_graph_click_selection_updates_store_table_and_selected_marker() -> None
     assert active.config_bundle.config["include_hw_in_price"] == scenario.config_bundle.config["include_hw_in_price"]
     assert float(active.config_bundle.config["price_others_total"]) == pytest.approx(float(scenario.config_bundle.config["price_others_total"]))
 
-    outputs = workbench_page.populate_results(next_payload, "es", 5)
+    outputs = workbench_page.populate_results(next_payload, "es", 5, current_store)
     table_rows = outputs[11]
     selected_rows = outputs[13]
     npv_figure = outputs[4]

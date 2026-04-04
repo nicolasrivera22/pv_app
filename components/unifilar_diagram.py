@@ -23,6 +23,7 @@ from services.schematic import (
     build_schematic_legend,
     default_schematic_inspector,
 )
+from .collapsible_section import collapsible_section
 
 
 CYTOSCAPE_STYLESHEET = [
@@ -165,17 +166,21 @@ def render_schematic_inspector(inspector: SchematicInspector) -> list[html.Div]:
     return children
 
 
-def unifilar_diagram_section() -> html.Div:
+def unifilar_diagram_section() -> html.Details:
     default_legend = render_schematic_legend(build_schematic_legend("es"))
     default_inspector = render_schematic_inspector(default_schematic_inspector(None, "es"))
-    return html.Div(
-        className="panel",
-        children=[
+    return collapsible_section(
+        section_id="unifilar-diagram-section",
+        summary_id="unifilar-diagram-summary-trigger",
+        title_id="unifilar-diagram-title",
+        title=tr("workbench.schematic.title", "es"),
+        open=False,
+        title_level="h3",
+        variant="primary",
+        class_name="panel results-primary-section unifilar-diagram-section",
+        body_class_name="unifilar-diagram-body",
+        body=[
             dcc.Store(id="unifilar-inspector-lock", storage_type="memory"),
-            html.Div(
-                className="section-head",
-                children=[html.H3(tr("workbench.schematic.title", "es"), id="unifilar-diagram-title")],
-            ),
             html.Div(id="unifilar-diagram-summary", className="status-line schematic-summary-chip"),
             html.P(tr("workbench.schematic.empty", "es"), id="unifilar-diagram-empty", className="section-copy"),
             html.Div(
@@ -202,10 +207,19 @@ def unifilar_diagram_section() -> html.Div:
                                     ),
                                 ],
                             ),
-                            html.Div(
-                                className="subpanel schematic-detail-card",
-                                children=[
-                                    html.H4(tr("workbench.schematic.inspector.title", "es"), id="unifilar-inspector-title"),
+                            collapsible_section(
+                                section_id="unifilar-inspector-section",
+                                summary_id="unifilar-inspector-summary",
+                                title_id="unifilar-inspector-title",
+                                title=tr("workbench.schematic.inspector.title", "es"),
+                                open=False,
+                                title_level="h4",
+                                variant="secondary",
+                                class_name="subpanel schematic-detail-card unifilar-inspector-section",
+                                body_class_name="unifilar-inspector-body-wrap",
+                                summary_text=tr("workbench.schematic.inspector.summary", "es"),
+                                summary_text_id="unifilar-inspector-summary-text",
+                                body=[
                                     html.Div(id="unifilar-inspector-body", className="inspector-body", children=default_inspector),
                                 ],
                             ),

@@ -8,6 +8,7 @@ import pytest
 
 from app import create_app
 from components.unifilar_diagram import CYTOSCAPE_STYLESHEET, unifilar_diagram_section
+import services.workspace_results_callbacks as results_callbacks
 from services import (
     LoadedConfigBundle,
     ScanRunResult,
@@ -293,12 +294,17 @@ def test_incomplete_hardware_data_and_component_defaults_are_graceful() -> None:
     section_title = _find_component(section, "unifilar-diagram-title")
     legend_title = _find_component(section, "unifilar-legend-title")
     inspector_title = _find_component(section, "unifilar-inspector-title")
+    inspector_summary = _find_component(section, "unifilar-inspector-summary-text")
+    inspector_section = _find_component(section, "unifilar-inspector-section")
 
     assert model.nodes
     assert model.note.startswith("Este es un esquema unifilar")
+    assert getattr(section, "open", None) is False
     assert section_title.children == "Esquema unifilar"
     assert legend_title.children == "Leyenda"
     assert inspector_title.children == "Detalle del componente"
+    assert getattr(inspector_section, "open", None) is False
+    assert inspector_summary.children == "Abrir detalle del componente seleccionado"
 
 
 def test_unifilar_section_stacks_diagram_inspector_legend_and_note() -> None:
@@ -313,6 +319,8 @@ def test_unifilar_section_stacks_diagram_inspector_legend_and_note() -> None:
     assert stack.children[0].className == "schematic-diagram-card"
     assert _find_component(stack.children[0], "active-unifilar-diagram") is not None
     assert "schematic-detail-card" in stack.children[1].className
+    assert getattr(stack.children[1], "open", None) is False
+    assert _find_component(stack.children[1], "unifilar-inspector-summary") is not None
     assert _find_component(stack.children[1], "unifilar-inspector-body") is not None
     assert "schematic-legend-card" in stack.children[2].className
     assert stack.children[3].id == "unifilar-diagram-note"
@@ -333,10 +341,9 @@ def test_unifilar_styles_shift_labels_and_callback_uses_model_height(monkeypatch
     model = build_unifilar_model(scenario, "18.000::None", lang="es")
 
     create_app()
-    workbench = importlib.import_module("pages.workbench")
-    monkeypatch.setattr(workbench, "_session_with_scan", lambda payload, language_value: (None, None, scenario))
+    monkeypatch.setattr(results_callbacks, "_session_with_scan", lambda payload, language_value: (None, None, scenario))
 
-    outputs = workbench.populate_unifilar_diagram({}, "es")
+    outputs = results_callbacks.populate_unifilar_diagram({}, "es")
     assert outputs[7]["height"] == f"{model.diagram_height}px"
 
 

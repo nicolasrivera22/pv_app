@@ -28,6 +28,15 @@ from .workspace_partitions import partition_assumption_sections
 from .ui_mode import admin_surface_style, internal_entry_style, resolve_ui_mode_from_payload
 
 
+ASSUMPTIONS_GROUP_OPEN_DEFAULTS = {
+    "Demanda y Perfil": True,
+    "Sol y módulos": False,
+    "Semilla": False,
+    "Restricción de Proporción Pico": False,
+    "Controles de Batería y Exporte": False,
+}
+
+
 def _lang(value: str | None) -> str:
     return value if value in {"en", "es"} else "es"
 
@@ -321,6 +330,9 @@ def _build_assumptions_response(
             input_id_type="assumptions-input",
             field_card_type="assumptions-field-card",
             context_note_type="assumptions-context-note",
+            collapsible_groups=True,
+            group_open_defaults=ASSUMPTIONS_GROUP_OPEN_DEFAULTS,
+            section_id_prefix="assumptions-group",
         ),
         "validation": render_validation_panel(validation_issues, lang=lang),
         "apply_disabled": apply_disabled,

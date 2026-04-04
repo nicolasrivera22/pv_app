@@ -694,6 +694,18 @@ body {
     border: 1px solid var(--color-border-active);
 }
 
+.candidate-explorer-toolbar-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(240px, 0.95fr);
+    gap: 1rem;
+    align-items: start;
+}
+
+.candidate-horizon-control,
+.candidate-family-control {
+    min-width: 0;
+}
+
 .candidate-horizon-head {
     display: flex;
     align-items: center;
@@ -746,6 +758,22 @@ body {
     line-height: 1.55;
 }
 
+.candidate-family-control {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.candidate-family-dropdown {
+    min-width: 0;
+}
+
+.candidate-family-helper {
+    margin: 0.2rem 0 0;
+    color: var(--color-text-secondary);
+    font-size: 0.84rem;
+    line-height: 1.45;
+}
+
 .candidate-selection-helper {
     margin-top: 0.25rem;
     padding: 0.75rem 0.9rem;
@@ -794,6 +822,23 @@ body {
 .selected-candidate-banner-value {
     color: var(--color-text-primary);
     font-weight: 600;
+}
+
+.results-primary-section > .ui-collapsible-summary {
+    padding: 0.1rem 0;
+}
+
+.results-explorer-body,
+.results-analysis-body,
+.results-behavior-body,
+.unifilar-diagram-body,
+.assumption-group-body,
+.assumption-advanced-body {
+    min-width: 0;
+}
+
+.results-explorer-actions {
+    margin: 0 0 0.1rem;
 }
 
 .assumptions-advanced-entry-card {
@@ -1153,6 +1198,27 @@ body {
     color: #334155;
     font-weight: 600;
     margin-bottom: 0.75rem;
+}
+
+.assumption-group-section {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.98) 100%);
+}
+
+.assumption-group-section > .ui-collapsible-summary .ui-collapsible-summary-copy h4 {
+    color: var(--color-text-primary);
+}
+
+.assumption-advanced-details {
+    background: rgba(248, 250, 252, 0.92);
+}
+
+.assumption-advanced-details > .ui-collapsible-summary .ui-collapsible-summary-copy h5 {
+    color: var(--color-text-secondary);
+    font-weight: 600;
+}
+
+.assumption-advanced-details > .ui-collapsible-body {
+    margin-top: 0.75rem;
 }
 
 .field-help {
@@ -1838,6 +1904,10 @@ body {
 }
 
 @media (max-width: 720px) {
+    .candidate-explorer-toolbar-grid {
+        grid-template-columns: 1fr;
+    }
+
     .economics-compatibility-shell {
         padding: 0.75rem 0.8rem;
     }
@@ -2105,6 +2175,19 @@ body {
     gap: 1rem;
 }
 
+.results-behavior-body {
+    display: grid;
+    gap: 1rem;
+}
+
+.results-behavior-note {
+    margin: 0;
+}
+
+.results-behavior-panel {
+    padding: 0.9rem 1rem;
+}
+
 .schematic-summary-chip {
     display: inline-flex;
     align-items: center;
@@ -2136,6 +2219,18 @@ body {
 .schematic-detail-card,
 .schematic-legend-card {
     padding: 1rem 1.1rem;
+}
+
+.unifilar-inspector-section > .ui-collapsible-summary .ui-collapsible-summary-copy h4 {
+    color: var(--color-text-primary);
+}
+
+.unifilar-inspector-section > .ui-collapsible-summary .ui-collapsible-summary-text {
+    color: var(--color-text-secondary);
+}
+
+.unifilar-inspector-body-wrap {
+    margin-top: 0.8rem;
 }
 
 .schematic-note {
@@ -2606,6 +2701,13 @@ body {
 .assumptions-demand-body {
     display: grid;
     gap: 1rem;
+}
+
+@media (max-width: 640px) {
+    .results-explorer-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
 }
 
 .demand-profile-module {

@@ -16,6 +16,11 @@ layout = workspace_frame(
         dcc.Download(id="scenario-download"),
         dcc.Store(id="workbench-latest-export-folder", storage_type="memory", data=""),
         dcc.Store(id="candidate-horizon-context", storage_type="memory", data={}),
+        dcc.Store(
+            id="results-explorer-state",
+            storage_type="memory",
+            data={"scenario_id": None, "scan_fingerprint": None, "subset_mode": "optimal", "subset_key": None, "subset_label": ""},
+        ),
     ],
     children=[
         html.Div(

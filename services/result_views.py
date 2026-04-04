@@ -58,6 +58,10 @@ CLICK_ROLE_NPV_CURVE = "npv_curve"
 CLICK_ROLE_PAYBACK_CURVE = "payback_curve"
 CLICK_ROLE_SELECTED_OVERLAY = "selected_overlay"
 CLICK_ROLE_BEST_OVERLAY = "best_overlay"
+EXPLORER_SUBSET_MODE_OPTIMAL = "optimal"
+EXPLORER_SUBSET_MODE_BATTERY = "battery"
+EXPLORER_SUBSET_KEY_OPTIMAL = "optimal"
+EXPLORER_SUBSET_KEY_NO_BATTERY = "battery:none"
 CLICK_POINT_ROLE_PRIORITY = {
     CLICK_ROLE_NPV_CURVE: 0,
     CLICK_ROLE_PAYBACK_CURVE: 1,
@@ -370,6 +374,274 @@ def build_candidate_table(
         ]
     )
     return _finalize_candidate_table(frame)
+
+
+def _safe_battery_kwh(detail: dict[str, Any]) -> float | None:
+    battery = detail.get("battery") if isinstance(detail.get("battery"), dict) else {}
+    normalized = _normalize_optional_float((battery or {}).get("nom_kWh"))
+    if normalized is None or normalized <= 0:
+        return None
+    return float(normalized)
+
+
+def _safe_battery_name(detail: dict[str, Any]) -> str:
+    battery = detail.get("battery") if isinstance(detail.get("battery"), dict) else {}
+    return str(detail.get("battery_name") or (battery or {}).get("name") or "").strip()
+
+
+def battery_family_key_from_detail(detail: dict[str, Any]) -> str:
+    battery_name = _safe_battery_name(detail)
+    battery_kwh = _safe_battery_kwh(detail)
+    lowered_name = battery_name.casefold()
+    if battery_kwh is None and lowered_name in {"", "none", "bat-0"}:
+        return EXPLORER_SUBSET_KEY_NO_BATTERY
+    if battery_kwh is not None:
+        return f"battery:kwh:{battery_kwh:.3f}"
+    fallback_name = lowered_name or "unknown"
+    return f"battery:name:{fallback_name}"
+
+
+def battery_family_label_from_detail(detail: dict[str, Any], *, lang: str = "es") -> str:
+    battery_name = _safe_battery_name(detail)
+    battery_kwh = _safe_battery_kwh(detail)
+    lowered_name = battery_name.casefold()
+    if battery_kwh is None and lowered_name in {"", "none", "bat-0"}:
+        return tr("common.no_battery", lang)
+    if battery_kwh is not None:
+        suffix = "batería" if lang == "es" else "battery"
+        return f"{battery_kwh:.1f} kWh {suffix}"
+    return battery_name or tr("common.no_battery", lang)
+
+
+def enrich_results_candidate_table(
+    candidate_table: pd.DataFrame,
+    detail_map: dict[str, dict[str, Any]],
+    *,
+    lang: str = "es",
+) -> pd.DataFrame:
+    frame = candidate_table.copy()
+    if frame.empty:
+        for column in ("battery_family_key", "battery_family_label", "battery_kwh"):
+            frame[column] = pd.Series(dtype=object)
+        return frame
+    family_keys: list[str] = []
+    family_labels: list[str] = []
+    battery_kwh_values: list[float | None] = []
+    for candidate_key in frame["candidate_key"].tolist():
+        detail = detail_map.get(str(candidate_key), {})
+        family_keys.append(battery_family_key_from_detail(detail))
+        family_labels.append(battery_family_label_from_detail(detail, lang=lang))
+        battery_kwh_values.append(_safe_battery_kwh(detail))
+    frame["battery_family_key"] = family_keys
+    frame["battery_family_label"] = family_labels
+    frame["battery_kwh"] = battery_kwh_values
+    return frame
+
+
+def subset_mode_for_key(subset_key: str | None) -> str:
+    return EXPLORER_SUBSET_MODE_OPTIMAL if subset_key == EXPLORER_SUBSET_KEY_OPTIMAL else EXPLORER_SUBSET_MODE_BATTERY
+
+
+def candidate_key_in_subset(candidate_table: pd.DataFrame, candidate_key: str | None, subset_key: str | None) -> bool:
+    if candidate_table.empty or candidate_key in (None, "") or subset_key in (None, ""):
+        return False
+    if subset_key == EXPLORER_SUBSET_KEY_OPTIMAL:
+        if "best_battery_for_kwp" not in candidate_table.columns:
+            return False
+        subset = candidate_table[candidate_table["best_battery_for_kwp"] == True]  # noqa: E712
+    else:
+        if "battery_family_key" not in candidate_table.columns:
+            return False
+        subset = candidate_table[candidate_table["battery_family_key"] == subset_key]
+    return bool(not subset.empty and candidate_key in subset["candidate_key"].astype(str).tolist())
+
+
+def filter_results_subset(candidate_table: pd.DataFrame, subset_key: str | None) -> pd.DataFrame:
+    if candidate_table.empty or subset_key in (None, ""):
+        return candidate_table.iloc[0:0].copy()
+    if subset_key == EXPLORER_SUBSET_KEY_OPTIMAL:
+        if "best_battery_for_kwp" not in candidate_table.columns:
+            return candidate_table.iloc[0:0].copy()
+        return candidate_table[candidate_table["best_battery_for_kwp"] == True].copy()  # noqa: E712
+    if "battery_family_key" not in candidate_table.columns:
+        return candidate_table.iloc[0:0].copy()
+    return candidate_table[candidate_table["battery_family_key"] == subset_key].copy()
+
+
+def subset_label_for_key(candidate_table: pd.DataFrame, subset_key: str | None, *, lang: str = "es") -> str:
+    if subset_key == EXPLORER_SUBSET_KEY_OPTIMAL:
+        return tr("workbench.explorer.family.optimal", lang)
+    subset = filter_results_subset(candidate_table, subset_key)
+    if subset.empty:
+        return ""
+    return str(subset.iloc[0].get("battery_family_label") or "")
+
+
+def build_results_explorer_options(candidate_table: pd.DataFrame, *, lang: str = "es") -> list[dict[str, str]]:
+    if candidate_table.empty:
+        return []
+    options = [{"label": tr("workbench.explorer.family.optimal", lang), "value": EXPLORER_SUBSET_KEY_OPTIMAL}]
+    family_frame = (
+        candidate_table[["battery_family_key", "battery_family_label", "battery_kwh"]]
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
+    if family_frame.empty:
+        return options
+    family_frame["sort_bucket"] = family_frame["battery_family_key"].map(
+        lambda value: 0 if value == EXPLORER_SUBSET_KEY_NO_BATTERY else 1
+    )
+    family_frame["sort_kwh"] = family_frame["battery_kwh"].map(lambda value: float(value) if value is not None and pd.notna(value) else float("inf"))
+    family_frame = family_frame.sort_values(
+        ["sort_bucket", "sort_kwh", "battery_family_label", "battery_family_key"],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    options.extend(
+        {
+            "label": str(row["battery_family_label"]),
+            "value": str(row["battery_family_key"]),
+        }
+        for row in family_frame.to_dict("records")
+    )
+    return options
+
+
+def _first_available_subset_key(candidate_table: pd.DataFrame, *, lang: str = "es") -> str | None:
+    options = build_results_explorer_options(candidate_table, lang=lang)
+    if not options:
+        return None
+    for option in options:
+        if option["value"] != EXPLORER_SUBSET_KEY_OPTIMAL:
+            return str(option["value"])
+    return str(options[0]["value"])
+
+
+def _best_candidate_key_from_subset(
+    subset: pd.DataFrame,
+    *,
+    display_metric_key: str = "NPV_COP",
+) -> str | None:
+    if subset.empty:
+        return None
+    value_ascending = _display_metric_prefers_lower_value(display_metric_key)
+    ordered = subset.sort_values(
+        ["NPV_COP", "scan_order", "candidate_key"],
+        ascending=[value_ascending, True, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    return str(ordered.iloc[0]["candidate_key"])
+
+
+def resolve_nearest_candidate_key_in_subset(
+    candidate_table: pd.DataFrame,
+    reference_candidate_key: str | None,
+    subset_key: str | None,
+    *,
+    display_metric_key: str = "NPV_COP",
+) -> str | None:
+    subset = filter_results_subset(candidate_table, subset_key)
+    if subset.empty:
+        return None
+    if reference_candidate_key not in candidate_table["candidate_key"].astype(str).tolist():
+        return _best_candidate_key_from_subset(subset, display_metric_key=display_metric_key)
+    reference_row = candidate_table[candidate_table["candidate_key"] == reference_candidate_key].head(1)
+    if reference_row.empty:
+        return _best_candidate_key_from_subset(subset, display_metric_key=display_metric_key)
+    reference_kwp = float(reference_row.iloc[0]["kWp"])
+    nearest = (
+        subset.assign(
+            kwp_delta=subset["kWp"].map(lambda value: abs(float(value) - reference_kwp)),
+            candidate_key_sort=subset["candidate_key"].astype(str),
+        )
+        .sort_values(["kwp_delta", "scan_order", "candidate_key_sort"], kind="mergesort")
+        .reset_index(drop=True)
+    )
+    return str(nearest.iloc[0]["candidate_key"])
+
+
+def resolve_results_explorer_state(
+    candidate_table: pd.DataFrame,
+    *,
+    scenario_id: str | None,
+    scan_fingerprint: str | None,
+    selected_candidate_key: str | None,
+    current_state: dict[str, Any] | None = None,
+    lang: str = "es",
+) -> dict[str, Any]:
+    if candidate_table.empty:
+        return {
+            "scenario_id": scenario_id,
+            "scan_fingerprint": scan_fingerprint,
+            "subset_mode": EXPLORER_SUBSET_MODE_OPTIMAL,
+            "subset_key": None,
+            "subset_label": "",
+        }
+    current = current_state or {}
+    current_subset_key = str(current.get("subset_key") or "").strip() or None
+    same_scan = (
+        str(current.get("scenario_id") or "") == str(scenario_id or "")
+        and str(current.get("scan_fingerprint") or "") == str(scan_fingerprint or "")
+    )
+    explorer_options = build_results_explorer_options(candidate_table, lang=lang)
+    if same_scan and selected_candidate_key and candidate_key_in_subset(candidate_table, selected_candidate_key, current_subset_key):
+        preserved_key = current_subset_key
+    else:
+        preserved_key = None
+    if preserved_key is None and selected_candidate_key and selected_candidate_key in candidate_table["candidate_key"].astype(str).tolist():
+        selected_row = candidate_table[candidate_table["candidate_key"] == selected_candidate_key].head(1)
+        resolved_key = str(selected_row.iloc[0]["battery_family_key"])
+    elif EXPLORER_SUBSET_KEY_OPTIMAL in [option["value"] for option in explorer_options]:
+        optimal_subset = filter_results_subset(candidate_table, EXPLORER_SUBSET_KEY_OPTIMAL)
+        resolved_key = EXPLORER_SUBSET_KEY_OPTIMAL if not optimal_subset.empty else _first_available_subset_key(candidate_table, lang=lang)
+    else:
+        resolved_key = _first_available_subset_key(candidate_table, lang=lang)
+    final_key = preserved_key or resolved_key
+    return {
+        "scenario_id": scenario_id,
+        "scan_fingerprint": scan_fingerprint,
+        "subset_mode": subset_mode_for_key(final_key),
+        "subset_key": final_key,
+        "subset_label": subset_label_for_key(candidate_table, final_key, lang=lang),
+    }
+
+
+def canonical_results_explorer_view(
+    candidate_table: pd.DataFrame,
+    *,
+    selected_candidate_key: str | None,
+    subset_key: str | None,
+    display_metric_key: str = "NPV_COP",
+) -> dict[str, Any]:
+    if candidate_table.empty:
+        return {
+            "subset_key": None,
+            "subset_rows": candidate_table.iloc[0:0].copy(),
+            "highlight_keys": tuple(),
+            "selected_candidate_key": None,
+        }
+    active_subset_key = subset_key if subset_key not in (None, "") else EXPLORER_SUBSET_KEY_OPTIMAL
+    subset = filter_results_subset(candidate_table, active_subset_key)
+    if subset.empty:
+        fallback_key = EXPLORER_SUBSET_KEY_OPTIMAL if not filter_results_subset(candidate_table, EXPLORER_SUBSET_KEY_OPTIMAL).empty else _first_available_subset_key(candidate_table)
+        active_subset_key = fallback_key
+        subset = filter_results_subset(candidate_table, active_subset_key)
+    if candidate_key_in_subset(candidate_table, selected_candidate_key, active_subset_key):
+        final_selected_key = selected_candidate_key
+    elif selected_candidate_key and selected_candidate_key in candidate_table["candidate_key"].astype(str).tolist():
+        final_selected_key = resolve_nearest_candidate_key_in_subset(
+            candidate_table,
+            selected_candidate_key,
+            active_subset_key,
+            display_metric_key=display_metric_key,
+        )
+    else:
+        final_selected_key = _best_candidate_key_from_subset(subset, display_metric_key=display_metric_key)
+    return {
+        "subset_key": active_subset_key,
+        "subset_rows": subset.copy(),
+        "highlight_keys": tuple(str(candidate_key) for candidate_key in subset["candidate_key"].astype(str).tolist()),
+        "selected_candidate_key": final_selected_key,
+    }
 
 
 def summarize_candidates_for_horizon(
@@ -775,7 +1047,6 @@ def _add_viable_npv_traces(
     figure_title: str,
     display_metric_key: str,
     payback_label: str,
-    best_row: pd.DataFrame,
     selected_row: pd.DataFrame,
     row: int | None = None,
 ) -> None:
@@ -795,21 +1066,6 @@ def _add_viable_npv_traces(
         ),
         **add_trace_kwargs,
     )
-    if not best_row.empty:
-        figure.add_trace(
-            go.Scatter(
-                x=best_row["kWp"],
-                y=best_row["NPV_COP"],
-                mode="markers",
-                marker={"size": 14, "color": "#16a34a", "line": {"width": 2, "color": "#166534"}},
-                name=tr("common.chart.best_design", lang),
-                ids=best_row["candidate_key"],
-                customdata=_chart_point_customdata(best_row, point_role=CLICK_ROLE_BEST_OVERLAY),
-                hovertext=_curve_hover_lines(best_row, lang=lang, display_metric_key=display_metric_key, payback_label=payback_label),
-                hovertemplate=tr("common.chart.best_design", lang) + "<br>%{hovertext}<extra></extra>",
-            ),
-            **add_trace_kwargs,
-        )
     if selected_row.empty:
         return
     figure.add_trace(
@@ -881,11 +1137,6 @@ def build_npv_figure(
         curve["panel_count"] = curve["kWp"].map(lambda value: int(round(float(value) / (float(module_power_w) / 1000.0))))
     else:
         curve["panel_count"] = None
-    best_row = _best_candidate_overlay_row(
-        display_table,
-        display_metric_key=resolved_display_metric,
-        exclude_candidate_key=selected_key,
-    )
     selected_row = _candidate_overlay_row(display_table, selected_key)
     figure_title = title or _financial_chart_title(resolved_display_metric, lang=lang)
     full_title = _npv_figure_title(figure_title, horizon_years=horizon_years, lang=lang)
@@ -910,7 +1161,6 @@ def build_npv_figure(
                 figure_title=figure_title,
                 display_metric_key=resolved_display_metric,
                 payback_label=resolved_payback_label,
-                best_row=best_row,
                 selected_row=selected_row,
             )
             figure.add_trace(
@@ -965,7 +1215,6 @@ def build_npv_figure(
             figure_title=figure_title,
             display_metric_key=resolved_display_metric,
             payback_label=resolved_payback_label,
-            best_row=best_row,
             selected_row=selected_row,
             row=1,
         )

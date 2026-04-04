@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pandas.testing as pdt
@@ -1663,8 +1664,19 @@ def test_results_selection_syncs_admin_selector_and_preview(monkeypatch, tmp_pat
     )
     table_rows = results_callbacks.populate_results(payload, "es", 5)[11]
     selected_index = next(index for index, row in enumerate(table_rows) if row["candidate_key"] == selected_candidate)
+    current_store = results_callbacks.sync_results_explorer_state(payload, "es", {})
+    monkeypatch.setattr(results_callbacks, "ctx", SimpleNamespace(triggered_id="active-candidate-table"))
 
-    next_payload = results_callbacks.persist_selected_candidate([selected_index], None, table_rows, payload)
+    _next_store, next_payload = results_callbacks.persist_selected_candidate(
+        current_store["subset_key"],
+        [selected_index],
+        None,
+        5,
+        current_store,
+        table_rows,
+        payload,
+        "es",
+    )
     _, updated_state = resolve_client_session(next_payload, language="es")
     updated_active = updated_state.get_scenario()
 

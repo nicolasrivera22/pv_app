@@ -7,6 +7,7 @@ from app import create_app
 from pages import admin as admin_page
 from pages import assumptions as assumptions_page
 from pages import results as results_page
+from pages import workbench as workbench_page
 from services import (
     ScenarioSessionState,
     ValidationIssue,
@@ -214,6 +215,36 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(admin_layout, "workspace-admin-entry") is None
 
 
+def test_results_page_mounts_local_explorer_store_without_adding_it_to_workbench() -> None:
+    results_layout = results_page.layout() if callable(results_page.layout) else results_page.layout
+    workbench_layout = workbench_page.layout() if callable(workbench_page.layout) else workbench_page.layout
+
+    assert _find_component(results_layout, "results-explorer-state") is not None
+    assert _find_component(workbench_layout, "results-explorer-state") is None
+
+
+def test_assumptions_page_uses_collapsible_groups_for_general_groups_with_closed_defaults() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = commit_client_session(bootstrap_client_session("es"), state).to_payload()
+
+    response = _assumptions_response(populate_assumptions_page(payload, [], "es"))
+    sections = response["sections"]
+
+    solar_section = next(section for section in sections if _find_component(section, "assumptions-group-sol-y-módulos-title") is not None)
+    scan_section = next(section for section in sections if _find_component(section, "assumptions-group-semilla-title") is not None)
+    peak_section = next(section for section in sections if _find_component(section, "assumptions-group-restricción-de-proporción-pico-title") is not None)
+    battery_section = next(
+        section for section in sections if _find_component(section, "assumptions-group-controles-de-batería-y-exporte-title") is not None
+    )
+
+    assert getattr(solar_section, "open", None) is False
+    assert getattr(scan_section, "open", None) is False
+    assert getattr(peak_section, "open", None) is False
+    assert getattr(battery_section, "open", None) is False
+    assert _find_component(solar_section, {"type": "assumptions-input", "field": "panel_name"}) is not None
+    assert _find_component(scan_section, {"type": "assumptions-input", "field": "kWp_seed_mode"}) is not None
+
+
 def test_assumptions_layout_places_advanced_entry_near_top_before_real_host() -> None:
     assumptions_layout = assumptions_page.layout() if callable(assumptions_page.layout) else assumptions_page.layout
     main_stack = _find_matching_component(
@@ -223,7 +254,7 @@ def test_assumptions_layout_places_advanced_entry_near_top_before_real_host() ->
 
     assert main_stack is not None
     child_ids = [getattr(child, "id", None) for child in main_stack.children]
-    assert child_ids.index("assumptions-advanced-tools-entry-shell") == 3
+    assert child_ids.index("assumptions-advanced-tools-entry-shell") == 2
     assert child_ids.index("assumptions-advanced-tools-entry-shell") < child_ids.index("advanced-tools")
 
 
@@ -426,4 +457,4 @@ def test_apply_assumptions_persists_demand_mode_and_keeps_run_flow(monkeypatch) 
     assert active.config_bundle.config["use_excel_profile"] == "perfil horario relativo"
     assert "aplic" in status.lower()
     assert "ejecut" in status.lower() or "rerun" in status.lower()
-    assert dialog_state == {"open": False}
+    assert dialog_state == {"open": False, "suggested_project_name": ""}
