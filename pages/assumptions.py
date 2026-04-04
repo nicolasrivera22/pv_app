@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dash import dcc, html, register_page
 
-from components import demand_profile_module, run_scan_choice_dialog
+from components import demand_profile_module
 from components.workspace_frame import workspace_frame
 import services.workspace_admin_callbacks as _workspace_admin_callbacks  # noqa: F401
 import services.workspace_assumptions_callbacks as _workspace_assumptions_callbacks  # noqa: F401
@@ -43,7 +43,6 @@ layout = workspace_frame(
     page_class_name="page-advanced-host",
     grid_class_name="workbench-grid-advanced-host",
     stores=[
-        dcc.Store(id="run-scan-choice-state", storage_type="memory", data={"open": False, "suggested_project_name": ""}),
         dcc.Store(id="assumptions-draft-meta", storage_type="memory", data={}),
         dcc.Store(id="active-profile-table-state", storage_type="memory", data={"table_id": None}),
         dcc.Store(
@@ -64,7 +63,6 @@ layout = workspace_frame(
         dcc.Store(id="admin-draft-meta", storage_type="memory", data={}),
     ],
     children=[
-        run_scan_choice_dialog(),
         html.Div(
             className="panel",
             children=[

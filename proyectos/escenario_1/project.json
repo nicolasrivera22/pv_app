@@ -1,0 +1,385 @@
+{
+  "format_version": 2,
+  "name": "Escenario 1",
+  "slug": "escenario_1",
+  "active_scenario_id": "scenario-0e63aa62",
+  "comparison_scenario_ids": [],
+  "design_comparison_candidate_keys": {},
+  "scenarios": [
+    {
+      "scenario_id": "scenario-0e63aa62",
+      "name": "Escenario 1",
+      "source_name": "PV_inputs.xlsx",
+      "selected_candidate_key": "15.000::None",
+      "dirty": false,
+      "last_run_at": "2026-04-04T13:49:22",
+      "scan_fingerprint": "3536d9b30b2fffca51613ad7e810a6978bfb2060d7f4907024369aad44017d2f",
+      "runtime_price_bridge": null
+    }
+  ],
+  "financial_presets": [
+    {
+      "preset_id": "preset-65cc200d",
+      "name": "Industrial agresivo copia",
+      "economics_cost_items_rows": [
+        {
+          "stage": "technical",
+          "name": "Panel hardware",
+          "basis": "per_panel",
+          "amount_COP": 0.0,
+          "source_mode": "selected_hardware",
+          "hardware_binding": "panel",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "technical",
+          "name": "Inverter hardware",
+          "basis": "per_inverter",
+          "amount_COP": 0.0,
+          "source_mode": "selected_hardware",
+          "hardware_binding": "inverter",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "technical",
+          "name": "Battery hardware",
+          "basis": "per_battery_kwh",
+          "amount_COP": 0.0,
+          "source_mode": "selected_hardware",
+          "hardware_binding": "battery",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "BOS eléctrico",
+          "basis": "per_kwp",
+          "amount_COP": 320000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Estructura",
+          "basis": "per_kwp",
+          "amount_COP": 160000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Mano de obra",
+          "basis": "per_kwp",
+          "amount_COP": 180000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Ingeniería",
+          "basis": "fixed_project",
+          "amount_COP": 3200000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Logística",
+          "basis": "fixed_project",
+          "amount_COP": 1600000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        }
+      ],
+      "economics_price_items_rows": [
+        {
+          "layer": "tax",
+          "name": "IVA",
+          "method": "tax_pct",
+          "value": 0.19,
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "layer": "commercial",
+          "name": "Contingencia",
+          "method": "markup_pct",
+          "value": 0.03,
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "layer": "commercial",
+          "name": "Margen comercial",
+          "method": "markup_pct",
+          "value": 0.07,
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "layer": "sale",
+          "name": "Ajuste final",
+          "method": "fixed_project",
+          "value": 0.0,
+          "enabled": false,
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "preset_id": "preset-9b95cb5c",
+      "name": "Industrial agresivo copia copia",
+      "economics_cost_items_rows": [
+        {
+          "stage": "technical",
+          "name": "Panel hardware",
+          "basis": "per_panel",
+          "amount_COP": 0.0,
+          "source_mode": "selected_hardware",
+          "hardware_binding": "panel",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "technical",
+          "name": "Inverter hardware",
+          "basis": "per_inverter",
+          "amount_COP": 0.0,
+          "source_mode": "selected_hardware",
+          "hardware_binding": "inverter",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "technical",
+          "name": "Battery hardware",
+          "basis": "per_battery_kwh",
+          "amount_COP": 0.0,
+          "source_mode": "selected_hardware",
+          "hardware_binding": "battery",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "BOS eléctrico",
+          "basis": "per_kwp",
+          "amount_COP": 320000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Estructura",
+          "basis": "per_kwp",
+          "amount_COP": 160000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Mano de obra",
+          "basis": "per_kwp",
+          "amount_COP": 180000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Ingeniería",
+          "basis": "fixed_project",
+          "amount_COP": 3200000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Logística",
+          "basis": "fixed_project",
+          "amount_COP": 1600000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        }
+      ],
+      "economics_price_items_rows": [
+        {
+          "layer": "tax",
+          "name": "IVA",
+          "method": "tax_pct",
+          "value": 0.19,
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "layer": "commercial",
+          "name": "Contingencia",
+          "method": "markup_pct",
+          "value": 0.03,
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "layer": "commercial",
+          "name": "Margen comercial",
+          "method": "markup_pct",
+          "value": 0.07,
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "layer": "sale",
+          "name": "Ajuste final",
+          "method": "fixed_project",
+          "value": 0.0,
+          "enabled": false,
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "preset_id": "preset-3edb88df",
+      "name": "Industrial agresivo copia copia copia",
+      "economics_cost_items_rows": [
+        {
+          "stage": "technical",
+          "name": "Panel hardware",
+          "basis": "per_panel",
+          "amount_COP": 0.0,
+          "source_mode": "selected_hardware",
+          "hardware_binding": "panel",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "technical",
+          "name": "Inverter hardware",
+          "basis": "per_inverter",
+          "amount_COP": 0.0,
+          "source_mode": "selected_hardware",
+          "hardware_binding": "inverter",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "technical",
+          "name": "Battery hardware",
+          "basis": "per_battery_kwh",
+          "amount_COP": 0.0,
+          "source_mode": "selected_hardware",
+          "hardware_binding": "battery",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "BOS eléctrico",
+          "basis": "per_kwp",
+          "amount_COP": 320000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Estructura",
+          "basis": "per_kwp",
+          "amount_COP": 160000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Mano de obra",
+          "basis": "per_kwp",
+          "amount_COP": 180000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Ingeniería",
+          "basis": "fixed_project",
+          "amount_COP": 3200000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "stage": "installed",
+          "name": "Logística",
+          "basis": "fixed_project",
+          "amount_COP": 1600000.0,
+          "source_mode": "manual",
+          "hardware_binding": "none",
+          "enabled": true,
+          "notes": ""
+        }
+      ],
+      "economics_price_items_rows": [
+        {
+          "layer": "tax",
+          "name": "IVA",
+          "method": "tax_pct",
+          "value": 0.19,
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "layer": "commercial",
+          "name": "Contingencia",
+          "method": "markup_pct",
+          "value": 0.03,
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "layer": "commercial",
+          "name": "Margen comercial",
+          "method": "markup_pct",
+          "value": 0.07,
+          "enabled": true,
+          "notes": ""
+        },
+        {
+          "layer": "sale",
+          "name": "Ajuste final",
+          "method": "fixed_project",
+          "value": 0.0,
+          "enabled": false,
+          "notes": ""
+        }
+      ]
+    }
+  ],
+  "ui_prefs": {
+    "language": "es"
+  }
+}

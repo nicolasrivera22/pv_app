@@ -7,6 +7,7 @@ from dash.exceptions import PreventUpdate
 from flask import jsonify, request, send_file
 
 from components.admin_view import build_admin_mode_dialog
+from components.scenario_controls import run_scan_choice_dialog
 from services.admin_access import is_admin_session_unlocked
 from services.desktop_lifecycle import desktop_lifecycle
 from services.i18n import tr
@@ -157,11 +158,22 @@ def create_app() -> Dash:
                     storage_type="memory",
                     data=_admin_mode_dialog_state(return_mode=client_state.ui_mode),
                 ),
+                dcc.Store(
+                    id="run-scan-choice-state",
+                    storage_type="memory",
+                    data={"open": False, "suggested_project_name": ""},
+                ),
+                dcc.Store(
+                    id="project-name-draft-store",
+                    storage_type="memory",
+                    data={"value": ""},
+                ),
                 html.Div(
                     id="admin-mode-dialog",
                     className="dialog-backdrop",
                     style={"display": "none"},
                 ),
+                run_scan_choice_dialog(),
                 html.Header(
                     className="app-header",
                     children=[

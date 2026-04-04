@@ -1169,10 +1169,10 @@ def test_profile_visibility_and_bundle_rebuild_round_trip() -> None:
 def test_run_scan_choice_dialog_uses_suggested_name_without_dead_primary_cta() -> None:
     style, title, copy, save_label, disabled, unsaved_label, cancel_label = workbench_page.sync_run_scan_choice_dialog(
         {"open": True, "suggested_project_name": "Project 1"},
-        "",
+        {"value": ""},
         "en",
     )
-    named = workbench_page.sync_run_scan_choice_dialog({"open": True, "suggested_project_name": "Demo FV"}, "", "es")
+    named = workbench_page.sync_run_scan_choice_dialog({"open": True, "suggested_project_name": "Demo FV"}, {"value": ""}, "es")
 
     assert style["display"] == "flex"
     assert title == "Save before running?"
@@ -1189,7 +1189,7 @@ def test_run_scan_choice_dialog_uses_suggested_name_without_dead_primary_cta() -
 def test_run_scan_choice_dialog_prefers_user_edited_name_over_suggestion() -> None:
     dialog = {"open": True, "suggested_project_name": "Proyecto 1"}
 
-    rendered = workbench_page.sync_run_scan_choice_dialog(dialog, "Proyecto Cliente", "es")
+    rendered = workbench_page.sync_run_scan_choice_dialog(dialog, {"value": "Proyecto Cliente"}, "es")
 
     assert rendered[4] is False
     assert "Guárdala como 'Proyecto Cliente'" in rendered[2]
@@ -1208,6 +1208,19 @@ def test_run_scan_choice_dialog_autofills_blank_sidebar_name_only_when_needed() 
             None,
             "Proyecto Cliente",
         )
+
+
+def test_project_name_draft_store_uses_sidebar_value_when_present_and_session_value_when_absent() -> None:
+    payload = _session_payload(
+        replace(
+            ScenarioSessionState.empty(),
+            project_name="Proyecto guardado",
+            project_slug="proyecto_guardado",
+        )
+    )
+
+    assert shared_callbacks.sync_project_name_draft_store(payload, "Cliente Demo") == {"value": "Cliente Demo"}
+    assert shared_callbacks.sync_project_name_draft_store(payload, None) == {"value": "Proyecto guardado"}
 
 
 def test_run_scan_project_name_suggestion_cleans_labels_and_avoids_conflicts(monkeypatch) -> None:

@@ -197,6 +197,8 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(assumptions_layout, "assumptions-demand-profile-mode-selector") is not None
     assert _find_component(assumptions_layout, "inverter-table-editor") is None
     assert _find_component(assumptions_layout, "economics-editor-title") is None
+    assert _find_component(assumptions_layout, "run-scan-choice-state") is None
+    assert _find_component(assumptions_layout, "run-scan-choice-dialog") is None
 
     assert _find_component(admin_layout, "admin-redirect-fallback") is not None
     assert _find_component(admin_layout, "admin-redirect-title") is not None
@@ -279,7 +281,22 @@ def test_top_nav_exposes_results_and_assumptions_but_not_admin() -> None:
     assert _find_component(layout, "admin-mode-dialog-state") is not None
     assert _find_component(layout, "admin-access-meta") is not None
     assert _find_component(layout, "admin-mode-dialog") is not None
+    assert _find_component(layout, "project-name-draft-store") is not None
     assert _find_component(layout, "workspace-admin-link") is None
+
+
+def test_app_layout_keeps_run_scan_choice_shell_global_for_cross_page_callbacks() -> None:
+    app = create_app()
+    layout = app.layout() if callable(app.layout) else app.layout
+
+    assert _find_component(layout, "run-scan-choice-state") is not None
+    assert _find_component(layout, "project-name-draft-store") is not None
+    assert _find_component(layout, "run-scan-choice-dialog") is not None
+    assert _find_component(layout, "run-scan-choice-title") is not None
+    assert _find_component(layout, "run-scan-choice-copy") is not None
+    assert _find_component(layout, "run-scan-save-and-run-btn") is not None
+    assert _find_component(layout, "run-scan-run-unsaved-btn") is not None
+    assert _find_component(layout, "run-scan-cancel-btn") is not None
 
 
 def test_admin_page_gracefully_handles_direct_access_without_active_scenario(monkeypatch, tmp_path) -> None:

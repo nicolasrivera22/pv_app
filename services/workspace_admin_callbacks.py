@@ -261,7 +261,11 @@ def _project_is_bound(state) -> bool:
 
 
 def _resolved_project_name(project_name_value, state) -> str:
-    return (project_name_value or state.project_name or state.project_slug or "").strip()
+    if isinstance(project_name_value, dict):
+        value = project_name_value.get("value")
+    else:
+        value = project_name_value
+    return (value or state.project_name or state.project_slug or "").strip()
 
 
 def _join_status_parts(*parts: str) -> str:
@@ -2072,7 +2076,7 @@ def apply_financial_preset(
     Output("workbench-status", "children", allow_duplicate=True),
     Input("save-economics-preset-btn", "n_clicks", allow_optional=True),
     State("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-draft-store", "data"),
     State("economics-preset-name-input", "value"),
     State("economics-cost-items-editor", "data", allow_optional=True),
     State("economics-tax-items-editor", "data", allow_optional=True),
@@ -2155,7 +2159,7 @@ def save_current_financial_preset(
     Output("workbench-status", "children", allow_duplicate=True),
     Input("duplicate-economics-preset-btn", "n_clicks", allow_optional=True),
     State("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-draft-store", "data"),
     State("admin-financial-preset-selection", "data"),
     State("economics-preset-name-input", "value"),
     State("language-selector", "value"),
@@ -2238,7 +2242,7 @@ def duplicate_financial_preset_action(
     Output("workbench-status", "children", allow_duplicate=True),
     Input("rename-economics-preset-btn", "n_clicks", allow_optional=True),
     State("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-draft-store", "data"),
     State("admin-financial-preset-selection", "data"),
     State("economics-preset-name-input", "value"),
     State("language-selector", "value"),
@@ -2338,7 +2342,7 @@ def request_financial_preset_delete(_delete_clicks, session_payload, preset_sele
     Output("workbench-status", "children", allow_duplicate=True),
     Input("economics-preset-delete-confirm", "submit_n_clicks"),
     State("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-draft-store", "data"),
     State("admin-financial-preset-selection", "data"),
     State("language-selector", "value"),
     prevent_initial_call=True,
@@ -2872,7 +2876,7 @@ def render_runtime_price_bridge_ui(session_payload, language_value):
     Output("workbench-status", "children", allow_duplicate=True),
     Input("economics-bridge-btn", "n_clicks", allow_optional=True),
     State("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-draft-store", "data"),
     State({"type": "admin-assumption-input", "field": ALL}, "id"),
     State({"type": "admin-assumption-input", "field": ALL}, "value"),
     State("inverter-table-editor", "data", allow_optional=True),
@@ -3310,7 +3314,7 @@ def add_economics_adjustment_row(n_clicks, table_rows, table_columns, language_v
     Output("workbench-status", "children", allow_duplicate=True),
     Input("apply-admin-btn", "n_clicks", allow_optional=True),
     State("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-draft-store", "data"),
     State({"type": "admin-assumption-input", "field": ALL}, "id"),
     State({"type": "admin-assumption-input", "field": ALL}, "value"),
     State("inverter-table-editor", "data", allow_optional=True),

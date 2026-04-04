@@ -47,7 +47,11 @@ def _clean_project_name_seed(value) -> str:
 
 
 def _resolved_project_name(project_name_value, state, *, suggested_name: str | None = None) -> str:
-    typed_name = str(project_name_value or "").strip()
+    if isinstance(project_name_value, dict):
+        value = project_name_value.get("value")
+    else:
+        value = project_name_value
+    typed_name = str(value or "").strip()
     return typed_name or (suggested_name or state.project_name or state.project_slug or "").strip()
 
 
@@ -767,13 +771,13 @@ def sync_assumptions_demand_profile_views(
     Output("run-scan-run-unsaved-btn", "children"),
     Output("run-scan-cancel-btn", "children"),
     Input("run-scan-choice-state", "data"),
-    Input("project-name-input", "value"),
+    Input("project-name-draft-store", "data"),
     Input("language-selector", "value"),
 )
-def sync_run_scan_choice_dialog(dialog_state, project_name_value, language_value):
+def sync_run_scan_choice_dialog(dialog_state, project_name_state, language_value):
     lang = _lang(language_value)
     suggested_name = str((dialog_state or {}).get("suggested_project_name") or "").strip()
-    project_name = str(project_name_value or "").strip() or suggested_name
+    project_name = str((project_name_state or {}).get("value") or "").strip() or suggested_name
     copy = (
         tr("workbench.run_dialog.body_named", lang, name=project_name)
         if project_name
@@ -795,7 +799,7 @@ def sync_run_scan_choice_dialog(dialog_state, project_name_value, language_value
     Output("project-name-input", "value", allow_duplicate=True),
     Input("run-scan-choice-state", "data"),
     Input("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-input", "value", allow_optional=True),
     prevent_initial_call=True,
 )
 def sync_run_scan_suggested_project_name(dialog_state, _session_payload, project_name_value):
@@ -851,7 +855,7 @@ def _sync_current_assumptions_slice(
     Input("apply-assumptions-btn", "n_clicks"),
     Input("run-assumptions-scan-btn", "n_clicks"),
     State("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-draft-store", "data"),
     State({"type": "assumptions-input", "field": ALL}, "id"),
     State({"type": "assumptions-input", "field": ALL}, "value"),
     State("assumptions-demand-profile-mode-selector", "value", allow_optional=True),
@@ -871,7 +875,7 @@ def mutate_assumptions_state(
     _apply_clicks,
     _run_clicks,
     session_payload,
-    project_name_value,
+    project_name_state,
     assumption_input_ids,
     assumption_values,
     demand_profile_mode_value,
@@ -913,7 +917,7 @@ def mutate_assumptions_state(
         if trigger == "apply-assumptions-btn":
             saved = False
             if _project_is_bound(state):
-                state = save_project(state, project_name=_resolved_project_name(project_name_value, state), language=lang)
+                state = save_project(state, project_name=_resolved_project_name(project_name_state, state), language=lang)
                 saved = True
             client_state = commit_client_session(client_state, state)
             status = _join_status_parts(
@@ -927,7 +931,7 @@ def mutate_assumptions_state(
             if _project_is_bound(state):
                 saved = False
                 if _project_is_bound(state):
-                    state = save_project(state, project_name=_resolved_project_name(project_name_value, state), language=lang)
+                    state = save_project(state, project_name=_resolved_project_name(project_name_state, state), language=lang)
                     updated_active = state.get_scenario(updated_active.scenario_id) or updated_active
                     saved = True
                 if _bundle_has_errors(updated_active.config_bundle):
@@ -984,7 +988,7 @@ def mutate_assumptions_state(
     Input("run-scan-save-and-run-btn", "n_clicks"),
     Input("run-scan-run-unsaved-btn", "n_clicks"),
     State("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-draft-store", "data"),
     State("run-scan-choice-state", "data"),
     State("language-selector", "value"),
     prevent_initial_call=True,
@@ -997,7 +1001,7 @@ def resolve_run_scan_choice(
     _save_and_run_clicks,
     _run_without_saving_clicks,
     session_payload,
-    project_name_value,
+    project_name_state,
     dialog_state,
     language_value,
 ):
@@ -1024,7 +1028,7 @@ def resolve_run_scan_choice(
             return client_state.to_payload(), status, closed_dialog
 
         if trigger == "run-scan-save-and-run-btn":
-            resolved_name = _resolved_project_name(project_name_value, state, suggested_name=suggested_name)
+            resolved_name = _resolved_project_name(project_name_state, state, suggested_name=suggested_name)
             if not resolved_name:
                 return no_update, tr("workbench.run_dialog.name_required", lang), dialog_state
             state = save_project(state, project_name=resolved_name, language=lang)
