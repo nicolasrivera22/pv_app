@@ -5,12 +5,14 @@ from dash.exceptions import PreventUpdate
 import pandas as pd
 import plotly.graph_objects as go
 
+from pv_product.panel_catalog import PANEL_DERIVED_CONFIG_FIELDS, PANEL_SELECTION_CATALOG, apply_panel_selection
+
 from components import render_assumption_sections, render_validation_panel
 from .i18n import tr
-from .project_io import save_project
+from .project_io import list_projects, save_project, slugify_project_name
 from .scenario_session import run_scenario_scan
 from .session_state import commit_client_session, resolve_client_session
-from .ui_schema import assumption_context_map, build_assumption_sections
+from .ui_schema import assumption_context_map, build_assumption_sections, display_assumption_value
 from .workbench_ui import collect_config_updates, workbench_status_message
 from .workspace_actions import apply_workspace_draft_to_state, resolve_workspace_bundle_for_display, table_draft_rows
 from .workspace_demand import (
@@ -23,7 +25,16 @@ from .workspace_demand import (
 )
 from .workspace_drafts import bind_workspace_draft_project, upsert_workspace_draft
 from .workspace_partitions import partition_assumption_sections
-from .ui_mode import internal_entry_style, resolve_ui_mode_from_payload
+from .ui_mode import admin_surface_style, internal_entry_style, resolve_ui_mode_from_payload
+
+
+ASSUMPTIONS_GROUP_OPEN_DEFAULTS = {
+    "Demanda y Perfil": True,
+    "Sol y módulos": False,
+    "Semilla": False,
+    "Restricción de Proporción Pico": False,
+    "Controles de Batería y Exporte": False,
+}
 
 
 def _lang(value: str | None) -> str:
@@ -38,16 +49,52 @@ def _project_is_bound(state) -> bool:
     return bool(str(state.project_slug or "").strip())
 
 
-def _resolved_project_name(project_name_value, state) -> str:
-    return (project_name_value or state.project_name or state.project_slug or "").strip()
+def _clean_project_name_seed(value) -> str:
+    cleaned = str(value or "").strip().replace("_", " ").replace("-", " ")
+    normalized = " ".join(cleaned.split())
+    return "" if normalized.casefold() in {"", "none", "nan", "null"} else normalized
+
+
+def _resolved_project_name(project_name_value, state, *, suggested_name: str | None = None) -> str:
+    if isinstance(project_name_value, dict):
+        value = project_name_value.get("value")
+    else:
+        value = project_name_value
+    typed_name = str(value or "").strip()
+    return typed_name or (suggested_name or state.project_name or state.project_slug or "").strip()
 
 
 def _join_status_parts(*parts: str) -> str:
     return " ".join(part.strip() for part in parts if part and part.strip())
 
 
-def _run_choice_state(*, open_dialog: bool = False) -> dict[str, bool]:
-    return {"open": open_dialog}
+def _run_choice_state(*, open_dialog: bool = False, suggested_project_name: str | None = None) -> dict[str, object]:
+    return {
+        "open": open_dialog,
+        "suggested_project_name": str(suggested_project_name or "").strip(),
+    }
+
+
+def _suggest_run_project_name(state, active, *, lang: str) -> str:
+    preferred_name = _clean_project_name_seed(getattr(active, "name", ""))
+    existing_slugs = {manifest.slug for manifest in list_projects()}
+    if preferred_name:
+        if slugify_project_name(preferred_name) not in existing_slugs:
+            return preferred_name
+        suffix = 2
+        while True:
+            candidate = f"{preferred_name} {suffix}"
+            if slugify_project_name(candidate) not in existing_slugs:
+                return candidate
+            suffix += 1
+
+    base_name = tr("workbench.run_dialog.default_project_base", lang)
+    index = 1
+    while True:
+        candidate = f"{base_name} {index}"
+        if slugify_project_name(candidate) not in existing_slugs:
+            return candidate
+        index += 1
 
 
 def _bundle_has_errors(bundle) -> bool:
@@ -144,35 +191,213 @@ def _assumptions_draft_payload(
     return overrides, owned_fields, rows_payload, owned_tables
 
 
-def _empty_demand_outputs(lang: str):
-    empty = ([], [], {})
+ASSUMPTIONS_PAGE_RESPONSE_KEYS = (
+    "sections",
+    "validation",
+    "apply_disabled",
+    "scan_disabled",
+    "mode_options",
+    "mode_value",
+    "type_options",
+    "type_value",
+    "alpha_value",
+    "energy_value",
+    "alpha_disabled",
+    "energy_disabled",
+    "mode_note",
+    "weekday_rows",
+    "weekday_columns",
+    "weekday_tooltips",
+    "total_rows",
+    "total_columns",
+    "total_tooltips",
+    "total_preview_rows",
+    "total_preview_columns",
+    "total_preview_tooltips",
+    "relative_rows",
+    "relative_columns",
+    "relative_tooltips",
+    "relative_preview_rows",
+    "relative_preview_columns",
+    "relative_preview_tooltips",
+    "panel_style",
+    "general_panel_style",
+    "general_preview_panel_style",
+    "weights_panel_style",
+    "weights_preview_panel_style",
+    "energy_shell_style",
+    "alpha_shell_style",
+    "type_shell_style",
+    "relative_grid_style",
+    "secondary_grid_style",
+    "chart_panel_style",
+    "chart_title",
+    "chart_subtitle",
+    "chart_figure",
+)
+
+
+def _build_empty_assumptions_chart(lang: str, *, message: str) -> go.Figure:
+    figure = go.Figure()
+    figure.update_layout(
+        template="plotly_white",
+        margin={"l": 44, "r": 18, "t": 20, "b": 36},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+        annotations=[
+            {
+                "text": message,
+                "xref": "paper",
+                "yref": "paper",
+                "x": 0.5,
+                "y": 0.5,
+                "showarrow": False,
+                "font": {"size": 13, "color": "#475569"},
+            }
+        ],
+    )
+    return figure
+
+
+def _build_assumptions_response(
+    *,
+    lang: str,
+    sections: list[dict],
+    validation_issues,
+    apply_disabled: bool,
+    scan_disabled: bool,
+    show_all: bool,
+    empty_message: str,
+    demand_state: dict[str, object] | None = None,
+    demand_chart: dict[str, object] | None = None,
+    empty_chart_title: str = "",
+):
     hidden = {"display": "none"}
-    return (
-        demand_mode_options(lang),
-        "perfil general",
-        relative_profile_type_options(lang),
-        "mixta",
-        0.5,
-        0,
-        True,
-        True,
-        tr("workbench.profiles.mode.note.total", lang),
-        *empty,
-        *empty,
-        *empty,
-        *empty,
-        *empty,
-        hidden,
-        hidden,
-        hidden,
-        hidden,
-        hidden,
-        hidden,
-        hidden,
-        hidden,
-        "",
-        "",
-        go.Figure(),
+    mode_options = demand_mode_options(lang)
+    type_options = relative_profile_type_options(lang)
+    fallback_mode = mode_options[1]["value"] if len(mode_options) > 1 else "perfil general"
+    fallback_type = type_options[-1]["value"] if type_options else "mixta"
+    resolved_demand_state = demand_state or {
+        "profile_mode": fallback_mode,
+        "profile_type": fallback_type,
+        "alpha_mix": 0.5,
+        "e_month_kwh": 0,
+        "alpha_disabled": True,
+        "energy_disabled": True,
+        "mode_note": tr("workbench.profiles.mode.note.total", lang),
+        "weekday_source_rows": [],
+        "weekday_columns": [],
+        "weekday_tooltips": {},
+        "total_source_rows": [],
+        "total_columns": [],
+        "total_tooltips": {},
+        "total_preview_rows": [],
+        "total_preview_columns": [],
+        "total_preview_tooltips": {},
+        "relative_source_rows": [],
+        "relative_columns": [],
+        "relative_tooltips": {},
+        "relative_preview_rows": [],
+        "relative_preview_columns": [],
+        "relative_preview_tooltips": {},
+        "visibility": {
+            "demand-profile-panel": hidden,
+            "demand-profile-general-panel": hidden,
+            "demand-profile-general-preview-panel": hidden,
+            "demand-profile-weights-panel": hidden,
+        },
+        "weights_preview_style": hidden,
+        "energy_shell_style": hidden,
+        "alpha_shell_style": hidden,
+        "type_shell_style": hidden,
+        "relative_grid_style": hidden,
+        "secondary_grid_style": hidden,
+    }
+    resolved_chart = demand_chart or {
+        "style": {"display": "grid"},
+        "title": empty_chart_title,
+        "copy": empty_message,
+        "figure": _build_empty_assumptions_chart(lang, message=empty_message),
+    }
+    response = {
+        "sections": render_assumption_sections(
+            sections,
+            show_all=show_all,
+            empty_message=empty_message,
+            advanced_label=tr("workbench.assumptions.advanced", lang),
+            input_id_type="assumptions-input",
+            field_card_type="assumptions-field-card",
+            context_note_type="assumptions-context-note",
+            collapsible_groups=True,
+            group_open_defaults=ASSUMPTIONS_GROUP_OPEN_DEFAULTS,
+            section_id_prefix="assumptions-group",
+        ),
+        "validation": render_validation_panel(validation_issues, lang=lang),
+        "apply_disabled": apply_disabled,
+        "scan_disabled": scan_disabled,
+        "mode_options": mode_options,
+        "mode_value": resolved_demand_state["profile_mode"],
+        "type_options": type_options,
+        "type_value": resolved_demand_state["profile_type"],
+        "alpha_value": resolved_demand_state["alpha_mix"],
+        "energy_value": resolved_demand_state["e_month_kwh"],
+        "alpha_disabled": resolved_demand_state["alpha_disabled"],
+        "energy_disabled": resolved_demand_state["energy_disabled"],
+        "mode_note": resolved_demand_state["mode_note"],
+        "weekday_rows": resolved_demand_state["weekday_source_rows"],
+        "weekday_columns": resolved_demand_state["weekday_columns"],
+        "weekday_tooltips": resolved_demand_state["weekday_tooltips"],
+        "total_rows": resolved_demand_state["total_source_rows"],
+        "total_columns": resolved_demand_state["total_columns"],
+        "total_tooltips": resolved_demand_state["total_tooltips"],
+        "total_preview_rows": resolved_demand_state["total_preview_rows"],
+        "total_preview_columns": resolved_demand_state["total_preview_columns"],
+        "total_preview_tooltips": resolved_demand_state["total_preview_tooltips"],
+        "relative_rows": resolved_demand_state["relative_source_rows"],
+        "relative_columns": resolved_demand_state["relative_columns"],
+        "relative_tooltips": resolved_demand_state["relative_tooltips"],
+        "relative_preview_rows": resolved_demand_state["relative_preview_rows"],
+        "relative_preview_columns": resolved_demand_state["relative_preview_columns"],
+        "relative_preview_tooltips": resolved_demand_state["relative_preview_tooltips"],
+        "panel_style": resolved_demand_state["visibility"]["demand-profile-panel"],
+        "general_panel_style": resolved_demand_state["visibility"]["demand-profile-general-panel"],
+        "general_preview_panel_style": resolved_demand_state["visibility"]["demand-profile-general-preview-panel"],
+        "weights_panel_style": resolved_demand_state["visibility"]["demand-profile-weights-panel"],
+        "weights_preview_panel_style": resolved_demand_state["weights_preview_style"],
+        "energy_shell_style": resolved_demand_state["energy_shell_style"],
+        "alpha_shell_style": resolved_demand_state["alpha_shell_style"],
+        "type_shell_style": resolved_demand_state["type_shell_style"],
+        "relative_grid_style": resolved_demand_state["relative_grid_style"],
+        "secondary_grid_style": resolved_demand_state["secondary_grid_style"],
+        "chart_panel_style": resolved_chart["style"],
+        "chart_title": resolved_chart["title"],
+        "chart_subtitle": resolved_chart["copy"],
+        "chart_figure": resolved_chart["figure"],
+    }
+    missing = [key for key in ASSUMPTIONS_PAGE_RESPONSE_KEYS if key not in response]
+    if missing:
+        raise ValueError(f"Missing assumptions response keys: {missing}")
+    return tuple(response[key] for key in ASSUMPTIONS_PAGE_RESPONSE_KEYS)
+
+
+def _build_empty_assumptions_response(*, state, lang: str):
+    if _project_is_bound(state):
+        empty_title = tr("workspace.results_digest.no_active.title", lang)
+        empty_message = tr("workspace.results_digest.no_active.body", lang)
+    else:
+        empty_title = tr("workspace.assumptions.empty.no_project_title", lang)
+        empty_message = tr("workspace.assumptions.empty.no_project_body", lang)
+    return _build_assumptions_response(
+        lang=lang,
+        sections=[],
+        validation_issues=[],
+        apply_disabled=True,
+        scan_disabled=True,
+        show_all=False,
+        empty_message=empty_message,
+        empty_chart_title=empty_title,
     )
 
 
@@ -202,9 +427,8 @@ def _empty_demand_outputs(lang: str):
     Output("assumptions-demand-profile-energy-label", "children"),
     Output("assumptions-demand-profile-weights-preview-title", "children"),
     Output("assumptions-demand-profile-weights-preview-copy", "children"),
-    Output("workspace-internal-title", "children"),
-    Output("workspace-internal-copy", "children"),
-    Output("workspace-admin-link", "children"),
+    Output("assumptions-advanced-tools-title", "children"),
+    Output("assumptions-advanced-tools-copy", "children"),
     Input("language-selector", "value"),
 )
 def translate_assumptions_page(language_value):
@@ -235,18 +459,23 @@ def translate_assumptions_page(language_value):
         tr("workbench.profiles.relative.energy", lang),
         tr("workbench.profiles.relative.preview", lang),
         tr("workbench.profiles.relative.preview.copy", lang),
-        tr("workspace.internal.title", lang),
-        tr("workspace.internal.copy", lang),
-        tr("workspace.internal.link", lang),
+        tr("workspace.advanced.title", lang),
+        tr("workspace.advanced.copy", lang),
     )
 
 
-@callback(
-    Output("workspace-admin-entry", "style"),
-    Input("scenario-session-store", "data"),
-)
 def sync_workspace_internal_entry(session_payload):
     return internal_entry_style(resolve_ui_mode_from_payload(session_payload))
+
+
+@callback(
+    Output("assumptions-advanced-tools-entry-shell", "style"),
+    Output("advanced-tools", "style"),
+    Input("scenario-session-store", "data"),
+)
+def sync_assumptions_admin_surface_visibility(session_payload):
+    style = admin_surface_style(resolve_ui_mode_from_payload(session_payload))
+    return style, style
 
 
 @callback(
@@ -301,21 +530,7 @@ def populate_assumptions_page(session_payload, show_all_values, language_value):
     client_state, state = _session(session_payload, lang)
     active = state.get_scenario()
     if active is None:
-        return (
-            render_assumption_sections(
-                [],
-                show_all=False,
-                empty_message=tr("workbench.assumptions.none", lang),
-                advanced_label=tr("workbench.assumptions.advanced", lang),
-                input_id_type="assumptions-input",
-                field_card_type="assumptions-field-card",
-                context_note_type="assumptions-context-note",
-            ),
-            render_validation_panel([], lang=lang),
-            True,
-            True,
-            *_empty_demand_outputs(lang),
-        )
+        return _build_empty_assumptions_response(state=state, lang=lang)
 
     display_bundle = resolve_workspace_bundle_for_display(client_state.session_id, active.scenario_id, active.config_bundle)
     all_sections = build_assumption_sections(
@@ -327,62 +542,21 @@ def populate_assumptions_page(session_payload, show_all_values, language_value):
     partition = partition_assumption_sections(all_sections)
     demand_state = build_demand_profile_ui_state(bundle=display_bundle, lang=lang)
     demand_chart = build_active_demand_chart(lang=lang, demand_state=demand_state)
-    has_errors = any(issue.level == "error" for issue in active.config_bundle.issues)
-    return (
-        render_assumption_sections(
-            partition.client_safe_sections,
-            show_all="all" in (show_all_values or []),
-            empty_message=tr("workbench.assumptions.none", lang),
-            advanced_label=tr("workbench.assumptions.advanced", lang),
-            input_id_type="assumptions-input",
-            field_card_type="assumptions-field-card",
-            context_note_type="assumptions-context-note",
-        ),
-        render_validation_panel(active.config_bundle.issues, lang=lang),
-        False,
-        has_errors,
-        demand_mode_options(lang),
-        demand_state["profile_mode"],
-        relative_profile_type_options(lang),
-        demand_state["profile_type"],
-        demand_state["alpha_mix"],
-        demand_state["e_month_kwh"],
-        demand_state["alpha_disabled"],
-        demand_state["energy_disabled"],
-        demand_state["mode_note"],
-        demand_state["weekday_source_rows"],
-        demand_state["weekday_columns"],
-        demand_state["weekday_tooltips"],
-        demand_state["total_source_rows"],
-        demand_state["total_columns"],
-        demand_state["total_tooltips"],
-        demand_state["total_preview_rows"],
-        demand_state["total_preview_columns"],
-        demand_state["total_preview_tooltips"],
-        demand_state["relative_source_rows"],
-        demand_state["relative_columns"],
-        demand_state["relative_tooltips"],
-        demand_state["relative_preview_rows"],
-        demand_state["relative_preview_columns"],
-        demand_state["relative_preview_tooltips"],
-        demand_state["visibility"]["demand-profile-panel"],
-        demand_state["visibility"]["demand-profile-general-panel"],
-        demand_state["visibility"]["demand-profile-general-preview-panel"],
-        demand_state["visibility"]["demand-profile-weights-panel"],
-        demand_state["weights_preview_style"],
-        demand_state["energy_shell_style"],
-        demand_state["alpha_shell_style"],
-        demand_state["type_shell_style"],
-        demand_state["relative_grid_style"],
-        demand_state["secondary_grid_style"],
-        demand_chart["style"],
-        demand_chart["title"],
-        demand_chart["copy"],
-        demand_chart["figure"],
+    return _build_assumptions_response(
+        lang=lang,
+        sections=partition.client_safe_sections,
+        validation_issues=active.config_bundle.issues,
+        apply_disabled=False,
+        scan_disabled=_bundle_has_errors(active.config_bundle),
+        show_all="all" in (show_all_values or []),
+        empty_message=tr("workbench.assumptions.none", lang),
+        demand_state=demand_state,
+        demand_chart=demand_chart,
     )
 
 
 @callback(
+    Output({"type": "assumptions-input", "field": ALL}, "value"),
     Output({"type": "assumptions-input", "field": ALL}, "disabled"),
     Output({"type": "assumptions-field-card", "field": ALL}, "className"),
     Output({"type": "assumptions-context-note", "group": ALL}, "children"),
@@ -406,13 +580,27 @@ def sync_assumption_context_ui(
     _, state = _session(session_payload, lang)
     active = state.get_scenario()
     if active is None:
-        return [], [], [], []
+        return [], [], [], [], []
 
     current_config = collect_config_updates(assumption_input_ids, assumption_values, active.config_bundle.config)
-    context = assumption_context_map(current_config, lang=lang)
+    effective_config, panel_resolution = apply_panel_selection(current_config, active.config_bundle.panel_catalog)
+    context = assumption_context_map(current_config, panel_catalog=active.config_bundle.panel_catalog, lang=lang)
     disabled_map = dict(context.get("field_disabled") or {})
     emphasis_map = dict(context.get("field_emphasis") or {})
     notes_map = dict(context.get("notes") or {})
+
+    next_values = list(assumption_values or [])
+    if panel_resolution.selection_mode == PANEL_SELECTION_CATALOG:
+        for index, component_id in enumerate(assumption_input_ids or []):
+            field_key = str((component_id or {}).get("field", "")).strip()
+            if field_key in PANEL_DERIVED_CONFIG_FIELDS:
+                next_values[index] = display_assumption_value(field_key, effective_config.get(field_key))
+    value_updates = [no_update for _ in (assumption_input_ids or [])]
+    if len(next_values) == len(assumption_values or []) and any(
+        _normalize_compare_value(updated) != _normalize_compare_value(current)
+        for updated, current in zip(next_values, assumption_values or [])
+    ):
+        value_updates = next_values
 
     disabled_values = [
         bool(disabled_map.get((component_id or {}).get("field", ""), False))
@@ -431,7 +619,7 @@ def sync_assumption_context_ui(
         for component_id in (note_ids or [])
     ]
     note_styles = [_assumption_note_style(message) for message in note_children]
-    return disabled_values, card_classes, note_children, note_styles
+    return value_updates, disabled_values, card_classes, note_children, note_styles
 
 
 @callback(
@@ -595,12 +783,13 @@ def sync_assumptions_demand_profile_views(
     Output("run-scan-run-unsaved-btn", "children"),
     Output("run-scan-cancel-btn", "children"),
     Input("run-scan-choice-state", "data"),
-    Input("project-name-input", "value"),
+    Input("project-name-draft-store", "data"),
     Input("language-selector", "value"),
 )
-def sync_run_scan_choice_dialog(dialog_state, project_name_value, language_value):
+def sync_run_scan_choice_dialog(dialog_state, project_name_state, language_value):
     lang = _lang(language_value)
-    project_name = str(project_name_value or "").strip()
+    suggested_name = str((dialog_state or {}).get("suggested_project_name") or "").strip()
+    project_name = str((project_name_state or {}).get("value") or "").strip() or suggested_name
     copy = (
         tr("workbench.run_dialog.body_named", lang, name=project_name)
         if project_name
@@ -616,6 +805,24 @@ def sync_run_scan_choice_dialog(dialog_state, project_name_value, language_value
         tr("workbench.run_dialog.run_without_saving", lang),
         tr("workbench.run_dialog.cancel", lang),
     )
+
+
+@callback(
+    Output("project-name-input", "value", allow_duplicate=True),
+    Input("run-scan-choice-state", "data"),
+    Input("scenario-session-store", "data"),
+    State("project-name-input", "value", allow_optional=True),
+    prevent_initial_call=True,
+)
+def sync_run_scan_suggested_project_name(dialog_state, _session_payload, project_name_value):
+    if not (dialog_state or {}).get("open"):
+        raise PreventUpdate
+    if _clean_project_name_seed(project_name_value):
+        raise PreventUpdate
+    suggested_name = str((dialog_state or {}).get("suggested_project_name") or "").strip()
+    if not suggested_name:
+        raise PreventUpdate
+    return suggested_name
 
 
 def _sync_current_assumptions_slice(
@@ -660,7 +867,7 @@ def _sync_current_assumptions_slice(
     Input("apply-assumptions-btn", "n_clicks"),
     Input("run-assumptions-scan-btn", "n_clicks"),
     State("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-draft-store", "data"),
     State({"type": "assumptions-input", "field": ALL}, "id"),
     State({"type": "assumptions-input", "field": ALL}, "value"),
     State("assumptions-demand-profile-mode-selector", "value", allow_optional=True),
@@ -680,7 +887,7 @@ def mutate_assumptions_state(
     _apply_clicks,
     _run_clicks,
     session_payload,
-    project_name_value,
+    project_name_state,
     assumption_input_ids,
     assumption_values,
     demand_profile_mode_value,
@@ -722,7 +929,7 @@ def mutate_assumptions_state(
         if trigger == "apply-assumptions-btn":
             saved = False
             if _project_is_bound(state):
-                state = save_project(state, project_name=_resolved_project_name(project_name_value, state), language=lang)
+                state = save_project(state, project_name=_resolved_project_name(project_name_state, state), language=lang)
                 saved = True
             client_state = commit_client_session(client_state, state)
             status = _join_status_parts(
@@ -736,7 +943,7 @@ def mutate_assumptions_state(
             if _project_is_bound(state):
                 saved = False
                 if _project_is_bound(state):
-                    state = save_project(state, project_name=_resolved_project_name(project_name_value, state), language=lang)
+                    state = save_project(state, project_name=_resolved_project_name(project_name_state, state), language=lang)
                     updated_active = state.get_scenario(updated_active.scenario_id) or updated_active
                     saved = True
                 if _bundle_has_errors(updated_active.config_bundle):
@@ -770,7 +977,14 @@ def mutate_assumptions_state(
                 tr("workbench.run_flow.applied", lang),
                 tr("workbench.run_flow.choose_save", lang),
             )
-            return client_state.to_payload(), status, _run_choice_state(open_dialog=True)
+            return (
+                client_state.to_payload(),
+                status,
+                _run_choice_state(
+                    open_dialog=True,
+                    suggested_project_name=_suggest_run_project_name(state, updated_active, lang=lang),
+                ),
+            )
     except PreventUpdate:
         raise
     except Exception as exc:
@@ -786,7 +1000,7 @@ def mutate_assumptions_state(
     Input("run-scan-save-and-run-btn", "n_clicks"),
     Input("run-scan-run-unsaved-btn", "n_clicks"),
     State("scenario-session-store", "data"),
-    State("project-name-input", "value"),
+    State("project-name-draft-store", "data"),
     State("run-scan-choice-state", "data"),
     State("language-selector", "value"),
     prevent_initial_call=True,
@@ -799,7 +1013,7 @@ def resolve_run_scan_choice(
     _save_and_run_clicks,
     _run_without_saving_clicks,
     session_payload,
-    project_name_value,
+    project_name_state,
     dialog_state,
     language_value,
 ):
@@ -807,6 +1021,7 @@ def resolve_run_scan_choice(
     trigger = ctx.triggered_id
     client_state, state = _session(session_payload, lang)
     closed_dialog = _run_choice_state()
+    suggested_name = str((dialog_state or {}).get("suggested_project_name") or "").strip()
 
     if not (dialog_state or {}).get("open"):
         raise PreventUpdate
@@ -825,7 +1040,7 @@ def resolve_run_scan_choice(
             return client_state.to_payload(), status, closed_dialog
 
         if trigger == "run-scan-save-and-run-btn":
-            resolved_name = _resolved_project_name(project_name_value, state)
+            resolved_name = _resolved_project_name(project_name_state, state, suggested_name=suggested_name)
             if not resolved_name:
                 return no_update, tr("workbench.run_dialog.name_required", lang), dialog_state
             state = save_project(state, project_name=resolved_name, language=lang)

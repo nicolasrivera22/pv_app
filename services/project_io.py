@@ -1,22 +1,27 @@
 from __future__ import annotations
-from components.profile_editor import _debug_bundle_rows
 import json
 import shutil
 from dataclasses import replace
 from pathlib import Path
 
+from .config_metadata import materialize_panel_config_rows
+from .financial_presets import sanitize_financial_presets
 from .io_excel import TABLE_FILE_MAP, load_bundle_from_tables
 from .runtime_paths import legacy_packaged_root, project_exports_root, project_inputs_root, project_root, projects_root
 from .scenario_session import create_scenario_record
 from .types import LoadedConfigBundle, ProjectManifest, ProjectScenarioManifest, ScenarioRecord, ScenarioSessionState
 
-PROJECT_FORMAT_VERSION = 1
+PROJECT_FORMAT_VERSION = 2
 
 
 def _slugify(value: str) -> str:
     cleaned = "".join(char.lower() if char.isalnum() else "_" for char in value.strip())
     collapsed = "_".join(part for part in cleaned.split("_") if part)
     return collapsed or "proyecto"
+
+
+def slugify_project_name(value: str) -> str:
+    return _slugify(value)
 
 
 def _manifest_path(slug: str) -> Path:
@@ -42,16 +47,10 @@ def _legacy_manifest_path(slug: str) -> Path | None:
 def _resolve_manifest_path_for_open(slug: str) -> Path:
     current = _current_manifest_path(slug)
     legacy = _legacy_manifest_path(slug)
-    print("RESOLVE OPEN slug:", slug)
-    print("  current manifest:", current, "exists:", current.exists())
-    print("  legacy manifest:", legacy, "exists:", legacy.exists() if legacy is not None else None)
     if current.exists():
-        print("  USING CURRENT")
         return current
     if legacy is not None and legacy.exists():
-        print("  USING LEGACY")
         return legacy
-    print("  USING CURRENT (missing fallback)")
     return current
 
 
@@ -68,7 +67,7 @@ def load_project_bundle_from_tables(path: str | Path, *, source_name: str = "pro
 def _write_table_inputs(root: Path, scenario: ScenarioRecord) -> None:
     bundle = scenario.config_bundle
     tables = {
-        "Config": bundle.config_table,
+        "Config": materialize_panel_config_rows(bundle.config_table, bundle.config, bundle.panel_catalog),
         "Demand_Profile": bundle.demand_profile_table,
         "Demand_Profile_General": bundle.demand_profile_general_table,
         "Demand_Profile_Weights": bundle.demand_profile_weights_table,
@@ -78,12 +77,16 @@ def _write_table_inputs(root: Path, scenario: ScenarioRecord) -> None:
         "Precios_kWp_relativos_Otros": bundle.cop_kwp_table_others,
         "Inversor_Catalog": bundle.inverter_catalog,
         "Battery_Catalog": bundle.battery_catalog,
+        "Panel_Catalog": bundle.panel_catalog,
+        "Economics_Cost_Items": bundle.economics_cost_items_table,
+        "Economics_Price_Items": bundle.economics_price_items_table,
     }
     for table_name, frame in tables.items():
         frame.to_csv(root / TABLE_FILE_MAP[table_name], index=False)
 
 
 def _build_manifest(state: ScenarioSessionState, *, project_name: str, slug: str, language: str) -> ProjectManifest:
+    valid_financial_presets, _invalid = sanitize_financial_presets(state.financial_presets)
     scenarios = tuple(
         ProjectScenarioManifest(
             scenario_id=scenario.scenario_id,
@@ -93,6 +96,7 @@ def _build_manifest(state: ScenarioSessionState, *, project_name: str, slug: str
             dirty=scenario.dirty,
             last_run_at=scenario.last_run_at,
             scan_fingerprint=scenario.scan_fingerprint,
+            runtime_price_bridge=scenario.runtime_price_bridge,
         )
         for scenario in state.scenarios
     )
@@ -104,6 +108,7 @@ def _build_manifest(state: ScenarioSessionState, *, project_name: str, slug: str
         comparison_scenario_ids=state.comparison_scenario_ids,
         design_comparison_candidate_keys=state.design_comparison_candidate_keys,
         scenarios=scenarios,
+        financial_presets=valid_financial_presets,
         ui_prefs={"language": language},
     )
 
@@ -127,7 +132,6 @@ def save_project(
     project_root(resolved_slug)
     project_exports_root(resolved_slug)
     for scenario in state.scenarios:
-        _debug_bundle_rows(f"BEFORE save_project write {scenario.scenario_id}", scenario.config_bundle)
         _write_table_inputs(_scenario_input_root(resolved_slug, scenario.scenario_id), scenario)
     manifest = _build_manifest(state, project_name=resolved_name, slug=resolved_slug, language=language)
     _write_manifest(manifest)
@@ -158,9 +162,6 @@ def read_project_manifest(slug: str) -> ProjectManifest:
 
 def open_project(slug: str) -> ScenarioSessionState:
     manifest_path = _resolve_manifest_path_for_open(slug)
-    print("OPEN_PROJECT slug:", slug)
-    print("OPEN_PROJECT manifest_path:", manifest_path)
-    print("OPEN_PROJECT project_base:", manifest_path.parent)
     manifest = _read_manifest(manifest_path)
     manifest_path = _resolve_manifest_path_for_open(slug)
     manifest = _read_manifest(manifest_path)
@@ -169,7 +170,6 @@ def open_project(slug: str) -> ScenarioSessionState:
     for item in manifest.scenarios:
         table_root = project_base / "inputs" / item.scenario_id
         bundle = load_project_bundle_from_tables(table_root, source_name=item.source_name)
-        _debug_bundle_rows(f"AFTER open_project load {item.scenario_id}", bundle)
         record = create_scenario_record(item.name, bundle, source_name=item.source_name)
         scenarios.append(
             replace(
@@ -179,6 +179,7 @@ def open_project(slug: str) -> ScenarioSessionState:
                 dirty=item.dirty,
                 last_run_at=item.last_run_at,
                 scan_fingerprint=item.scan_fingerprint,
+                runtime_price_bridge=item.runtime_price_bridge,
             )
         )
     scenario_ids = {scenario.scenario_id for scenario in scenarios}
@@ -194,6 +195,7 @@ def open_project(slug: str) -> ScenarioSessionState:
         active_scenario_id=active_scenario_id,
         comparison_scenario_ids=comparison_ids,
         design_comparison_candidate_keys=design_keys,
+        financial_presets=manifest.financial_presets,
         project_slug=manifest.slug,
         project_name=manifest.name,
         project_dirty=False,

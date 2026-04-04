@@ -6,6 +6,12 @@ from typing import Any
 import pandas as pd
 from dash.dash_table.Format import Format, Group, Scheme
 
+from pv_product.panel_catalog import (
+    MANUAL_PANEL_TOKEN,
+    panel_catalog_options,
+    resolve_selected_panel,
+)
+from pv_product.panel_technology import panel_technology_options
 from pv_product.utils import DEFAULT_CONFIG
 
 from .config_metadata import ConfigFieldMeta, extract_config_metadata
@@ -103,6 +109,22 @@ FIELD_SCHEMAS: dict[str, FieldUiSchema] = {
         ui_scale=100.0,
         min_value=0,
         max_value=100,
+    ),
+    "panel_name": FieldUiSchema(
+        "dropdown",
+        "basic",
+        "Modelo de panel",
+        "Panel model",
+        "Selecciona un panel del catálogo para este escenario o vuelve a la configuración manual.",
+        "Select a catalog panel for this scenario or switch back to manual configuration.",
+    ),
+    "panel_technology_mode": FieldUiSchema(
+        "dropdown",
+        "basic",
+        "Tecnología de panel",
+        "Panel technology",
+        "Supuesto simple del escenario para el comportamiento de generación del panel. Solo cambia el rendimiento de energía; no cambia módulo, área ni hardware.",
+        "Simple scenario assumption for panel generation behavior. It changes energy yield only; it does not change module, area, or hardware choices.",
     ),
     "Tmin_C": FieldUiSchema(
         "number",
@@ -870,6 +892,52 @@ TABLE_COLUMN_SCHEMAS: dict[str, dict[str, TableColumnUiSchema]] = {
         "max_dis_kW": TableColumnUiSchema("Descarga máx [kW]", "Max discharge [kW]", "Potencia máxima de descarga.", "Maximum discharge power.", "kw", 1, "numeric"),
         "price_COP": TableColumnUiSchema("Precio [COP]", "Price [COP]", "Costo de la batería.", "Battery cost.", "currency_cop", 0, "numeric"),
     },
+    "panel_catalog": {
+        "name": TableColumnUiSchema("Nombre", "Name", "Modelo o referencia visible del panel.", "Visible panel model or reference."),
+        "P_mod_W": TableColumnUiSchema("Potencia módulo [Wp]", "Module power [Wp]", "Potencia nominal del módulo.", "Rated module power.", "number", 0, "numeric"),
+        "Voc25": TableColumnUiSchema("Voc a 25 °C [V]", "Voc at 25 °C [V]", "Voltaje de circuito abierto del módulo a 25 °C.", "Module open-circuit voltage at 25 °C.", "volts", 1, "numeric"),
+        "Vmp25": TableColumnUiSchema("Vmp a 25 °C [V]", "Vmp at 25 °C [V]", "Voltaje de máxima potencia del módulo a 25 °C.", "Module maximum-power voltage at 25 °C.", "volts", 1, "numeric"),
+        "Isc": TableColumnUiSchema("Isc [A]", "Isc [A]", "Corriente de cortocircuito del módulo.", "Module short-circuit current.", "amps", 2, "numeric"),
+        "length_m": TableColumnUiSchema("Largo [m]", "Length [m]", "Largo del panel para referencia de huella.", "Panel length for footprint reference.", "number", 3, "numeric"),
+        "width_m": TableColumnUiSchema("Ancho [m]", "Width [m]", "Ancho del panel para referencia de huella.", "Panel width for footprint reference.", "number", 3, "numeric"),
+        "panel_technology_mode": TableColumnUiSchema("Tecnología", "Technology", "Tecnología de generación asociada al modelo.", "Generation technology associated with the model.", "text", 0),
+        "price_COP": TableColumnUiSchema("Precio [COP]", "Price [COP]", "Costo de referencia del panel para la capa económica.", "Reference panel cost for the economics layer.", "currency_cop", 0, "numeric"),
+    },
+    "economics_cost_items": {
+        "stage": TableColumnUiSchema("Etapa de costo", "Cost stage", "Ubica la partida dentro del costo técnico o del costo instalado.", "Places the line in technical cost or installed cost."),
+        "name": TableColumnUiSchema("Partida", "Item", "Nombre visible de la partida de costo.", "Visible cost item name."),
+        "basis": TableColumnUiSchema("Base de cálculo", "Cost basis", "Define si el monto se aplica una vez por proyecto o por una unidad física del diseño.", "Defines whether the amount applies once per project or per physical unit in the design."),
+        "amount_COP": TableColumnUiSchema("Monto unitario [COP]", "Unit amount [COP]", "Monto en COP o COP por unidad según la base elegida.", "Amount in COP or COP per unit depending on the selected basis.", "currency_cop", 0, "numeric"),
+        "source_mode": TableColumnUiSchema("Fuente del costo", "Cost source", "Define si esta partida usa el monto manual guardado o el precio del hardware seleccionado.", "Defines whether this line uses the stored manual amount or the selected hardware price."),
+        "hardware_binding": TableColumnUiSchema("Vínculo hardware", "Hardware binding", "Define qué hardware alimenta la línea cuando la fuente es Hardware seleccionado.", "Defines which hardware feeds the line when the source is Selected hardware."),
+        "enabled": TableColumnUiSchema("Activo", "Enabled", "Permite desactivar temporalmente esta partida sin eliminarla.", "Lets you temporarily disable this line without deleting it."),
+        "notes": TableColumnUiSchema("Notas", "Notes", "Notas internas para explicar la fuente o el uso de la partida.", "Internal notes that explain the source or intent of the line."),
+    },
+    "economics_price_items": {
+        "layer": TableColumnUiSchema("Etapa de precio", "Price stage", "Ubica la fila en impuestos, oferta comercial o cierre final.", "Places the line in taxes, the commercial offer, or the final closing stage."),
+        "name": TableColumnUiSchema("Partida", "Item", "Nombre visible de la regla fiscal o del ajuste comercial.", "Visible name of the tax rule or commercial adjustment."),
+        "method": TableColumnUiSchema("Regla de cálculo", "Calculation rule", "Impuestos usa impuesto porcentual. Los ajustes comerciales usan porcentaje, monto fijo por proyecto o monto por kWp.", "Taxes use a percentage tax rule. Commercial adjustments use percentage, fixed project amount, or amount per kWp."),
+        "value": TableColumnUiSchema("Valor [COP o %]", "Value [COP or %]", "Usa 12 para 12% en impuesto porcentual o ajuste porcentual. Los otros métodos usan COP o COP por kWp.", "Use 12 for 12% in a percentage tax or adjustment. Other methods use COP or COP per kWp.", "text", 0, "numeric"),
+        "enabled": TableColumnUiSchema("Activo", "Enabled", "Permite desactivar temporalmente este ajuste sin eliminarlo.", "Lets you temporarily disable this adjustment without deleting it."),
+        "notes": TableColumnUiSchema("Notas", "Notes", "Notas internas para aclarar el criterio comercial o de cierre.", "Internal notes that clarify the commercial or final-sale rationale."),
+    },
+    "economics_breakdown": {
+        "source_table": TableColumnUiSchema("Origen", "Source", "Bloque de economics que originó la línea calculada.", "Economics block that produced the calculated line."),
+        "source_row": TableColumnUiSchema("Fila", "Row", "Fila 1-based del input normalizado usada en el cálculo.", "1-based normalized input row used in the calculation.", "integer", 0, "numeric"),
+        "group": TableColumnUiSchema("Grupo", "Group", "Separa costos y reglas de precio.", "Separates costs from pricing rules."),
+        "stage_or_layer": TableColumnUiSchema("Etapa", "Stage", "Etapa de costo, impuestos o ajuste usada en la línea.", "Cost, tax, or adjustment stage used in the line."),
+        "name": TableColumnUiSchema("Partida", "Item", "Nombre visible de la línea calculada.", "Visible name of the calculated line."),
+        "rule": TableColumnUiSchema("Regla aplicada", "Applied rule", "Regla de cálculo aplicada en la línea.", "Calculation rule applied in the line."),
+        "value_source": TableColumnUiSchema("Fuente", "Source", "Indica si la línea usa un monto manual, un precio del hardware seleccionado o si no hay dato disponible.", "Shows whether the line uses a manual amount, a selected hardware price, or no available value."),
+        "hardware_binding": TableColumnUiSchema("Hardware", "Hardware", "Indica qué tipo de hardware alimenta la línea cuando aplica.", "Shows which hardware type feeds the line when applicable."),
+        "hardware_name": TableColumnUiSchema("Equipo usado", "Resolved hardware", "Modelo de hardware que alimentó la línea calculada.", "Hardware model that fed the calculated line."),
+        "calculation": TableColumnUiSchema("Cálculo", "Calculation", "Explicación breve de cómo se calculó la línea con sus cantidades y base.", "Short explanation of how the line was calculated with its quantities and base."),
+        "multiplier": TableColumnUiSchema("Multiplicador", "Multiplier", "Cantidad usada para multiplicar la tarifa o monto.", "Quantity used to multiply the rate or amount.", "number", 3, "numeric"),
+        "unit_rate_COP": TableColumnUiSchema("Monto unitario", "Unit amount", "Monto unitario normalizado usado en la línea. En ajustes porcentuales guarda la tasa decimal.", "Normalized unit amount used in the line. For percentage adjustments it stores the decimal rate.", "number", 3, "numeric"),
+        "base_amount_COP": TableColumnUiSchema("Base monetaria [COP]", "Monetary base [COP]", "Base monetaria usada por los ajustes porcentuales. Queda vacía cuando no aplica.", "Monetary base used by percentage adjustments. Empty when not applicable.", "currency_cop", 0, "numeric"),
+        "line_amount_COP": TableColumnUiSchema("Resultado [COP]", "Result [COP]", "Monto total calculado para la línea.", "Total amount calculated for the line.", "currency_cop", 0, "numeric"),
+        "notes": TableColumnUiSchema("Notas", "Notes", "Notas internas preservadas desde la fila de origen.", "Internal notes preserved from the source row."),
+    },
     "month_profile": {
         "MONTH": TableColumnUiSchema("Mes", "Month", "Mes del año.", "Month of the year.", "integer", 0, "numeric"),
         "Demand_month": TableColumnUiSchema("Factor demanda", "Demand factor", "Multiplicador relativo de demanda mensual.", "Relative monthly demand multiplier.", "ratio", 3, "numeric"),
@@ -969,7 +1037,18 @@ def field_help(meta: ConfigFieldMeta, lang: str = "es") -> str:
     return field_label(meta, lang)
 
 
-def field_options(meta: ConfigFieldMeta, lang: str = "es") -> list[dict[str, Any]]:
+def field_options(meta: ConfigFieldMeta, bundle, lang: str = "es") -> list[dict[str, Any]]:
+    if meta.config_key == "panel_name":
+        options = [{"label": label, "value": value} for label, value in panel_catalog_options(bundle.panel_catalog, lang=lang)]
+        current_value = str(bundle.config.get("panel_name") or "").strip()
+        if current_value and current_value != MANUAL_PANEL_TOKEN and all(option["value"] != current_value for option in options):
+            options.append({"label": current_value, "value": current_value})
+        return options
+    if meta.config_key == "panel_technology_mode":
+        return [
+            {"label": label, "value": value}
+            for label, value in panel_technology_options(lang)
+        ]
     schema = field_schema_for(meta)
     if not schema.options:
         return []
@@ -1075,10 +1154,12 @@ def _field_payload(meta: ConfigFieldMeta, bundle, *, lang: str = "es") -> dict[s
         "input_step": field_input_step(meta),
         "min": schema.min_value,
         "max": schema.max_value,
-        "options": field_options(meta, lang),
+        "options": field_options(meta, bundle, lang),
         "value": display_assumption_value(meta.config_key, bundle.config.get(meta.config_key, meta.value)),
         "supported": meta.supported,
     }
+    if meta.config_key == "panel_name":
+        payload["value"] = str(payload["value"] or MANUAL_PANEL_TOKEN)
     if meta.config_key == "mc_battery_name":
         names = [
             str(value).strip()
@@ -1114,6 +1195,7 @@ def build_config_fields(
 
 
 ASSUMPTION_CONTEXT_NOTE_IDS = {
+    "Sol y módulos": "panel-selection-context-note",
     "Controles de Batería y Exporte": "battery-export-context-note",
     "Semilla": "seed-context-note",
     "Restricción de Proporción Pico": "peak-ratio-context-note",
@@ -1127,7 +1209,20 @@ def _to_bool(value: Any) -> bool:
     return bool(value)
 
 
-def _assumption_context_note(config: dict[str, Any], group_key: str, *, lang: str = "es") -> str:
+def _assumption_context_note(
+    config: dict[str, Any],
+    group_key: str,
+    *,
+    panel_catalog: pd.DataFrame | None = None,
+    lang: str = "es",
+) -> str:
+    panel_catalog_frame = panel_catalog if panel_catalog is not None else pd.DataFrame()
+    if group_key == "Sol y módulos":
+        panel_resolution = resolve_selected_panel(config, panel_catalog_frame)
+        if panel_resolution.selection_mode == "catalog":
+            if lang == "en":
+                return "Module power, electrical values, and panel technology are derived from the selected panel model."
+            return "La potencia del módulo, los valores eléctricos y la tecnología del panel se derivan del modelo seleccionado."
     if group_key == "Controles de Batería y Exporte":
         include_battery = _to_bool(config.get("include_battery"))
         optimize_battery = _to_bool(config.get("optimize_battery"))
@@ -1146,7 +1241,12 @@ def _assumption_context_note(config: dict[str, Any], group_key: str, *, lang: st
     return ""
 
 
-def assumption_context_map(config: dict[str, Any], *, lang: str = "es") -> dict[str, Any]:
+def assumption_context_map(
+    config: dict[str, Any],
+    *,
+    panel_catalog: pd.DataFrame | None = None,
+    lang: str = "es",
+) -> dict[str, Any]:
     include_battery = _to_bool(config.get("include_battery"))
     optimize_battery = _to_bool(config.get("optimize_battery"))
     pricing_mode = str(config.get("pricing_mode", "")).strip().lower()
@@ -1154,8 +1254,15 @@ def assumption_context_map(config: dict[str, Any], *, lang: str = "es") -> dict[
     seed_mode = str(config.get("kWp_seed_mode", "")).strip().lower()
     peak_month_mode = str(config.get("limit_peak_month_mode", "")).strip().lower()
     use_manual_risk_kwp = _to_bool(config.get("mc_use_manual_kWp"))
+    panel_resolution = resolve_selected_panel(config, panel_catalog if panel_catalog is not None else pd.DataFrame())
+    panel_fields_derived = panel_resolution.selection_mode == "catalog"
 
     field_disabled = {
+        "P_mod_W": panel_fields_derived,
+        "Voc25": panel_fields_derived,
+        "Vmp25": panel_fields_derived,
+        "Isc": panel_fields_derived,
+        "panel_technology_mode": panel_fields_derived,
         "price_total_COP": pricing_mode == "variable",
         "optimize_battery": not include_battery,
         "battery_name": (not include_battery) or optimize_battery,
@@ -1174,7 +1281,7 @@ def assumption_context_map(config: dict[str, Any], *, lang: str = "es") -> dict[
         "battery_name": include_battery and not optimize_battery,
     }
     notes = {
-        group_key: _assumption_context_note(config, group_key, lang=lang)
+        group_key: _assumption_context_note(config, group_key, panel_catalog=panel_catalog, lang=lang)
         for group_key in ASSUMPTION_CONTEXT_NOTE_IDS
     }
     return {
@@ -1196,7 +1303,7 @@ def build_assumption_sections(
     hidden_fields = {str(field).strip() for field in (exclude_fields or set()) if str(field).strip()}
     sections_by_group: dict[str, dict[str, Any]] = {}
     raw_key_for_group: dict[str, str] = {}
-    context = assumption_context_map(bundle.config, lang=lang)
+    context = assumption_context_map(bundle.config, panel_catalog=bundle.panel_catalog, lang=lang)
     for meta in extract_config_metadata(bundle.config_table, bundle.config):
         if meta.group in excluded:
             continue
@@ -1343,6 +1450,12 @@ def _prettify_column(column_key: str) -> str:
     return column_key.replace("_", " ").replace("kWh", "kWh").strip().capitalize()
 
 
+_TABLE_DROPDOWN_COLUMNS: dict[str, set[str]] = {
+    "economics_cost_items": {"stage", "basis", "source_mode", "hardware_binding", "enabled"},
+    "economics_price_items": {"layer", "method", "enabled"},
+}
+
+
 def build_table_display_columns(
     table_kind: str,
     column_keys: list[str],
@@ -1358,6 +1471,8 @@ def build_table_display_columns(
         column: dict[str, Any] = {"name": label, "id": key}
         if schema.type:
             column["type"] = schema.type
+        if key in _TABLE_DROPDOWN_COLUMNS.get(table_kind, set()):
+            column["presentation"] = "dropdown"
         data_format = _format_kind(schema.format, schema.precision)
         if data_format is not None:
             column["format"] = data_format

@@ -5,31 +5,34 @@ from dash import dash_table, dcc, html
 from services.i18n import tr
 from services.runtime_paths import is_frozen_runtime
 
+from .collapsible_section import collapsible_section
 
-def candidate_explorer_section() -> html.Div:
+
+def candidate_explorer_section() -> html.Details:
     open_button_style = {} if is_frozen_runtime() else {"display": "none"}
-    return html.Div(
-        id="candidate-selection-section",
-        className="panel",
-        children=[
+    return collapsible_section(
+        section_id="candidate-selection-section",
+        summary_id="candidate-selection-summary",
+        title_id="candidate-explorer-title",
+        title=tr("workbench.candidate_explorer", "es"),
+        open=True,
+        title_level="h3",
+        variant="primary",
+        class_name="panel results-primary-section results-explorer-section",
+        body_class_name="results-explorer-body",
+        body=[
             html.Div(
-                className="section-head",
+                className="controls results-explorer-actions",
                 children=[
-                    html.H3(tr("workbench.candidate_explorer", "es"), id="candidate-explorer-title"),
-                    html.Div(
-                        className="controls",
-                        children=[
-                            html.Button(tr("workbench.export_scenario", "es"), id="scenario-export-btn", n_clicks=0, className="action-btn secondary"),
-                            html.Button(tr("common.export_artifacts", "es"), id="scenario-artifacts-btn", n_clicks=0, className="action-btn tertiary"),
-                            html.Button(
-                                tr("common.open_exports_folder", "es"),
-                                id="scenario-open-exports-btn",
-                                n_clicks=0,
-                                className="action-btn tertiary",
-                                disabled=True,
-                                style=open_button_style,
-                            ),
-                        ],
+                    html.Button(tr("workbench.export_scenario", "es"), id="scenario-export-btn", n_clicks=0, className="action-btn secondary"),
+                    html.Button(tr("common.export_artifacts", "es"), id="scenario-artifacts-btn", n_clicks=0, className="action-btn tertiary"),
+                    html.Button(
+                        tr("common.open_exports_folder", "es"),
+                        id="scenario-open-exports-btn",
+                        n_clicks=0,
+                        className="action-btn tertiary",
+                        disabled=True,
+                        style=open_button_style,
                     ),
                 ],
             ),
@@ -49,31 +52,65 @@ def candidate_explorer_section() -> html.Div:
                         style={"display": "none"},
                         children=[
                             html.Div(
-                                className="candidate-horizon-head",
+                                className="candidate-explorer-toolbar-grid",
                                 children=[
-                                    html.Label(
-                                        tr("workbench.horizon.label", "es"),
-                                        id="candidate-horizon-label",
-                                        className="candidate-horizon-label",
-                                        htmlFor="candidate-horizon-slider",
+                                    html.Div(
+                                        className="candidate-horizon-control",
+                                        children=[
+                                            html.Div(
+                                                className="candidate-horizon-head",
+                                                children=[
+                                                    html.Label(
+                                                        tr("workbench.horizon.label", "es"),
+                                                        id="candidate-horizon-label",
+                                                        className="candidate-horizon-label",
+                                                        htmlFor="candidate-horizon-slider",
+                                                    ),
+                                                    html.Span("", id="candidate-horizon-value", className="candidate-horizon-value"),
+                                                ],
+                                            ),
+                                            dcc.Slider(
+                                                id="candidate-horizon-slider",
+                                                min=1,
+                                                max=1,
+                                                step=1,
+                                                value=1,
+                                                marks={1: "1"},
+                                                disabled=True,
+                                                updatemode="drag",
+                                            ),
+                                            html.P(
+                                                tr("workbench.horizon.helper", "es"),
+                                                id="candidate-horizon-helper",
+                                                className="candidate-horizon-helper",
+                                            ),
+                                        ],
                                     ),
-                                    html.Span("", id="candidate-horizon-value", className="candidate-horizon-value"),
+                                    html.Div(
+                                        className="candidate-family-control",
+                                        children=[
+                                            html.Label(
+                                                tr("workbench.explorer.family.label", "es"),
+                                                id="results-battery-family-label",
+                                                className="candidate-horizon-label",
+                                                htmlFor="results-battery-family-dropdown",
+                                            ),
+                                            dcc.Dropdown(
+                                                id="results-battery-family-dropdown",
+                                                options=[],
+                                                value=None,
+                                                clearable=False,
+                                                disabled=True,
+                                                className="candidate-family-dropdown",
+                                            ),
+                                        ],
+                                    ),
                                 ],
                             ),
-                            dcc.Slider(
-                                id="candidate-horizon-slider",
-                                min=1,
-                                max=1,
-                                step=1,
-                                value=1,
-                                marks={1: "1"},
-                                disabled=True,
-                                updatemode="drag",
-                            ),
                             html.P(
-                                tr("workbench.horizon.helper", "es"),
-                                id="candidate-horizon-helper",
-                                className="candidate-horizon-helper",
+                                "",
+                                id="results-battery-family-helper",
+                                className="candidate-family-helper",
                             ),
                         ],
                     ),
@@ -93,7 +130,14 @@ def candidate_explorer_section() -> html.Div:
                 columns=[],
                 row_selectable="single",
                 selected_rows=[],
-                hidden_columns=["candidate_key", "scan_order", "best_battery_for_kwp"],
+                hidden_columns=[
+                    "candidate_key",
+                    "scan_order",
+                    "best_battery_for_kwp",
+                    "battery_family_key",
+                    "battery_family_label",
+                    "battery_kwh",
+                ],
                 sort_action="native",
                 filter_action="native",
                 page_size=12,

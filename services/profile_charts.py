@@ -19,8 +19,6 @@ from .result_views import abbreviated_month_labels
 TABLE_ID_MONTH = "month-profile-editor"
 TABLE_ID_SUN = "sun-profile-editor"
 TABLE_ID_DEMAND_WEIGHTS = "demand-profile-weights-editor"
-TABLE_ID_PRICE = "price-kwp-editor"
-TABLE_ID_PRICE_OTHERS = "price-kwp-others-editor"
 TABLE_ID_DEMAND_WEEKDAY = "demand-profile-editor"
 TABLE_ID_DEMAND_GENERAL = "demand-profile-general-editor"
 
@@ -213,16 +211,6 @@ def _resolve_weekday_numbers(frame: pd.DataFrame) -> pd.Series:
     return resolved.fillna(pd.to_numeric(text_numbers, errors="coerce"))
 
 
-def _band_label(min_value: float | int | None, max_value: float | int | None) -> str:
-    def _fmt(value: float | int | None) -> str:
-        if value is None or pd.isna(value):
-            return "?"
-        value = float(value)
-        return str(int(value)) if value.is_integer() else f"{value:g}"
-
-    return f"{_fmt(min_value)}-{_fmt(max_value)}"
-
-
 def _build_month_profile_figure(rows: list[dict] | None, columns: list[dict] | None, lang: str) -> go.Figure:
     column_map = _column_name_map(columns)
     frame = _coerce_numeric(_frame(rows), ["MONTH", "Demand_month", "HSP_month"])
@@ -413,35 +401,6 @@ def _build_demand_general_figure(rows: list[dict] | None, columns: list[dict] | 
     )
 
 
-def _build_price_band_figure(rows: list[dict] | None, columns: list[dict] | None, lang: str) -> go.Figure:
-    column_map = _column_name_map(columns)
-    frame = _coerce_numeric(_frame(rows), ["MIN", "MAX", "PRECIO_POR_KWP"])
-    frame = frame.loc[frame[["MIN", "MAX", "PRECIO_POR_KWP"]].notna().all(axis=1)].copy()
-    if frame.empty:
-        return _empty_profile_figure(lang)
-    frame = frame.sort_values(["MIN", "MAX"], kind="mergesort")
-    frame["BAND"] = [_band_label(min_value, max_value) for min_value, max_value in zip(frame["MIN"], frame["MAX"], strict=False)]
-    customdata = frame[["MIN", "MAX", "PRECIO_POR_KWP"]].to_numpy()
-    figure = go.Figure()
-    figure.add_bar(
-        x=frame["BAND"],
-        y=frame["PRECIO_POR_KWP"],
-        name=_label(column_map, "PRECIO_POR_KWP"),
-        marker_color="#0f766e",
-        customdata=customdata,
-        hovertemplate=f"{tr('workbench.profile_chart.band', lang)}: %{{x}}<br>"
-        + f"{_label(column_map, 'MIN')}: %{{customdata[0]:g}}<br>"
-        + f"{_label(column_map, 'MAX')}: %{{customdata[1]:g}}<br>"
-        + f"{_label(column_map, 'PRECIO_POR_KWP')}: %{{customdata[2]:,.0f}}<extra></extra>",
-    )
-    return _apply_chart_layout(
-        figure,
-        lang=lang,
-        xaxis_title=tr("workbench.profile_chart.band", lang),
-        yaxis_title=_label(column_map, "PRECIO_POR_KWP"),
-    )
-
-
 PROFILE_CHARTS: dict[str, ProfileChartSpec] = {
     TABLE_ID_MONTH: ProfileChartSpec(
         table_id=TABLE_ID_MONTH,
@@ -463,20 +422,6 @@ PROFILE_CHARTS: dict[str, ProfileChartSpec] = {
         title_key="workbench.profiles.demand_weights",
         subtitle_key="workbench.profile_chart.subtitle.demand_weights",
         builder=_build_demand_weights_figure,
-    ),
-    TABLE_ID_PRICE: ProfileChartSpec(
-        table_id=TABLE_ID_PRICE,
-        row_target="secondary",
-        title_key="workbench.profiles.price",
-        subtitle_key="workbench.profile_chart.subtitle.price",
-        builder=_build_price_band_figure,
-    ),
-    TABLE_ID_PRICE_OTHERS: ProfileChartSpec(
-        table_id=TABLE_ID_PRICE_OTHERS,
-        row_target="secondary",
-        title_key="workbench.profiles.price_others",
-        subtitle_key="workbench.profile_chart.subtitle.price_others",
-        builder=_build_price_band_figure,
     ),
     TABLE_ID_DEMAND_WEEKDAY: ProfileChartSpec(
         table_id=TABLE_ID_DEMAND_WEEKDAY,

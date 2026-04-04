@@ -83,6 +83,14 @@ def internal_entry_style(ui_mode: str | None) -> dict[str, str]:
     return VISIBLE_STYLE if should_show_internal_entry(ui_mode) else HIDDEN_STYLE
 
 
+def should_show_admin_surface(ui_mode: str | None) -> bool:
+    return normalize_ui_mode(ui_mode) == UI_MODE_ADMIN
+
+
+def admin_surface_style(ui_mode: str | None) -> dict[str, str]:
+    return VISIBLE_STYLE if should_show_admin_surface(ui_mode) else HIDDEN_STYLE
+
+
 def resolve_page_access(page_key: str, ui_mode: str | None) -> PageAccess:
     mode = normalize_ui_mode(ui_mode)
     if page_key in {PAGE_RESULTS, PAGE_ASSUMPTIONS, PAGE_HELP}:
@@ -101,18 +109,7 @@ def resolve_page_access(page_key: str, ui_mode: str | None) -> PageAccess:
             cta_target_mode=UI_MODE_PRO,
         )
     if page_key == PAGE_ADMIN:
-        if mode == UI_MODE_ADMIN:
-            return PageAccess(page_key=page_key, ui_mode=mode, allowed=True)
-        return PageAccess(
-            page_key=page_key,
-            ui_mode=mode,
-            allowed=False,
-            required_mode=UI_MODE_ADMIN,
-            title_key="ui_mode.gate.admin.title",
-            body_key="ui_mode.gate.admin.body",
-            cta_label_key="ui_mode.cta.switch_admin",
-            cta_target_mode=UI_MODE_ADMIN,
-        )
+        return PageAccess(page_key=page_key, ui_mode=mode, allowed=True)
     raise ValueError(f"Unsupported page key: {page_key}")
 
 

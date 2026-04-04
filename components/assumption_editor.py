@@ -3,6 +3,7 @@ from __future__ import annotations
 from dash import dcc, html
 
 from services.i18n import tr
+from .collapsible_section import collapsible_section
 
 
 def _format_thousands(value) -> str:
@@ -108,6 +109,105 @@ _PRECIOS_ROW1_FIELDS = ["pricing_mode", "include_hw_in_price", "include_var_othe
 _PRECIOS_ROW2_FIELDS = ["price_total_COP", "price_others_total"]
 
 
+def _section_slug(section: dict) -> str:
+    return (
+        str(section.get("group_key") or section.get("group") or "section")
+        .strip()
+        .lower()
+        .replace(" ", "-")
+        .replace("_", "-")
+    )
+
+
+def _advanced_fields_block(
+    section: dict,
+    advanced_fields: list[dict],
+    *,
+    show_all: bool,
+    advanced_label: str,
+    input_id_type: str,
+    field_card_type: str,
+) -> html.Div | html.Details:
+    advanced_grid = html.Div(
+        className="assumption-grid",
+        children=[
+            _field_card(
+                field,
+                field_card_type=field_card_type,
+                input_id_type=input_id_type,
+            )
+            for field in advanced_fields
+        ],
+    )
+    if show_all:
+        return advanced_grid
+    slug = _section_slug(section)
+    return collapsible_section(
+        section_id=f"{slug}-advanced-details",
+        summary_id=f"{slug}-advanced-summary",
+        title_id=f"{slug}-advanced-title",
+        title=advanced_label,
+        open=False,
+        title_level="h5",
+        variant="secondary",
+        class_name="subpanel advanced-details assumption-advanced-details",
+        body_class_name="assumption-advanced-body",
+        body=[advanced_grid],
+    )
+
+
+def _section_content_blocks(
+    section: dict,
+    *,
+    show_all: bool,
+    advanced_label: str,
+    input_id_type: str,
+    field_card_type: str,
+    context_note_type: str,
+) -> list:
+    basic_fields = section.get("basic", [])
+    advanced_fields = section.get("advanced", [])
+    blocks: list = []
+    if section.get("help"):
+        blocks.append(html.P(section["help"], className="section-copy"))
+    if section.get("context_note_id"):
+        note_group = section.get("group_key", section.get("group", ""))
+        blocks.append(
+            html.Div(
+                section.get("context_note", ""),
+                id={"type": context_note_type, "group": note_group},
+                className="assumption-context-note",
+                style={"display": "block"} if section.get("context_note") else {"display": "none"},
+            )
+        )
+    if basic_fields:
+        blocks.append(
+            html.Div(
+                className="assumption-grid",
+                children=[
+                    _field_card(
+                        field,
+                        field_card_type=field_card_type,
+                        input_id_type=input_id_type,
+                    )
+                    for field in basic_fields
+                ],
+            )
+        )
+    if advanced_fields:
+        blocks.append(
+            _advanced_fields_block(
+                section,
+                advanced_fields,
+                show_all=show_all,
+                advanced_label=advanced_label,
+                input_id_type=input_id_type,
+                field_card_type=field_card_type,
+            )
+        )
+    return blocks
+
+
 def _render_precios_section(
     section: dict,
     *,
@@ -116,6 +216,9 @@ def _render_precios_section(
     input_id_type: str,
     field_card_type: str,
     context_note_type: str,
+    collapsible_groups: bool,
+    group_open_defaults: dict[str, bool] | None,
+    section_id_prefix: str,
 ) -> html.Div:
     """Render the Precios section with a custom two-row layout."""
     all_fields = section.get("basic", []) + section.get("advanced", [])
@@ -134,7 +237,7 @@ def _render_precios_section(
     row1_fields.sort(key=lambda f: _PRECIOS_ROW1_FIELDS.index(f["field"]) if f["field"] in _PRECIOS_ROW1_FIELDS else 99)
     row2_fields.sort(key=lambda f: _PRECIOS_ROW2_FIELDS.index(f["field"]) if f["field"] in _PRECIOS_ROW2_FIELDS else 99)
 
-    blocks: list = [html.H4(section["group"])]
+    blocks: list = []
     if section.get("help"):
         blocks.append(html.P(section["help"], className="section-copy"))
     if section.get("context_note_id"):
@@ -193,7 +296,22 @@ def _render_precios_section(
                 ],
             )
         )
-    return html.Div(className="subpanel", children=blocks)
+    if not collapsible_groups:
+        return html.Div(className="subpanel", children=[html.H4(section["group"]), *blocks])
+    slug = _section_slug(section)
+    open_default = bool((group_open_defaults or {}).get(str(section.get("group_key") or section.get("group")), False))
+    return collapsible_section(
+        section_id=f"{section_id_prefix}-{slug}-section",
+        summary_id=f"{section_id_prefix}-{slug}-summary",
+        title_id=f"{section_id_prefix}-{slug}-title",
+        title=section["group"],
+        open=open_default,
+        title_level="h4",
+        variant="secondary",
+        class_name="subpanel assumption-group-section",
+        body_class_name="assumption-group-body",
+        body=blocks,
+    )
 
 
 def render_assumption_sections(
@@ -205,6 +323,9 @@ def render_assumption_sections(
     input_id_type: str = "assumption-input",
     field_card_type: str = "assumption-field-card",
     context_note_type: str = "assumption-context-note",
+    collapsible_groups: bool = False,
+    group_open_defaults: dict[str, bool] | None = None,
+    section_id_prefix: str = "assumption-group",
 ) -> list[html.Div]:
     if not sections:
         return [html.Div(className="validation-empty", children=empty_message)]
@@ -220,64 +341,40 @@ def render_assumption_sections(
                     input_id_type=input_id_type,
                     field_card_type=field_card_type,
                     context_note_type=context_note_type,
+                    collapsible_groups=collapsible_groups,
+                    group_open_defaults=group_open_defaults,
+                    section_id_prefix=section_id_prefix,
                 )
             )
             continue
 
-        basic_fields = section.get("basic", [])
-        advanced_fields = section.get("advanced", [])
-        blocks = [html.H4(section["group"])]
-        if section.get("help"):
-            blocks.append(html.P(section["help"], className="section-copy"))
-        if section.get("context_note_id"):
-            note_group = section.get("group_key", section.get("group", ""))
-            blocks.append(
-                    html.Div(
-                        section.get("context_note", ""),
-                        id={"type": context_note_type, "group": note_group},
-                        className="assumption-context-note",
-                        style={"display": "block"} if section.get("context_note") else {"display": "none"},
-                    )
-                )
-        if basic_fields:
-            blocks.append(
-                html.Div(
-                    className="assumption-grid",
-                    children=[
-                        _field_card(
-                            field,
-                            field_card_type=field_card_type,
-                            input_id_type=input_id_type,
-                        )
-                        for field in basic_fields
-                    ],
-                )
+        blocks = _section_content_blocks(
+            section,
+            show_all=show_all,
+            advanced_label=advanced_label,
+            input_id_type=input_id_type,
+            field_card_type=field_card_type,
+            context_note_type=context_note_type,
+        )
+        if not collapsible_groups:
+            children.append(html.Div(className="subpanel", children=[html.H4(section["group"]), *blocks]))
+            continue
+        slug = _section_slug(section)
+        open_default = bool((group_open_defaults or {}).get(str(section.get("group_key") or section.get("group")), False))
+        children.append(
+            collapsible_section(
+                section_id=f"{section_id_prefix}-{slug}-section",
+                summary_id=f"{section_id_prefix}-{slug}-summary",
+                title_id=f"{section_id_prefix}-{slug}-title",
+                title=section["group"],
+                open=open_default,
+                title_level="h4",
+                variant="secondary",
+                class_name="subpanel assumption-group-section",
+                body_class_name="assumption-group-body",
+                body=blocks,
             )
-        if advanced_fields:
-            advanced_grid = html.Div(
-                className="assumption-grid",
-                children=[
-                    _field_card(
-                        field,
-                        field_card_type=field_card_type,
-                        input_id_type=input_id_type,
-                    )
-                    for field in advanced_fields
-                ],
-            )
-            if show_all:
-                blocks.append(advanced_grid)
-            else:
-                blocks.append(
-                    html.Details(
-                        className="subpanel advanced-details",
-                        children=[
-                            html.Summary(advanced_label),
-                            advanced_grid,
-                        ],
-                    )
-                )
-        children.append(html.Div(className="subpanel", children=blocks))
+        )
     return children
 
 

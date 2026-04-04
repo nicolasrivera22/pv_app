@@ -1,0 +1,24 @@
+{
+  "format_version": 2,
+  "name": "Demo",
+  "slug": "demo",
+  "active_scenario_id": "scenario-cbfcf278",
+  "comparison_scenario_ids": [],
+  "design_comparison_candidate_keys": {},
+  "scenarios": [
+    {
+      "scenario_id": "scenario-cbfcf278",
+      "name": "Base",
+      "source_name": "PV_inputs.xlsx",
+      "selected_candidate_key": null,
+      "dirty": true,
+      "last_run_at": null,
+      "scan_fingerprint": null,
+      "runtime_price_bridge": null
+    }
+  ],
+  "financial_presets": [],
+  "ui_prefs": {
+    "language": "en"
+  }
+}

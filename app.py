@@ -2,16 +2,22 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from dash import ALL, Dash, Input, Output, State, callback, ctx, dcc, html, page_container
+from dash import ALL, Dash, Input, Output, State, callback, ctx, dcc, html, no_update, page_container
 from dash.exceptions import PreventUpdate
 from flask import jsonify, request, send_file
 
+from components.admin_view import build_admin_mode_dialog
+from components.scenario_controls import run_scan_choice_dialog
+from services.admin_access import is_admin_session_unlocked
 from services.desktop_lifecycle import desktop_lifecycle
 from services.i18n import tr
 from services.runtime_paths import assets_dir, bundled_quick_guide_path, configure_runtime_environment, pages_dir
 from services.session_state import bootstrap_client_session
 from services.types import ClientSessionState
 from services.ui_mode import (
+    UI_MODE_ADMIN,
+    UI_MODE_PRO,
+    UI_MODE_SIMPLE,
     PAGE_ASSUMPTIONS,
     PAGE_COMPARE,
     PAGE_HELP,
@@ -21,6 +27,7 @@ from services.ui_mode import (
     normalize_ui_mode,
     resolve_ui_mode_from_payload,
 )
+from services.workspace_admin_callbacks import admin_access_meta, resolve_admin_access_view_state
 
 
 configure_runtime_environment()
@@ -33,6 +40,27 @@ NAV_LINK_TARGETS = (
     ("nav-risk-link", "/risk", PAGE_RISK),
     ("nav-help-link", "/help", PAGE_HELP),
 )
+ADMIN_MODE_ORIGIN_SELECTOR = "mode_selector"
+ADMIN_MODE_ORIGIN_ROUTE = "admin_route"
+ADMIN_MODE_SUCCESS_MESSAGE_KEYS = {
+    "workspace.advanced.setup.success",
+    "workspace.advanced.locked.unlocked",
+}
+
+
+def _admin_mode_dialog_state(
+    *,
+    open_dialog: bool = False,
+    origin: str | None = None,
+    return_mode: str | None = UI_MODE_SIMPLE,
+    post_unlock_href: str | None = None,
+) -> dict[str, object]:
+    return {
+        "open": bool(open_dialog),
+        "origin": None if not origin else str(origin),
+        "return_mode": normalize_ui_mode(return_mode),
+        "post_unlock_href": None if not post_unlock_href else str(post_unlock_href),
+    }
 
 
 def _normalize_pathname(pathname: str | None) -> str:
@@ -120,6 +148,32 @@ def create_app() -> Dash:
                     storage_type="session",
                     data=client_state.to_payload(),
                 ),
+                dcc.Store(
+                    id="admin-access-meta",
+                    storage_type="memory",
+                    data=admin_access_meta(),
+                ),
+                dcc.Store(
+                    id="admin-mode-dialog-state",
+                    storage_type="memory",
+                    data=_admin_mode_dialog_state(return_mode=client_state.ui_mode),
+                ),
+                dcc.Store(
+                    id="run-scan-choice-state",
+                    storage_type="memory",
+                    data={"open": False, "suggested_project_name": ""},
+                ),
+                dcc.Store(
+                    id="project-name-draft-store",
+                    storage_type="memory",
+                    data={"value": ""},
+                ),
+                html.Div(
+                    id="admin-mode-dialog",
+                    className="dialog-backdrop",
+                    style={"display": "none"},
+                ),
+                run_scan_choice_dialog(),
                 html.Header(
                     className="app-header",
                     children=[
@@ -289,26 +343,145 @@ def sync_ui_mode_selector(session_payload: dict | None):
 
 @callback(
     Output("scenario-session-store", "data", allow_duplicate=True),
+    Output("admin-mode-dialog-state", "data", allow_duplicate=True),
+    Output("admin-access-meta", "data", allow_duplicate=True),
+    Output("app-location", "href", allow_duplicate=True),
     Input("ui-mode-selector", "value"),
     Input({"type": "ui-mode-gate-cta", "page": ALL, "target_mode": ALL}, "n_clicks"),
+    Input("admin-redirect-enter-btn", "n_clicks", allow_optional=True),
+    State("scenario-session-store", "data"),
+    State("admin-mode-dialog-state", "data"),
+    prevent_initial_call=True,
+)
+def update_ui_mode(selector_value, _gate_clicks, _admin_route_clicks, session_payload: dict | None, _dialog_state):
+    trigger = ctx.triggered_id
+    client_state = ClientSessionState.from_payload(session_payload)
+    if client_state is None:
+        client_state = bootstrap_client_session(language="es")
+    current_mode = normalize_ui_mode(client_state.ui_mode)
+    cleared_dialog_state = _admin_mode_dialog_state(return_mode=current_mode)
+
+    if trigger == "ui-mode-selector":
+        next_mode = normalize_ui_mode(selector_value)
+        origin = ADMIN_MODE_ORIGIN_SELECTOR
+        post_unlock_href = None
+    elif isinstance(trigger, dict) and trigger.get("type") == "ui-mode-gate-cta":
+        next_mode = normalize_ui_mode(trigger.get("target_mode"))
+        origin = ADMIN_MODE_ORIGIN_SELECTOR
+        post_unlock_href = None
+    elif trigger == "admin-redirect-enter-btn":
+        next_mode = UI_MODE_ADMIN
+        origin = ADMIN_MODE_ORIGIN_ROUTE
+        post_unlock_href = "/assumptions#advanced-tools"
+    else:
+        raise PreventUpdate
+
+    if next_mode in {UI_MODE_SIMPLE, UI_MODE_PRO}:
+        if current_mode == next_mode:
+            raise PreventUpdate
+        return (
+            replace(client_state, ui_mode=next_mode).to_payload(),
+            _admin_mode_dialog_state(return_mode=next_mode),
+            admin_access_meta(),
+            no_update,
+        )
+
+    if is_admin_session_unlocked(client_state.session_id):
+        next_payload = no_update if current_mode == UI_MODE_ADMIN else replace(client_state, ui_mode=UI_MODE_ADMIN).to_payload()
+        href = post_unlock_href or no_update
+        if next_payload is no_update and href is no_update:
+            raise PreventUpdate
+        return (
+            next_payload,
+            _admin_mode_dialog_state(return_mode=UI_MODE_ADMIN),
+            admin_access_meta(),
+            href,
+        )
+
+    return (
+        no_update,
+        _admin_mode_dialog_state(
+            open_dialog=True,
+            origin=origin,
+            return_mode=current_mode,
+            post_unlock_href=post_unlock_href,
+        ),
+        admin_access_meta(),
+        no_update,
+    )
+
+
+@callback(
+    Output("admin-mode-dialog", "style"),
+    Output("admin-mode-dialog", "children"),
+    Input("admin-mode-dialog-state", "data"),
+    Input("scenario-session-store", "data"),
+    Input("language-selector", "value"),
+    Input("admin-access-meta", "data"),
+)
+def sync_admin_mode_dialog(dialog_state, session_payload, language_value, access_meta):
+    if not isinstance(dialog_state, dict) or not bool(dialog_state.get("open")):
+        return {"display": "none"}, []
+    view_state = resolve_admin_access_view_state(session_payload, language_value, access_meta)
+    return {
+        "display": "flex",
+    }, [
+        build_admin_mode_dialog(
+            lang=str(view_state["lang"]),
+            access_mode=str(view_state["access_mode"]),
+            status_key=view_state["status_key"],
+            tone=str(view_state["tone"]),
+        )
+    ]
+
+
+@callback(
+    Output("admin-mode-dialog-state", "data", allow_duplicate=True),
+    Output("admin-access-meta", "data", allow_duplicate=True),
+    Input("admin-mode-dialog-cancel-btn", "n_clicks"),
     State("scenario-session-store", "data"),
     prevent_initial_call=True,
 )
-def update_ui_mode(selector_value, _gate_clicks, session_payload: dict | None):
-    trigger = ctx.triggered_id
-    if trigger == "ui-mode-selector":
-        next_mode = normalize_ui_mode(selector_value)
-    elif isinstance(trigger, dict) and trigger.get("type") == "ui-mode-gate-cta":
-        next_mode = normalize_ui_mode(trigger.get("target_mode"))
-    else:
+def cancel_admin_mode_dialog(_cancel_clicks, session_payload):
+    return (
+        _admin_mode_dialog_state(return_mode=resolve_ui_mode_from_payload(session_payload)),
+        admin_access_meta(),
+    )
+
+
+@callback(
+    Output("scenario-session-store", "data", allow_duplicate=True),
+    Output("admin-mode-dialog-state", "data", allow_duplicate=True),
+    Output("admin-access-meta", "data", allow_duplicate=True),
+    Output("app-location", "href", allow_duplicate=True),
+    Input("admin-access-meta", "data"),
+    State("scenario-session-store", "data"),
+    State("admin-mode-dialog-state", "data"),
+    prevent_initial_call=True,
+)
+def finalize_admin_mode_unlock(access_meta, session_payload, dialog_state):
+    if not isinstance(dialog_state, dict) or not bool(dialog_state.get("open")):
+        raise PreventUpdate
+    message_key = str((access_meta or {}).get("message_key") or "").strip()
+    if message_key not in ADMIN_MODE_SUCCESS_MESSAGE_KEYS:
         raise PreventUpdate
 
     client_state = ClientSessionState.from_payload(session_payload)
     if client_state is None:
         client_state = bootstrap_client_session(language="es")
-    if client_state.ui_mode == next_mode:
-        raise PreventUpdate
-    return replace(client_state, ui_mode=next_mode).to_payload()
+    current_mode = normalize_ui_mode(client_state.ui_mode)
+    next_payload = no_update if current_mode == UI_MODE_ADMIN else replace(client_state, ui_mode=UI_MODE_ADMIN).to_payload()
+    href = (
+        str(dialog_state.get("post_unlock_href") or "").strip() or no_update
+        if str(dialog_state.get("origin") or "").strip() == ADMIN_MODE_ORIGIN_ROUTE
+        else no_update
+    )
+    return (
+        next_payload,
+        _admin_mode_dialog_state(return_mode=UI_MODE_ADMIN),
+        admin_access_meta(),
+        href,
+    )
 
 
 if __name__ == "__main__":

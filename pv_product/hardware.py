@@ -4,6 +4,8 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
+from .panel_technology import resolve_generation_pr
+
 
 def safe_div(a, b, default=0.0):
     """Divide con protección contra cero/nulos."""
@@ -76,7 +78,8 @@ def compute_kwp_seed(cfg) -> float:
         seed = float(cfg.get("kWp_seed_manual_kWp", 10.0))
     else:
         Dm = 30.0
-        seed = cfg["E_month_kWh"] / (cfg["PR"] * cfg["HSP"] * Dm)
+        pr_eff = resolve_generation_pr(cfg["PR"], cfg.get("panel_technology_mode"))
+        seed = cfg["E_month_kWh"] / (pr_eff * cfg["HSP"] * Dm)
     seed = math.ceil(1e3 * seed / cfg["P_mod_W"]) * cfg["P_mod_W"] / 1e3
     return max(seed, 0.1)
 
@@ -121,7 +124,10 @@ def peak_ratio_ok(
     else:
         m = int(np.argmax(demand_month_factor))
     year = int(cfg.get("limit_peak_year", 0))
-    PR_eff = cfg["PR"] * ((1 - cfg.get("deg_rate", 0.0)) ** year)
+    # Panel technology is a yield-only assumption in v1. It changes resolved
+    # PR, but does not alter module wattage, layout, or hardware constraints.
+    generation_pr = resolve_generation_pr(cfg["PR"], cfg.get("panel_technology_mode"))
+    PR_eff = generation_pr * ((1 - cfg.get("deg_rate", 0.0)) ** year)
 
     E_pv_day = kWp * PR_eff * hsp_month[m]
     P_pv_dc = np.array(s24) * E_pv_day * demand_month_factor[m]

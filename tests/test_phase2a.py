@@ -5,10 +5,22 @@ from io import BytesIO
 
 import pandas.testing as pdt
 from openpyxl import load_workbook
+import pytest
 
+from services.candidate_financials import (
+    CandidateFinancialSnapshotUnavailableError,
+    attach_candidate_financial_snapshot,
+    build_candidate_financial_snapshot,
+    build_snapshot_monthly_frame,
+    get_candidate_financial_snapshot_cache,
+    resolve_financial_best_candidate_key,
+    validate_candidate_financial_snapshot,
+)
+import services.export_excel as export_excel_service
 from services import (
     ScenarioSessionState,
     add_scenario,
+    apply_prepared_economics_runtime_price_bridge,
     build_comparison_figures,
     build_comparison_table,
     create_scenario_record,
@@ -18,12 +30,16 @@ from services import (
     export_scenario_workbook,
     load_example_config,
     normalize_inverter_catalog_rows,
+    prepare_economics_runtime_price_bridge,
     rename_scenario,
     run_scenario_scan,
+    select_candidate_and_sync_runtime_price,
     set_comparison_scenarios,
     update_scenario_bundle,
     update_selected_candidate,
 )
+from services.economics_engine import EconomicsPreviewResult
+from services.scenario_session import hydrate_scenario_scan, resolve_runtime_price_bridge_state
 
 
 def _fast_bundle():
@@ -42,6 +58,19 @@ def _run_named_scenario(name: str, bundle=None):
     bundle = bundle or _fast_bundle()
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record(name, bundle))
     return run_scenario_scan(state, state.active_scenario_id)
+
+
+def _bridge_selected_candidate(state: ScenarioSessionState) -> ScenarioSessionState:
+    active = state.get_scenario()
+    assert active is not None
+    prepared = prepare_economics_runtime_price_bridge(active)
+    assert prepared.applied is True
+    return apply_prepared_economics_runtime_price_bridge(
+        state,
+        active.scenario_id,
+        prepared,
+        mark_project_dirty=False,
+    )
 
 
 def test_scenario_duplicate_rename_delete_workflow() -> None:
@@ -76,6 +105,161 @@ def test_update_bundle_marks_scenario_dirty_and_clears_scan() -> None:
     assert active.selected_candidate_key is None
 
 
+def test_update_bundle_preserves_scan_for_economics_only_changes() -> None:
+    state = _run_named_scenario("Economics only")
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+
+    changed_costs = active.config_bundle.economics_cost_items_table.copy()
+    changed_prices = active.config_bundle.economics_price_items_table.copy()
+    changed_costs.at[0, "amount_COP"] = 123_456.0
+    changed_prices.at[0, "value"] = 0.15
+    updated_bundle = replace(
+        active.config_bundle,
+        economics_cost_items_table=changed_costs,
+        economics_price_items_table=changed_prices,
+    )
+
+    state = update_scenario_bundle(state, active.scenario_id, updated_bundle)
+    updated = state.get_scenario()
+
+    assert updated is not None
+    assert updated.dirty is False
+    assert updated.scan_result is active.scan_result
+    assert updated.scan_fingerprint == active.scan_fingerprint
+    assert updated.selected_candidate_key == active.selected_candidate_key
+    assert state.project_dirty is True
+
+
+def test_run_scenario_scan_keeps_runtime_pricing_unchanged_until_manual_bridge() -> None:
+    bundle = _fast_bundle()
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Auto bridge", bundle))
+
+    state = run_scenario_scan(state, state.active_scenario_id)
+    active = state.get_scenario()
+
+    assert active is not None
+    assert active.scan_result is not None
+    assert active.runtime_price_bridge is None
+    prepared = prepare_economics_runtime_price_bridge(active)
+    assert prepared.applied is True
+    assert active.selected_candidate_key == prepared.candidate_key
+    assert active.config_bundle.config["pricing_mode"] == bundle.config["pricing_mode"]
+    assert float(active.config_bundle.config["price_total_COP"]) == pytest.approx(float(bundle.config["price_total_COP"]))
+    assert active.config_bundle.config["include_hw_in_price"] == bundle.config["include_hw_in_price"]
+    assert float(active.config_bundle.config["price_others_total"]) == pytest.approx(float(bundle.config["price_others_total"]))
+
+
+def test_update_selected_candidate_remains_selection_only() -> None:
+    state = _run_named_scenario("Selection primitive")
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+    assert active.runtime_price_bridge is None
+    non_best_key = next(
+        key for key in active.scan_result.candidate_details if key != active.selected_candidate_key
+    )
+    original_price_total = float(active.config_bundle.config["price_total_COP"])
+    original_bridge = active.runtime_price_bridge
+
+    state = update_selected_candidate(state, active.scenario_id, non_best_key)
+    updated = state.get_scenario()
+
+    assert updated is not None
+    assert updated.selected_candidate_key == non_best_key
+    assert updated.dirty is False
+    assert float(updated.config_bundle.config["price_total_COP"]) == pytest.approx(original_price_total)
+    assert updated.runtime_price_bridge == original_bridge
+    assert state.project_dirty is True
+
+
+def test_update_selected_candidate_stales_existing_bridge_without_mutating_runtime_fields() -> None:
+    state = _run_named_scenario("Selection stale bridge")
+    state = _bridge_selected_candidate(state)
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+    assert active.runtime_price_bridge is not None
+
+    previous_candidate = active.selected_candidate_key
+    original_pricing_mode = active.config_bundle.config["pricing_mode"]
+    original_price_total = float(active.config_bundle.config["price_total_COP"])
+    original_include_hw = active.config_bundle.config["include_hw_in_price"]
+    original_price_others = float(active.config_bundle.config["price_others_total"])
+    non_best_key = next(
+        key for key in active.scan_result.candidate_details if key != previous_candidate
+    )
+
+    state = update_selected_candidate(state, active.scenario_id, non_best_key)
+    updated = state.get_scenario()
+
+    assert updated is not None
+    assert updated.selected_candidate_key == non_best_key
+    assert updated.dirty is False
+    assert updated.runtime_price_bridge is not None
+    assert updated.runtime_price_bridge.candidate_key == previous_candidate
+    assert updated.runtime_price_bridge.stale is True
+    assert resolve_runtime_price_bridge_state(updated) == "stale"
+    assert updated.config_bundle.config["pricing_mode"] == original_pricing_mode
+    assert float(updated.config_bundle.config["price_total_COP"]) == pytest.approx(original_price_total)
+    assert updated.config_bundle.config["include_hw_in_price"] == original_include_hw
+    assert float(updated.config_bundle.config["price_others_total"]) == pytest.approx(original_price_others)
+    assert state.project_dirty is True
+
+
+def test_select_candidate_and_sync_runtime_price_updates_runtime_fields() -> None:
+    state = _run_named_scenario("Selection sync")
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+    non_best_key = None
+    expected = None
+    for candidate_key in active.scan_result.candidate_details:
+        if candidate_key == active.selected_candidate_key:
+            continue
+        prepared = prepare_economics_runtime_price_bridge(replace(active, selected_candidate_key=candidate_key))
+        if prepared.applied:
+            non_best_key = candidate_key
+            expected = prepared
+            break
+    assert non_best_key is not None
+    assert expected is not None
+    assert expected.applied is True
+
+    state, prepared = select_candidate_and_sync_runtime_price(state, active.scenario_id, non_best_key)
+    updated = state.get_scenario()
+
+    assert prepared.applied is True
+    assert updated is not None
+    assert updated.selected_candidate_key == non_best_key
+    assert updated.config_bundle.config["pricing_mode"] == "total"
+    assert float(updated.config_bundle.config["price_total_COP"]) == pytest.approx(float(expected.final_price_COP))
+    assert updated.config_bundle.config["include_hw_in_price"] is False
+    assert float(updated.config_bundle.config["price_others_total"]) == pytest.approx(0.0)
+    assert updated.runtime_price_bridge is not None
+    assert updated.runtime_price_bridge.candidate_key == non_best_key
+    assert updated.runtime_price_bridge.applied_economics_signature is not None
+
+
+def test_hydrate_scenario_scan_does_not_auto_bridge() -> None:
+    state = _run_named_scenario("Hydrate only")
+    active = state.get_scenario()
+    assert active is not None
+    stripped = replace(active, scan_result=None, runtime_price_bridge=None)
+    state = replace(
+        state,
+        scenarios=tuple(stripped if item.scenario_id == stripped.scenario_id else item for item in state.scenarios),
+    )
+
+    hydrated = hydrate_scenario_scan(state, active.scenario_id)
+    hydrated_active = hydrated.get_scenario()
+
+    assert hydrated_active is not None
+    assert hydrated_active.scan_result is not None
+    assert hydrated_active.runtime_price_bridge is None
+
+
 def test_selected_candidate_resets_after_scenario_change_and_rerun() -> None:
     state = _run_named_scenario("Selection test")
     active = state.get_scenario()
@@ -98,8 +282,71 @@ def test_selected_candidate_resets_after_scenario_change_and_rerun() -> None:
     state = run_scenario_scan(state, active.scenario_id)
     rerun = state.get_scenario()
 
-    assert rerun.selected_candidate_key == rerun.scan_result.best_candidate_key
+    assert rerun.selected_candidate_key == resolve_financial_best_candidate_key(rerun)
     assert non_best_key not in rerun.scan_result.candidate_details
+
+
+def test_blocked_selection_sync_keeps_same_candidate_bridge_active(monkeypatch) -> None:
+    state = _run_named_scenario("Blocked same candidate")
+    state = _bridge_selected_candidate(state)
+    active = state.get_scenario()
+    assert active is not None
+    assert active.runtime_price_bridge is not None
+
+    def _blocked_preview(_scenario, *, economics_cost_items, economics_price_items, **_kwargs):
+        _ = economics_cost_items, economics_price_items
+        return EconomicsPreviewResult(
+            state="rerun_required",
+            message_key="workspace.admin.economics.preview.state.rerun_required",
+        )
+
+    monkeypatch.setattr("services.scenario_session.resolve_economics_preview", _blocked_preview)
+
+    next_state, prepared = select_candidate_and_sync_runtime_price(
+        state,
+        active.scenario_id,
+        active.selected_candidate_key,
+    )
+    next_active = next_state.get_scenario()
+
+    assert prepared.applied is False
+    assert next_active is not None
+    assert next_active.runtime_price_bridge is not None
+    assert next_active.runtime_price_bridge.stale is False
+    assert resolve_runtime_price_bridge_state(next_active) == "active"
+
+
+def test_blocked_selection_sync_stales_bridge_when_governing_design_changes(monkeypatch) -> None:
+    state = _run_named_scenario("Blocked other candidate")
+    state = _bridge_selected_candidate(state)
+    active = state.get_scenario()
+    assert active is not None
+    assert active.scan_result is not None
+    assert active.runtime_price_bridge is not None
+    original_price_total = float(active.config_bundle.config["price_total_COP"])
+    non_best_key = next(
+        key for key in active.scan_result.candidate_details if key != active.scan_result.best_candidate_key
+    )
+
+    def _blocked_preview(_scenario, *, economics_cost_items, economics_price_items, **_kwargs):
+        _ = economics_cost_items, economics_price_items
+        return EconomicsPreviewResult(
+            state="rerun_required",
+            message_key="workspace.admin.economics.preview.state.rerun_required",
+        )
+
+    monkeypatch.setattr("services.scenario_session.resolve_economics_preview", _blocked_preview)
+
+    next_state, prepared = select_candidate_and_sync_runtime_price(state, active.scenario_id, non_best_key)
+    next_active = next_state.get_scenario()
+
+    assert prepared.applied is False
+    assert next_active is not None
+    assert next_active.selected_candidate_key == non_best_key
+    assert float(next_active.config_bundle.config["price_total_COP"]) == pytest.approx(original_price_total)
+    assert next_active.runtime_price_bridge is not None
+    assert next_active.runtime_price_bridge.stale is True
+    assert resolve_runtime_price_bridge_state(next_active) == "stale"
 
 
 def test_catalog_row_validation_reports_duplicate_names_and_nonnumeric_values() -> None:
@@ -160,3 +407,205 @@ def test_export_comparison_workbook_contains_expected_sheets() -> None:
     assert "Comparison_KPIs" in workbook.sheetnames
     candidate_sheets = [name for name in workbook.sheetnames if name.startswith("Candidates_")]
     assert len(candidate_sheets) == 2
+
+
+def test_candidate_financial_snapshot_cache_reuses_key_and_invalidates_on_economics_change() -> None:
+    get_candidate_financial_snapshot_cache().clear()
+    state = _run_named_scenario("Snapshot cache")
+    active = state.get_scenario()
+    assert active is not None
+    candidate_key = active.selected_candidate_key
+    assert candidate_key is not None
+
+    first = build_candidate_financial_snapshot(active, candidate_key)
+    second = build_candidate_financial_snapshot(active, candidate_key)
+    assert first is second
+
+    changed_prices = active.config_bundle.economics_price_items_table.copy()
+    changed_prices.at[1, "value"] = float(changed_prices.at[1, "value"]) + 0.05
+    changed_bundle = replace(active.config_bundle, economics_price_items_table=changed_prices)
+    changed_state = update_scenario_bundle(state, active.scenario_id, changed_bundle)
+    changed_active = changed_state.get_scenario()
+    assert changed_active is not None
+
+    third = build_candidate_financial_snapshot(changed_active, candidate_key)
+    assert third is not first
+    assert third.economics_signature != first.economics_signature
+    assert third.visible_npv_COP != pytest.approx(first.visible_npv_COP)
+
+
+def test_snapshot_year0_is_tax_inclusive_and_bridge_reuses_same_total() -> None:
+    state = _run_named_scenario("Tax-inclusive snapshot")
+    scenario = state.get_scenario()
+    assert scenario is not None
+    candidate_key = scenario.selected_candidate_key
+    assert candidate_key is not None
+
+    changed_prices = scenario.config_bundle.economics_price_items_table.copy()
+    changed_prices.at[0, "enabled"] = True
+    changed_prices.at[0, "value"] = 0.19
+    changed_bundle = replace(scenario.config_bundle, economics_price_items_table=changed_prices)
+    state = update_scenario_bundle(state, scenario.scenario_id, changed_bundle)
+    scenario = state.get_scenario()
+    assert scenario is not None
+
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key, use_cache=False)
+    prepared = prepare_economics_runtime_price_bridge(replace(scenario, selected_candidate_key=candidate_key))
+
+    assert snapshot.economics_result.tax_total_COP > 0.0
+    assert snapshot.economics_result.subtotal_with_tax_COP == pytest.approx(
+        snapshot.economics_result.cost_total_COP + snapshot.economics_result.tax_total_COP
+    )
+    assert snapshot.project_price_year0_COP == pytest.approx(snapshot.economics_result.final_price_COP)
+    assert prepared.applied is True
+    assert prepared.candidate_key == candidate_key
+    assert prepared.final_price_COP == pytest.approx(snapshot.project_price_year0_COP)
+
+
+def test_two_candidates_build_distinct_snapshots_and_ignore_poisoned_legacy_finance() -> None:
+    state = _run_named_scenario("Distinct candidate snapshots")
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+
+    pair: tuple[str, str] | None = None
+    baseline_snapshots: dict[str, object] = {}
+    keys = list(scenario.scan_result.candidate_details)
+    for left_key in keys:
+        for right_key in keys:
+            if left_key == right_key:
+                continue
+            left_snapshot = build_candidate_financial_snapshot(scenario, left_key)
+            right_snapshot = build_candidate_financial_snapshot(scenario, right_key)
+            if left_snapshot.project_price_year0_COP != pytest.approx(right_snapshot.project_price_year0_COP):
+                pair = (left_key, right_key)
+                baseline_snapshots = {
+                    left_key: left_snapshot,
+                    right_key: right_snapshot,
+                }
+                break
+        if pair is not None:
+            break
+
+    assert pair is not None
+    left_key, right_key = pair
+    for candidate_key in pair:
+        detail = scenario.scan_result.candidate_details[candidate_key]
+        detail["summary"]["capex_client"] = -123_456.0
+        detail["summary"]["cum_disc_final"] = -654_321.0
+        detail["summary"]["payback_month"] = 999
+        detail["summary"]["payback_years"] = 83.25
+        detail["monthly"]["NPV_COP"] = [-777_777.0] * len(detail["monthly"])
+
+    rebuilt_left = build_candidate_financial_snapshot(scenario, left_key, use_cache=False)
+    rebuilt_right = build_candidate_financial_snapshot(scenario, right_key, use_cache=False)
+    baseline_left = baseline_snapshots[left_key]
+    baseline_right = baseline_snapshots[right_key]
+
+    assert rebuilt_left.project_price_year0_COP == pytest.approx(baseline_left.project_price_year0_COP)
+    assert rebuilt_right.project_price_year0_COP == pytest.approx(baseline_right.project_price_year0_COP)
+    assert rebuilt_left.project_price_year0_COP != pytest.approx(rebuilt_right.project_price_year0_COP)
+    assert rebuilt_left.visible_npv_COP == pytest.approx(baseline_left.visible_npv_COP)
+    assert rebuilt_right.visible_npv_COP == pytest.approx(baseline_right.visible_npv_COP)
+
+
+def test_validate_candidate_financial_snapshot_fails_closed_on_candidate_mismatch() -> None:
+    state = _run_named_scenario("Snapshot mismatch")
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    candidate_key = scenario.selected_candidate_key
+    assert candidate_key is not None
+    other_key = next(key for key in scenario.scan_result.candidate_details if key != candidate_key)
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key)
+
+    with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="candidato solicitado"):
+        validate_candidate_financial_snapshot(snapshot, candidate_key=other_key)
+
+    broken_snapshot = replace(
+        snapshot,
+        economics_result=replace(
+            snapshot.economics_result,
+            quantities=replace(snapshot.economics_result.quantities, candidate_key=other_key),
+        ),
+    )
+
+    with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="economics_result pertenece a"):
+        validate_candidate_financial_snapshot(broken_snapshot, candidate_key=candidate_key)
+
+
+def test_attach_candidate_financial_snapshot_adds_validated_snapshot_and_project_summary() -> None:
+    state = _run_named_scenario("Attach snapshot")
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    candidate_key = scenario.selected_candidate_key
+    assert candidate_key is not None
+
+    attached = attach_candidate_financial_snapshot(scenario, scenario.scan_result.candidate_details[candidate_key], candidate_key)
+    snapshot = attached["financial_snapshot"]
+
+    assert attached["candidate_key"] == candidate_key
+    assert attached["project_summary"]["project_price_year0_COP"] == pytest.approx(snapshot.project_price_year0_COP)
+    assert attached["project_summary"]["capex_client"] == pytest.approx(snapshot.capex_client_COP)
+    assert attached["project_summary"]["cum_disc_final"] == pytest.approx(snapshot.visible_npv_COP)
+    assert attached["project_summary"]["payback_month"] == snapshot.payback_month
+    assert attached["project_summary"]["payback_years"] == snapshot.payback_years
+
+
+def test_export_scenario_workbook_uses_snapshot_finance_contract() -> None:
+    state = _run_named_scenario("Export snapshot")
+    scenario = state.get_scenario()
+    assert scenario is not None
+    candidate_key = scenario.selected_candidate_key
+    assert candidate_key is not None
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key)
+    detail = scenario.scan_result.candidate_details[candidate_key]
+    detail["summary"]["capex_client"] = -999_999.0
+    detail["summary"]["cum_disc_final"] = -888_888.0
+    detail["summary"]["payback_month"] = 999
+    detail["summary"]["payback_years"] = 83.25
+    detail["monthly"]["NPV_COP"] = [-777_777.0] * len(detail["monthly"])
+
+    payload = export_scenario_workbook(scenario)
+    workbook = load_workbook(BytesIO(payload), data_only=True)
+    summary_sheet = workbook["Summary"]
+    summary_values = {
+        summary_sheet.cell(row=row_index, column=1).value: summary_sheet.cell(row=row_index, column=2).value
+        for row_index in range(2, summary_sheet.max_row + 1)
+    }
+    monthly_sheet = workbook["Monthly_Selected"]
+    headers = [monthly_sheet.cell(row=1, column=column_index).value for column_index in range(1, monthly_sheet.max_column + 1)]
+    npv_column = headers.index("NPV_COP") + 1
+    last_npv = monthly_sheet.cell(row=monthly_sheet.max_row, column=npv_column).value
+
+    assert summary_values["candidate_key"] == candidate_key
+    assert float(summary_values["capex_client_COP"]) == pytest.approx(snapshot.capex_client_COP)
+    assert float(summary_values["NPV_COP"]) == pytest.approx(snapshot.visible_npv_COP)
+    assert float(last_npv) == pytest.approx(snapshot.visible_npv_COP)
+
+
+def test_export_scenario_workbook_fails_closed_when_snapshot_attachment_fails(monkeypatch) -> None:
+    state = _run_named_scenario("Export fail closed")
+    scenario = state.get_scenario()
+    assert scenario is not None
+
+    def _boom(*_args, **_kwargs):
+        raise CandidateFinancialSnapshotUnavailableError("snapshot roto para export")
+
+    monkeypatch.setattr(export_excel_service, "attach_candidate_financial_snapshot", _boom)
+
+    with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="snapshot roto"):
+        export_scenario_workbook(scenario)
+
+
+def test_build_snapshot_monthly_frame_ignores_poisoned_legacy_monthly_npv() -> None:
+    state = _run_named_scenario("Snapshot monthly frame")
+    scenario = state.get_scenario()
+    assert scenario is not None and scenario.scan_result is not None
+    candidate_key = scenario.selected_candidate_key
+    assert candidate_key is not None
+    snapshot = build_candidate_financial_snapshot(scenario, candidate_key)
+    detail = scenario.scan_result.candidate_details[candidate_key]
+    detail["monthly"]["NPV_COP"] = [42.0] * len(detail["monthly"])
+
+    frame = build_snapshot_monthly_frame(detail["monthly"], snapshot)
+
+    assert list(frame["NPV_COP"]) == list(snapshot.cumulative_discounted_cash_flow_series)

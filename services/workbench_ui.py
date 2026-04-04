@@ -12,6 +12,7 @@ from .ui_schema import coerce_config_value, parse_assumption_input_value
 from .validation import (
     normalize_battery_catalog_rows,
     normalize_inverter_catalog_rows,
+    normalize_panel_catalog_rows,
     normalize_price_table_rows,
     refresh_bundle_issues,
 )
@@ -65,6 +66,7 @@ def rebuild_bundle_from_ui(
     config_updates: dict[str, Any],
     inverter_catalog: pd.DataFrame,
     battery_catalog: pd.DataFrame,
+    panel_catalog: pd.DataFrame | None = None,
     demand_profile: pd.DataFrame,
     demand_profile_weights: pd.DataFrame,
     demand_profile_general: pd.DataFrame,
@@ -72,6 +74,8 @@ def rebuild_bundle_from_ui(
     sun_profile: pd.DataFrame,
     cop_kwp_table: pd.DataFrame,
     cop_kwp_table_others: pd.DataFrame,
+    economics_cost_items: pd.DataFrame | None = None,
+    economics_price_items: pd.DataFrame | None = None,
 ) -> LoadedConfigBundle:
     config_table = update_config_table_values(base_bundle.config_table, config_updates)
     return rebuild_config_bundle(
@@ -80,6 +84,7 @@ def rebuild_bundle_from_ui(
         config_table=config_table,
         inverter_catalog=inverter_catalog,
         battery_catalog=battery_catalog,
+        panel_catalog=panel_catalog if panel_catalog is not None else base_bundle.panel_catalog,
         demand_profile=demand_profile,
         demand_profile_weights=demand_profile_weights,
         demand_profile_general=demand_profile_general,
@@ -87,6 +92,8 @@ def rebuild_bundle_from_ui(
         sun_profile=sun_profile,
         cop_kwp_table=cop_kwp_table,
         cop_kwp_table_others=cop_kwp_table_others,
+        economics_cost_items=economics_cost_items if economics_cost_items is not None else base_bundle.economics_cost_items_table,
+        economics_price_items=economics_price_items if economics_price_items is not None else base_bundle.economics_price_items_table,
     )
 
 
@@ -97,6 +104,7 @@ def apply_workbench_editor_state(
     assumption_values: list[Any] | None,
     inverter_rows: list[dict] | None,
     battery_rows: list[dict] | None,
+    panel_rows: list[dict] | None,
     month_profile_rows: list[dict] | None,
     sun_profile_rows: list[dict] | None,
     price_kwp_rows: list[dict] | None,
@@ -108,6 +116,8 @@ def apply_workbench_editor_state(
     config = collect_config_updates(assumption_input_ids, assumption_values, base_bundle.config)
     inverter_catalog, inverter_issues = normalize_inverter_catalog_rows(inverter_rows)
     battery_catalog, battery_issues = normalize_battery_catalog_rows(battery_rows)
+    panel_catalog_rows = panel_rows if panel_rows is not None else base_bundle.panel_catalog.to_dict("records")
+    panel_catalog, panel_issues = normalize_panel_catalog_rows(panel_catalog_rows)
     price_kwp_table, price_kwp_issues = normalize_price_table_rows(price_kwp_rows, "Precios_kWp_relativos")
     price_kwp_table_others, price_kwp_others_issues = normalize_price_table_rows(
         price_kwp_others_rows,
@@ -119,6 +129,7 @@ def apply_workbench_editor_state(
         config_updates=config,
         inverter_catalog=inverter_catalog,
         battery_catalog=battery_catalog,
+        panel_catalog=panel_catalog,
         demand_profile=frame_from_rows(demand_profile_rows, list(base_bundle.demand_profile_table.columns)),
         demand_profile_weights=frame_from_rows(demand_profile_weights_rows, list(base_bundle.demand_profile_weights_table.columns)),
         demand_profile_general=frame_from_rows(demand_profile_general_rows, list(base_bundle.demand_profile_general_table.columns)),
@@ -132,7 +143,7 @@ def apply_workbench_editor_state(
     )
     return refresh_bundle_issues(
         bundle,
-        extra_issues=[*inverter_issues, *battery_issues, *price_kwp_issues, *price_kwp_others_issues],
+        extra_issues=[*inverter_issues, *battery_issues, *panel_issues, *price_kwp_issues, *price_kwp_others_issues],
     )
 
 

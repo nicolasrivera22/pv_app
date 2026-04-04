@@ -22,6 +22,15 @@ from pv_product.utils import (
     plot_npv_scan,
 )
 
+from .candidate_financials import (
+    attach_candidate_financial_snapshot,
+    attach_candidate_financial_snapshots,
+    build_snapshot_monthly_frame,
+    resolve_financial_best_candidate_key,
+    resolve_financial_candidate_key,
+    validate_candidate_financial_snapshot,
+)
+from .result_views import build_candidate_table
 from .types import MonteCarloRunResult, ScenarioRecord
 
 LEGACY_DETERMINISTIC_TOP_LEVEL = (
@@ -74,10 +83,12 @@ def legacy_risk_export_manifest() -> tuple[str, ...]:
 def _selected_detail(scenario: ScenarioRecord) -> tuple[str, dict]:
     if scenario.scan_result is None:
         raise ValueError(f"El escenario '{scenario.name}' no tiene resultados para exportar.")
-    candidate_key = scenario.selected_candidate_key or scenario.scan_result.best_candidate_key
+    candidate_key = resolve_financial_candidate_key(scenario)
     if not candidate_key:
         raise ValueError(f"El escenario '{scenario.name}' no tiene diseños viables para exportar.")
-    return candidate_key, scenario.scan_result.candidate_details[candidate_key]
+    attached_detail = attach_candidate_financial_snapshot(scenario, scenario.scan_result.candidate_details[candidate_key], candidate_key)
+    validate_candidate_financial_snapshot(attached_detail.get("financial_snapshot"), candidate_key=candidate_key)
+    return candidate_key, attached_detail
 
 
 def _ordered_details(scenario: ScenarioRecord) -> list[dict]:
@@ -103,15 +114,14 @@ def _ensure_legacy_directories(output_dir: Path) -> dict[str, Path]:
 
 def _legacy_scan_frame(scenario: ScenarioRecord) -> pd.DataFrame:
     assert scenario.scan_result is not None
-    frame = scenario.scan_result.candidates.copy()
+    frame = build_candidate_table(attach_candidate_financial_snapshots(scenario), require_financial_snapshot=True).copy()
     frame["filtered"] = "ok"
     frame["best_battery"] = frame["best_battery_for_kwp"].astype(bool)
     frame = frame.rename(columns={"NPV_COP": "NPV"})
     return frame[["kWp", "battery", "NPV", "peak_ratio", "filtered", "best_battery"]].copy()
 
 
-def _write_summary_text(path: Path, scenario: ScenarioRecord, candidate_key: str, detail: dict) -> None:
-    summary = detail["summary"]
+def _write_summary_text(path: Path, scenario: ScenarioRecord, candidate_key: str, detail: dict, snapshot) -> None:
     lines = [
         f"Escenario: {scenario.name}",
         f"Fuente: {scenario.source_name}",
@@ -119,8 +129,9 @@ def _write_summary_text(path: Path, scenario: ScenarioRecord, candidate_key: str
         f"kWp seleccionado: {float(detail['kWp']):.3f}",
         f"Batería seleccionada: {detail['battery_name']}",
         f"Inversor: {detail['inv_sel']['inverter']['name']} ({detail['inv_sel']['inverter']['AC_kW']} kW)",
-        f"VPN [COP]: {float(summary['cum_disc_final']):,.0f}",
-        f"Payback [años]: {summary['payback_years'] if summary['payback_years'] is not None else 'NaN'}",
+        f"CAPEX cliente [COP]: {float(snapshot.capex_client_COP):,.0f}",
+        f"VPN [COP]: {float(snapshot.visible_npv_COP):,.0f}",
+        f"Payback [años]: {snapshot.payback_years if snapshot.payback_years is not None else 'NaN'}",
         f"Relación pico: {float(detail['peak_ratio']):.3f}",
         "Monte Carlo: exporta los artefactos desde la página de Riesgo para incluir la distribución estocástica.",
     ]
@@ -206,6 +217,7 @@ def export_deterministic_artifacts(
     output_dir = _scenario_root(_resolve_output_root(output_root), scenario_record)
     directories = _ensure_legacy_directories(output_dir)
     candidate_key, selected_detail = _selected_detail(scenario_record)
+    selected_snapshot = validate_candidate_financial_snapshot(selected_detail.get("financial_snapshot"), candidate_key=candidate_key)
     cfg = scenario_record.config_bundle.config
     export_allowed = bool(cfg.get("export_allowed", True))
 
@@ -214,19 +226,24 @@ def export_deterministic_artifacts(
     summary_txt = output_dir / "resumen_optimizacion.txt"
     chart_png = output_dir / "chart_npv_vs_kWp.png"
     scan_df.to_csv(summary_csv, index=False)
+    best_candidate_key = resolve_financial_best_candidate_key(scenario_record) or candidate_key
+    best_detail = scenario_record.scan_result.candidate_details[best_candidate_key]
     plot_npv_scan(
         scan_df=scan_df,
         seed_kwp=float(scenario_record.scan_result.seed_kwp),
-        best_kwp=float(scenario_record.scan_result.candidates.sort_values(["NPV_COP", "scan_order"], ascending=[False, True], kind="mergesort").iloc[0]["kWp"]),
+        best_kwp=float(best_detail["kWp"]),
         out_png=str(chart_png),
         wp_panel=float(cfg["P_mod_W"]),
     )
-    _write_summary_text(summary_txt, scenario_record, candidate_key, selected_detail)
+    _write_summary_text(summary_txt, scenario_record, candidate_key, selected_detail, selected_snapshot)
 
     exported_paths: list[Path] = [summary_csv, summary_txt, chart_png]
 
+    attached_details = attach_candidate_financial_snapshots(scenario_record)
     for detail in _ordered_details(scenario_record):
-        monthly = detail["monthly"]
+        attached_detail = attached_details[str(detail["candidate_key"])]
+        snapshot = validate_candidate_financial_snapshot(attached_detail.get("financial_snapshot"), candidate_key=str(detail["candidate_key"]))
+        monthly = build_snapshot_monthly_frame(attached_detail["monthly"], snapshot)
         k_wp = float(detail["kWp"])
         battery_name = str(detail["battery_name"])
         battery = detail["battery"] or {"name": battery_name}
@@ -294,9 +311,9 @@ def export_deterministic_artifacts(
     selected_monthly_csv = output_dir / "mensual_candidato_seleccionado.csv"
     candidates_csv = output_dir / "candidatos_factibles.csv"
     current_summary_txt = output_dir / "resumen_escenario.txt"
-    selected_detail["monthly"].to_csv(selected_monthly_csv, index=False)
-    scenario_record.scan_result.candidates.to_csv(candidates_csv, index=False)
-    _write_summary_text(current_summary_txt, scenario_record, candidate_key, selected_detail)
+    build_snapshot_monthly_frame(selected_detail["monthly"], selected_snapshot).to_csv(selected_monthly_csv, index=False)
+    build_candidate_table(attached_details, require_financial_snapshot=True).to_csv(candidates_csv, index=False)
+    _write_summary_text(current_summary_txt, scenario_record, candidate_key, selected_detail, selected_snapshot)
     exported_paths.extend([selected_monthly_csv, candidates_csv, current_summary_txt])
     return exported_paths
 

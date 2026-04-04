@@ -6,6 +6,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .economics_tables import (
+    default_economics_cost_items_table,
+    default_economics_price_items_table,
+    hydrate_economics_cost_items_table,
+    hydrate_economics_price_items_table,
+)
 from .ui_mode import normalize_ui_mode
 
 
@@ -50,10 +56,68 @@ class ValidationIssue:
 
 
 @dataclass(frozen=True)
+class RuntimePriceBridgeRecord:
+    source: str
+    candidate_key: str
+    final_price_COP: float
+    resolved_preview_state: str
+    applied_at: str
+    applied_pricing_mode: str
+    applied_price_total_COP: float
+    applied_include_hw_in_price: bool
+    applied_price_others_total: float
+    applied_scan_fingerprint: str | None = None
+    applied_economics_signature: str | None = None
+    stale: bool = False
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "source": self.source,
+            "candidate_key": self.candidate_key,
+            "final_price_COP": self.final_price_COP,
+            "resolved_preview_state": self.resolved_preview_state,
+            "applied_at": self.applied_at,
+            "applied_pricing_mode": self.applied_pricing_mode,
+            "applied_price_total_COP": self.applied_price_total_COP,
+            "applied_include_hw_in_price": self.applied_include_hw_in_price,
+            "applied_price_others_total": self.applied_price_others_total,
+            "applied_scan_fingerprint": self.applied_scan_fingerprint,
+            "applied_economics_signature": self.applied_economics_signature,
+            "stale": self.stale,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "RuntimePriceBridgeRecord":
+        return cls(
+            source=str(payload["source"]),
+            candidate_key=str(payload["candidate_key"]),
+            final_price_COP=float(payload["final_price_COP"]),
+            resolved_preview_state=str(payload.get("resolved_preview_state", "")),
+            applied_at=str(payload["applied_at"]),
+            applied_pricing_mode=str(payload.get("applied_pricing_mode", "")),
+            applied_price_total_COP=float(payload.get("applied_price_total_COP", payload.get("final_price_COP", 0.0))),
+            applied_include_hw_in_price=bool(payload.get("applied_include_hw_in_price", False)),
+            applied_price_others_total=float(payload.get("applied_price_others_total", 0.0)),
+            applied_scan_fingerprint=(
+                None
+                if payload.get("applied_scan_fingerprint") in (None, "")
+                else str(payload.get("applied_scan_fingerprint"))
+            ),
+            applied_economics_signature=(
+                None
+                if payload.get("applied_economics_signature") in (None, "")
+                else str(payload.get("applied_economics_signature"))
+            ),
+            stale=bool(payload.get("stale", False)),
+        )
+
+
+@dataclass(frozen=True)
 class LoadedConfigBundle:
     config: dict[str, Any]
     inverter_catalog: pd.DataFrame
     battery_catalog: pd.DataFrame
+    panel_catalog: pd.DataFrame
     solar_profile: np.ndarray
     hsp_month: np.ndarray
     demand_profile_7x24: np.ndarray
@@ -67,14 +131,19 @@ class LoadedConfigBundle:
     demand_profile_weights_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     month_profile_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     sun_profile_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    economics_cost_items_table: pd.DataFrame = field(default_factory=default_economics_cost_items_table)
+    economics_price_items_table: pd.DataFrame = field(default_factory=default_economics_price_items_table)
     source_name: str = "config.xlsx"
     issues: tuple[ValidationIssue, ...] = ()
 
     def to_payload(self) -> dict[str, Any]:
+        economics_cost_items_table, _cost_issues = hydrate_economics_cost_items_table(self.economics_cost_items_table)
+        economics_price_items_table, _price_issues = hydrate_economics_price_items_table(self.economics_price_items_table)
         return {
             "config": self.config,
             "inverter_catalog": _frame_to_payload(self.inverter_catalog),
             "battery_catalog": _frame_to_payload(self.battery_catalog),
+            "panel_catalog": _frame_to_payload(self.panel_catalog),
             "solar_profile": _array_to_list(self.solar_profile),
             "hsp_month": _array_to_list(self.hsp_month),
             "demand_profile_7x24": _array_to_list(self.demand_profile_7x24),
@@ -88,16 +157,32 @@ class LoadedConfigBundle:
             "demand_profile_weights_table": _frame_to_payload(self.demand_profile_weights_table),
             "month_profile_table": _frame_to_payload(self.month_profile_table),
             "sun_profile_table": _frame_to_payload(self.sun_profile_table),
+            "economics_cost_items_table": _frame_to_payload(economics_cost_items_table),
+            "economics_price_items_table": _frame_to_payload(economics_price_items_table),
             "source_name": self.source_name,
             "issues": [issue.to_payload() for issue in self.issues],
         }
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "LoadedConfigBundle":
+        economics_cost_items_table, cost_issues = hydrate_economics_cost_items_table(
+            _frame_from_payload(payload["economics_cost_items_table"])
+            if "economics_cost_items_table" in payload
+            else default_economics_cost_items_table()
+        )
+        economics_price_items_table, price_issues = hydrate_economics_price_items_table(
+            _frame_from_payload(payload["economics_price_items_table"])
+            if "economics_price_items_table" in payload
+            else default_economics_price_items_table()
+        )
+        payload_issues = [ValidationIssue.from_payload(issue) for issue in payload.get("issues", [])]
+        payload_issues.extend(ValidationIssue("warning", "economics_cost_items", message) for message in cost_issues)
+        payload_issues.extend(ValidationIssue("warning", "economics_price_items", message) for message in price_issues)
         return cls(
             config=payload["config"],
             inverter_catalog=_frame_from_payload(payload["inverter_catalog"]),
             battery_catalog=_frame_from_payload(payload["battery_catalog"]),
+            panel_catalog=_frame_from_payload(payload["panel_catalog"]) if "panel_catalog" in payload else pd.DataFrame(),
             solar_profile=np.asarray(payload["solar_profile"], dtype=float),
             hsp_month=np.asarray(payload["hsp_month"], dtype=float),
             demand_profile_7x24=np.asarray(payload["demand_profile_7x24"], dtype=float),
@@ -111,8 +196,10 @@ class LoadedConfigBundle:
             demand_profile_weights_table=_frame_from_payload(payload["demand_profile_weights_table"]) if "demand_profile_weights_table" in payload else pd.DataFrame(),
             month_profile_table=_frame_from_payload(payload["month_profile_table"]) if "month_profile_table" in payload else pd.DataFrame(),
             sun_profile_table=_frame_from_payload(payload["sun_profile_table"]) if "sun_profile_table" in payload else pd.DataFrame(),
+            economics_cost_items_table=economics_cost_items_table,
+            economics_price_items_table=economics_price_items_table,
             source_name=payload.get("source_name", "config.xlsx"),
-            issues=tuple(ValidationIssue.from_payload(issue) for issue in payload.get("issues", [])),
+            issues=tuple(payload_issues),
         )
 
 
@@ -211,6 +298,31 @@ class ScenarioRunResult:
 
 
 @dataclass(frozen=True)
+class FinancialPresetRecord:
+    preset_id: str
+    name: str
+    economics_cost_items_rows: tuple[dict[str, Any], ...] = ()
+    economics_price_items_rows: tuple[dict[str, Any], ...] = ()
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "preset_id": self.preset_id,
+            "name": self.name,
+            "economics_cost_items_rows": [dict(row) for row in self.economics_cost_items_rows],
+            "economics_price_items_rows": [dict(row) for row in self.economics_price_items_rows],
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "FinancialPresetRecord":
+        return cls(
+            preset_id=str(payload["preset_id"]),
+            name=str(payload["name"]),
+            economics_cost_items_rows=tuple(dict(row) for row in payload.get("economics_cost_items_rows", [])),
+            economics_price_items_rows=tuple(dict(row) for row in payload.get("economics_price_items_rows", [])),
+        )
+
+
+@dataclass(frozen=True)
 class ScenarioRecord:
     scenario_id: str
     name: str
@@ -221,6 +333,7 @@ class ScenarioRecord:
     selected_candidate_key: str | None = None
     dirty: bool = True
     last_run_at: str | None = None
+    runtime_price_bridge: RuntimePriceBridgeRecord | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -233,6 +346,7 @@ class ScenarioRecord:
             "selected_candidate_key": self.selected_candidate_key,
             "dirty": self.dirty,
             "last_run_at": self.last_run_at,
+            "runtime_price_bridge": None if self.runtime_price_bridge is None else self.runtime_price_bridge.to_payload(),
         }
 
     @classmethod
@@ -248,6 +362,11 @@ class ScenarioRecord:
             selected_candidate_key=payload.get("selected_candidate_key"),
             dirty=bool(payload.get("dirty", True)),
             last_run_at=payload.get("last_run_at"),
+            runtime_price_bridge=(
+                None
+                if payload.get("runtime_price_bridge") is None
+                else RuntimePriceBridgeRecord.from_payload(payload["runtime_price_bridge"])
+            ),
         )
 
 
@@ -257,6 +376,7 @@ class ScenarioSessionState:
     active_scenario_id: str | None = None
     comparison_scenario_ids: tuple[str, ...] = ()
     design_comparison_candidate_keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    financial_presets: tuple[FinancialPresetRecord, ...] = ()
     project_slug: str | None = None
     project_name: str | None = None
     project_dirty: bool = False
@@ -274,6 +394,7 @@ class ScenarioSessionState:
                 scenario_id: list(candidate_keys)
                 for scenario_id, candidate_keys in self.design_comparison_candidate_keys.items()
             },
+            "financial_presets": [preset.to_payload() for preset in self.financial_presets],
             "project_slug": self.project_slug,
             "project_name": self.project_name,
             "project_dirty": self.project_dirty,
@@ -291,6 +412,7 @@ class ScenarioSessionState:
                 str(scenario_id): tuple(candidate_keys)
                 for scenario_id, candidate_keys in payload.get("design_comparison_candidate_keys", {}).items()
             },
+            financial_presets=tuple(FinancialPresetRecord.from_payload(item) for item in payload.get("financial_presets", [])),
             project_slug=payload.get("project_slug"),
             project_name=payload.get("project_name"),
             project_dirty=bool(payload.get("project_dirty", False)),
@@ -372,6 +494,7 @@ class ProjectScenarioManifest:
     dirty: bool = True
     last_run_at: str | None = None
     scan_fingerprint: str | None = None
+    runtime_price_bridge: RuntimePriceBridgeRecord | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -382,6 +505,7 @@ class ProjectScenarioManifest:
             "dirty": self.dirty,
             "last_run_at": self.last_run_at,
             "scan_fingerprint": self.scan_fingerprint,
+            "runtime_price_bridge": None if self.runtime_price_bridge is None else self.runtime_price_bridge.to_payload(),
         }
 
     @classmethod
@@ -394,6 +518,11 @@ class ProjectScenarioManifest:
             dirty=bool(payload.get("dirty", True)),
             last_run_at=payload.get("last_run_at"),
             scan_fingerprint=payload.get("scan_fingerprint"),
+            runtime_price_bridge=(
+                None
+                if payload.get("runtime_price_bridge") is None
+                else RuntimePriceBridgeRecord.from_payload(payload["runtime_price_bridge"])
+            ),
         )
 
 
@@ -406,6 +535,7 @@ class ProjectManifest:
     comparison_scenario_ids: tuple[str, ...] = ()
     design_comparison_candidate_keys: dict[str, tuple[str, ...]] = field(default_factory=dict)
     scenarios: tuple[ProjectScenarioManifest, ...] = ()
+    financial_presets: tuple[FinancialPresetRecord, ...] = ()
     ui_prefs: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
@@ -420,13 +550,14 @@ class ProjectManifest:
                 for scenario_id, candidate_keys in self.design_comparison_candidate_keys.items()
             },
             "scenarios": [scenario.to_payload() for scenario in self.scenarios],
+            "financial_presets": [preset.to_payload() for preset in self.financial_presets],
             "ui_prefs": self.ui_prefs,
         }
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "ProjectManifest":
         return cls(
-            format_version=int(payload["format_version"]),
+            format_version=int(payload.get("format_version", 1)),
             name=str(payload["name"]),
             slug=str(payload["slug"]),
             active_scenario_id=payload.get("active_scenario_id"),
@@ -436,6 +567,7 @@ class ProjectManifest:
                 for scenario_id, candidate_keys in payload.get("design_comparison_candidate_keys", {}).items()
             },
             scenarios=tuple(ProjectScenarioManifest.from_payload(item) for item in payload.get("scenarios", [])),
+            financial_presets=tuple(FinancialPresetRecord.from_payload(item) for item in payload.get("financial_presets", [])),
             ui_prefs=dict(payload.get("ui_prefs", {})),
         )
 

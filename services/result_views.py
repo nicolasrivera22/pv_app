@@ -16,6 +16,17 @@ from pv_product.utils import (
     prepare_typical_day_series,
 )
 
+from .candidate_financials import (
+    CandidateFinancialSnapshot,
+    CandidateFinancialSnapshotUnavailableError,
+    attach_candidate_financial_snapshot,
+    attach_candidate_financial_snapshots,
+    build_snapshot_monthly_frame,
+    resolve_financial_candidate_key,
+    snapshot_npv_at_horizon,
+    snapshot_project_summary,
+    validate_candidate_financial_snapshot,
+)
 from .i18n import tr
 from .types import ScenarioRecord, ScenarioSessionState
 from .ui_schema import format_metric, metric_label
@@ -47,6 +58,10 @@ CLICK_ROLE_NPV_CURVE = "npv_curve"
 CLICK_ROLE_PAYBACK_CURVE = "payback_curve"
 CLICK_ROLE_SELECTED_OVERLAY = "selected_overlay"
 CLICK_ROLE_BEST_OVERLAY = "best_overlay"
+EXPLORER_SUBSET_MODE_OPTIMAL = "optimal"
+EXPLORER_SUBSET_MODE_BATTERY = "battery"
+EXPLORER_SUBSET_KEY_OPTIMAL = "optimal"
+EXPLORER_SUBSET_KEY_NO_BATTERY = "battery:none"
 CLICK_POINT_ROLE_PRIORITY = {
     CLICK_ROLE_NPV_CURVE: 0,
     CLICK_ROLE_PAYBACK_CURVE: 1,
@@ -135,26 +150,97 @@ def _normalize_payback_month(value: Any) -> int | None:
     return normalized
 
 
-def build_candidate_project_summary(detail: dict[str, Any]) -> dict[str, Any]:
+def _snapshot_from_detail(detail: dict[str, Any]) -> CandidateFinancialSnapshot | None:
+    snapshot = detail.get("financial_snapshot")
+    return snapshot if isinstance(snapshot, CandidateFinancialSnapshot) else None
+
+
+def build_candidate_project_summary(
+    detail: dict[str, Any],
+    *,
+    require_financial_snapshot: bool = False,
+) -> dict[str, Any]:
+    snapshot = _snapshot_from_detail(detail)
+    if snapshot is not None:
+        return snapshot_project_summary(snapshot)
+    if require_financial_snapshot:
+        candidate_key = str(detail.get("candidate_key") or "<missing>")
+        raise CandidateFinancialSnapshotUnavailableError(
+            f"Candidato '{candidate_key}': se requiere CandidateFinancialSnapshot para construir project_summary."
+        )
+    # Compatibility-only fallback for snapshot-less helpers. Live scenario-backed paths must set require_financial_snapshot=True.
     summary = dict(detail.get("summary") or {})
     summary["cum_disc_final"] = _normalize_optional_float(summary.get("cum_disc_final"))
+    summary["capex_client"] = _normalize_optional_float(summary.get("capex_client"))
     summary["payback_years"] = _normalize_payback_years(summary.get("payback_years"))
     summary["payback_month"] = _normalize_payback_month(summary.get("payback_month"))
     return summary
 
 
-def summarize_candidate_for_horizon(detail: dict[str, Any], horizon_years: int) -> dict[str, Any]:
+def _coerce_visible_horizon_years(value: Any, *, default: int = 1, max_years: int | None = None) -> int:
+    try:
+        resolved = int(float(value))
+    except (TypeError, ValueError):
+        resolved = default
+    resolved = max(0, resolved)
+    if max_years is not None:
+        resolved = min(resolved, max_years)
+    return resolved
+
+
+def visible_financial_metric_key(horizon_years: Any) -> str:
+    return "capex_client" if _coerce_visible_horizon_years(horizon_years, default=1) == 0 else "NPV_COP"
+
+
+def _display_metric_prefers_lower_value(metric_key: str) -> bool:
+    return metric_key == "capex_client"
+
+
+def summarize_candidate_for_horizon(
+    detail: dict[str, Any],
+    horizon_years: int,
+    *,
+    require_financial_snapshot: bool = False,
+) -> dict[str, Any]:
+    snapshot = _snapshot_from_detail(detail)
     monthly = detail.get("monthly")
-    project_summary = build_candidate_project_summary(detail)
-    if not isinstance(monthly, pd.DataFrame) or monthly.empty or "NPV_COP" not in monthly.columns:
+    project_summary = build_candidate_project_summary(detail, require_financial_snapshot=require_financial_snapshot)
+    display_metric_key = visible_financial_metric_key(horizon_years)
+    if display_metric_key == "capex_client":
         return {
-            "horizon_years": max(1, int(horizon_years or 1)),
+            "horizon_years": 0,
+            "horizon_months": 0,
+            "NPV_COP": None,
+            "display_metric_key": display_metric_key,
+            "display_value_COP": project_summary.get("capex_client"),
+        }
+    if snapshot is not None:
+        effective_years, horizon_months, npv_value = snapshot_npv_at_horizon(snapshot, horizon_years)
+        return {
+            "horizon_years": effective_years,
+            "horizon_months": horizon_months,
+            "NPV_COP": npv_value,
+            "display_metric_key": "NPV_COP",
+            "display_value_COP": npv_value,
+        }
+    if require_financial_snapshot:
+        candidate_key = str(detail.get("candidate_key") or "<missing>")
+        raise CandidateFinancialSnapshotUnavailableError(
+            f"Candidato '{candidate_key}': se requiere CandidateFinancialSnapshot para resumir el horizonte visible."
+        )
+    # Compatibility-only fallback for snapshot-less helpers. Live scenario-backed paths must set require_financial_snapshot=True.
+    if not isinstance(monthly, pd.DataFrame) or monthly.empty or "NPV_COP" not in monthly.columns:
+        effective_years = _coerce_visible_horizon_years(horizon_years, default=1)
+        return {
+            "horizon_years": effective_years,
             "horizon_months": 0,
             "NPV_COP": project_summary.get("cum_disc_final"),
+            "display_metric_key": "NPV_COP",
+            "display_value_COP": project_summary.get("cum_disc_final"),
         }
 
     max_years = _available_horizon_years(monthly)
-    effective_years = max(1, min(int(horizon_years or max_years), max_years))
+    effective_years = _coerce_visible_horizon_years(horizon_years, default=max_years, max_years=max_years)
     horizon_months = min(len(monthly), effective_years * MONTHS_PER_YEAR)
     truncated = monthly.iloc[:horizon_months].reset_index(drop=True)
     npv_series = pd.to_numeric(truncated["NPV_COP"], errors="coerce")
@@ -165,6 +251,8 @@ def summarize_candidate_for_horizon(detail: dict[str, Any], horizon_years: int) 
         "horizon_years": effective_years,
         "horizon_months": horizon_months,
         "NPV_COP": npv_value,
+        "display_metric_key": "NPV_COP",
+        "display_value_COP": npv_value,
     }
 
 
@@ -174,10 +262,7 @@ def resolve_payback_display_state(
     *,
     payback_month: Any = None,
 ) -> dict[str, Any]:
-    try:
-        resolved_visible_horizon = max(1, int(float(visible_horizon_years or 1)))
-    except (TypeError, ValueError):
-        resolved_visible_horizon = 1
+    resolved_visible_horizon = _coerce_visible_horizon_years(visible_horizon_years, default=1)
     resolved_payback_years = _normalize_payback_years(payback_years)
     resolved_payback_month = _normalize_payback_month(payback_month)
     if resolved_payback_years is None:
@@ -205,9 +290,19 @@ def resolve_payback_display_state(
     }
 
 
-def build_visible_horizon_candidate_summary(detail: dict[str, Any], horizon_years: int) -> dict[str, Any]:
-    project_summary = build_candidate_project_summary(detail)
-    visible_horizon_summary = summarize_candidate_for_horizon(detail, horizon_years)
+def build_visible_horizon_candidate_summary(
+    detail: dict[str, Any],
+    horizon_years: int,
+    *,
+    require_financial_snapshot: bool = False,
+) -> dict[str, Any]:
+    snapshot = _snapshot_from_detail(detail)
+    project_summary = build_candidate_project_summary(detail, require_financial_snapshot=require_financial_snapshot)
+    visible_horizon_summary = summarize_candidate_for_horizon(
+        detail,
+        horizon_years,
+        require_financial_snapshot=require_financial_snapshot,
+    )
     payback_display_state = resolve_payback_display_state(
         project_summary.get("payback_years"),
         visible_horizon_summary["horizon_years"],
@@ -215,6 +310,7 @@ def build_visible_horizon_candidate_summary(detail: dict[str, Any], horizon_year
     )
     return {
         **detail,
+        "financial_snapshot": snapshot,
         "project_summary": project_summary,
         "visible_horizon_summary": visible_horizon_summary,
         "payback_display_state": payback_display_state,
@@ -225,19 +321,24 @@ def _candidate_summary_row(
     detail: dict[str, Any],
     *,
     npv_cop: float | None = None,
+    display_value_cop: float | None = None,
     payback_years: float | None = None,
+    require_financial_snapshot: bool = False,
 ) -> dict[str, Any]:
     energy = summarize_energy_metrics(detail["monthly"])
-    project_summary = build_candidate_project_summary(detail)
-    resolved_npv = npv_cop if npv_cop is not None else project_summary.get("cum_disc_final")
+    project_summary = build_candidate_project_summary(detail, require_financial_snapshot=require_financial_snapshot)
+    resolved_display_value = display_value_cop if display_value_cop is not None else npv_cop
+    if resolved_display_value is None:
+        resolved_display_value = project_summary.get("cum_disc_final")
+    capex_client = project_summary.get("capex_client")
     return {
         "scan_order": int(detail["scan_order"]),
         "candidate_key": detail["candidate_key"],
         "kWp": round(float(detail["kWp"]), 3),
         "battery": detail["battery_name"],
-        "NPV_COP": float(resolved_npv) if resolved_npv is not None else None,
+        "NPV_COP": float(resolved_display_value) if resolved_display_value is not None else None,
         "payback_years": payback_years if payback_years is not None else project_summary.get("payback_years"),
-        "capex_client": float(project_summary["capex_client"]),
+        "capex_client": float(capex_client) if capex_client is not None else None,
         "self_consumption_ratio": energy["self_consumption_ratio"],
         "self_sufficiency_ratio": energy["self_sufficiency_ratio"],
         "annual_import_kwh": energy["annual_import_kwh"],
@@ -246,12 +347,13 @@ def _candidate_summary_row(
     }
 
 
-def _finalize_candidate_table(frame: pd.DataFrame) -> pd.DataFrame:
+def _finalize_candidate_table(frame: pd.DataFrame, *, display_metric_key: str = "NPV_COP") -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame(columns=CANDIDATE_TABLE_COLUMNS)
+    value_ascending = _display_metric_prefers_lower_value(display_metric_key)
     frame = frame.sort_values(
         by=["kWp", "NPV_COP", "scan_order"],
-        ascending=[True, False, True],
+        ascending=[True, value_ascending, True],
         kind="mergesort",
     ).reset_index(drop=True)
     frame["best_battery_for_kwp"] = False
@@ -260,33 +362,326 @@ def _finalize_candidate_table(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def build_candidate_table(detail_map: dict[str, dict]) -> pd.DataFrame:
-    frame = pd.DataFrame([_candidate_summary_row(detail) for detail in detail_map.values()])
+def build_candidate_table(
+    detail_map: dict[str, dict],
+    *,
+    require_financial_snapshot: bool = False,
+) -> pd.DataFrame:
+    frame = pd.DataFrame(
+        [
+            _candidate_summary_row(detail, require_financial_snapshot=require_financial_snapshot)
+            for detail in detail_map.values()
+        ]
+    )
     return _finalize_candidate_table(frame)
 
 
-def summarize_candidates_for_horizon(detail_map: dict[str, dict], horizon_years: int) -> pd.DataFrame:
+def _safe_battery_kwh(detail: dict[str, Any]) -> float | None:
+    battery = detail.get("battery") if isinstance(detail.get("battery"), dict) else {}
+    normalized = _normalize_optional_float((battery or {}).get("nom_kWh"))
+    if normalized is None or normalized <= 0:
+        return None
+    return float(normalized)
+
+
+def _safe_battery_name(detail: dict[str, Any]) -> str:
+    battery = detail.get("battery") if isinstance(detail.get("battery"), dict) else {}
+    return str(detail.get("battery_name") or (battery or {}).get("name") or "").strip()
+
+
+def battery_family_key_from_detail(detail: dict[str, Any]) -> str:
+    battery_name = _safe_battery_name(detail)
+    battery_kwh = _safe_battery_kwh(detail)
+    lowered_name = battery_name.casefold()
+    if battery_kwh is None and lowered_name in {"", "none", "bat-0"}:
+        return EXPLORER_SUBSET_KEY_NO_BATTERY
+    if battery_kwh is not None:
+        return f"battery:kwh:{battery_kwh:.3f}"
+    fallback_name = lowered_name or "unknown"
+    return f"battery:name:{fallback_name}"
+
+
+def battery_family_label_from_detail(detail: dict[str, Any], *, lang: str = "es") -> str:
+    battery_name = _safe_battery_name(detail)
+    battery_kwh = _safe_battery_kwh(detail)
+    lowered_name = battery_name.casefold()
+    if battery_kwh is None and lowered_name in {"", "none", "bat-0"}:
+        return tr("common.no_battery", lang)
+    if battery_kwh is not None:
+        suffix = "batería" if lang == "es" else "battery"
+        return f"{battery_kwh:.1f} kWh {suffix}"
+    return battery_name or tr("common.no_battery", lang)
+
+
+def enrich_results_candidate_table(
+    candidate_table: pd.DataFrame,
+    detail_map: dict[str, dict[str, Any]],
+    *,
+    lang: str = "es",
+) -> pd.DataFrame:
+    frame = candidate_table.copy()
+    if frame.empty:
+        for column in ("battery_family_key", "battery_family_label", "battery_kwh"):
+            frame[column] = pd.Series(dtype=object)
+        return frame
+    family_keys: list[str] = []
+    family_labels: list[str] = []
+    battery_kwh_values: list[float | None] = []
+    for candidate_key in frame["candidate_key"].tolist():
+        detail = detail_map.get(str(candidate_key), {})
+        family_keys.append(battery_family_key_from_detail(detail))
+        family_labels.append(battery_family_label_from_detail(detail, lang=lang))
+        battery_kwh_values.append(_safe_battery_kwh(detail))
+    frame["battery_family_key"] = family_keys
+    frame["battery_family_label"] = family_labels
+    frame["battery_kwh"] = battery_kwh_values
+    return frame
+
+
+def subset_mode_for_key(subset_key: str | None) -> str:
+    return EXPLORER_SUBSET_MODE_OPTIMAL if subset_key == EXPLORER_SUBSET_KEY_OPTIMAL else EXPLORER_SUBSET_MODE_BATTERY
+
+
+def candidate_key_in_subset(candidate_table: pd.DataFrame, candidate_key: str | None, subset_key: str | None) -> bool:
+    if candidate_table.empty or candidate_key in (None, "") or subset_key in (None, ""):
+        return False
+    if subset_key == EXPLORER_SUBSET_KEY_OPTIMAL:
+        if "best_battery_for_kwp" not in candidate_table.columns:
+            return False
+        subset = candidate_table[candidate_table["best_battery_for_kwp"] == True]  # noqa: E712
+    else:
+        if "battery_family_key" not in candidate_table.columns:
+            return False
+        subset = candidate_table[candidate_table["battery_family_key"] == subset_key]
+    return bool(not subset.empty and candidate_key in subset["candidate_key"].astype(str).tolist())
+
+
+def filter_results_subset(candidate_table: pd.DataFrame, subset_key: str | None) -> pd.DataFrame:
+    if candidate_table.empty or subset_key in (None, ""):
+        return candidate_table.iloc[0:0].copy()
+    if subset_key == EXPLORER_SUBSET_KEY_OPTIMAL:
+        if "best_battery_for_kwp" not in candidate_table.columns:
+            return candidate_table.iloc[0:0].copy()
+        return candidate_table[candidate_table["best_battery_for_kwp"] == True].copy()  # noqa: E712
+    if "battery_family_key" not in candidate_table.columns:
+        return candidate_table.iloc[0:0].copy()
+    return candidate_table[candidate_table["battery_family_key"] == subset_key].copy()
+
+
+def subset_label_for_key(candidate_table: pd.DataFrame, subset_key: str | None, *, lang: str = "es") -> str:
+    if subset_key == EXPLORER_SUBSET_KEY_OPTIMAL:
+        return tr("workbench.explorer.family.optimal", lang)
+    subset = filter_results_subset(candidate_table, subset_key)
+    if subset.empty:
+        return ""
+    return str(subset.iloc[0].get("battery_family_label") or "")
+
+
+def build_results_explorer_options(candidate_table: pd.DataFrame, *, lang: str = "es") -> list[dict[str, str]]:
+    if candidate_table.empty:
+        return []
+    options = [{"label": tr("workbench.explorer.family.optimal", lang), "value": EXPLORER_SUBSET_KEY_OPTIMAL}]
+    family_frame = (
+        candidate_table[["battery_family_key", "battery_family_label", "battery_kwh"]]
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
+    if family_frame.empty:
+        return options
+    family_frame["sort_bucket"] = family_frame["battery_family_key"].map(
+        lambda value: 0 if value == EXPLORER_SUBSET_KEY_NO_BATTERY else 1
+    )
+    family_frame["sort_kwh"] = family_frame["battery_kwh"].map(lambda value: float(value) if value is not None and pd.notna(value) else float("inf"))
+    family_frame = family_frame.sort_values(
+        ["sort_bucket", "sort_kwh", "battery_family_label", "battery_family_key"],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    options.extend(
+        {
+            "label": str(row["battery_family_label"]),
+            "value": str(row["battery_family_key"]),
+        }
+        for row in family_frame.to_dict("records")
+    )
+    return options
+
+
+def _first_available_subset_key(candidate_table: pd.DataFrame, *, lang: str = "es") -> str | None:
+    options = build_results_explorer_options(candidate_table, lang=lang)
+    if not options:
+        return None
+    for option in options:
+        if option["value"] != EXPLORER_SUBSET_KEY_OPTIMAL:
+            return str(option["value"])
+    return str(options[0]["value"])
+
+
+def _best_candidate_key_from_subset(
+    subset: pd.DataFrame,
+    *,
+    display_metric_key: str = "NPV_COP",
+) -> str | None:
+    if subset.empty:
+        return None
+    value_ascending = _display_metric_prefers_lower_value(display_metric_key)
+    ordered = subset.sort_values(
+        ["NPV_COP", "scan_order", "candidate_key"],
+        ascending=[value_ascending, True, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    return str(ordered.iloc[0]["candidate_key"])
+
+
+def resolve_nearest_candidate_key_in_subset(
+    candidate_table: pd.DataFrame,
+    reference_candidate_key: str | None,
+    subset_key: str | None,
+    *,
+    display_metric_key: str = "NPV_COP",
+) -> str | None:
+    subset = filter_results_subset(candidate_table, subset_key)
+    if subset.empty:
+        return None
+    if reference_candidate_key not in candidate_table["candidate_key"].astype(str).tolist():
+        return _best_candidate_key_from_subset(subset, display_metric_key=display_metric_key)
+    reference_row = candidate_table[candidate_table["candidate_key"] == reference_candidate_key].head(1)
+    if reference_row.empty:
+        return _best_candidate_key_from_subset(subset, display_metric_key=display_metric_key)
+    reference_kwp = float(reference_row.iloc[0]["kWp"])
+    nearest = (
+        subset.assign(
+            kwp_delta=subset["kWp"].map(lambda value: abs(float(value) - reference_kwp)),
+            candidate_key_sort=subset["candidate_key"].astype(str),
+        )
+        .sort_values(["kwp_delta", "scan_order", "candidate_key_sort"], kind="mergesort")
+        .reset_index(drop=True)
+    )
+    return str(nearest.iloc[0]["candidate_key"])
+
+
+def resolve_results_explorer_state(
+    candidate_table: pd.DataFrame,
+    *,
+    scenario_id: str | None,
+    scan_fingerprint: str | None,
+    selected_candidate_key: str | None,
+    current_state: dict[str, Any] | None = None,
+    lang: str = "es",
+) -> dict[str, Any]:
+    if candidate_table.empty:
+        return {
+            "scenario_id": scenario_id,
+            "scan_fingerprint": scan_fingerprint,
+            "subset_mode": EXPLORER_SUBSET_MODE_OPTIMAL,
+            "subset_key": None,
+            "subset_label": "",
+        }
+    current = current_state or {}
+    current_subset_key = str(current.get("subset_key") or "").strip() or None
+    same_scan = (
+        str(current.get("scenario_id") or "") == str(scenario_id or "")
+        and str(current.get("scan_fingerprint") or "") == str(scan_fingerprint or "")
+    )
+    explorer_options = build_results_explorer_options(candidate_table, lang=lang)
+    if same_scan and selected_candidate_key and candidate_key_in_subset(candidate_table, selected_candidate_key, current_subset_key):
+        preserved_key = current_subset_key
+    else:
+        preserved_key = None
+    if preserved_key is None and selected_candidate_key and selected_candidate_key in candidate_table["candidate_key"].astype(str).tolist():
+        selected_row = candidate_table[candidate_table["candidate_key"] == selected_candidate_key].head(1)
+        resolved_key = str(selected_row.iloc[0]["battery_family_key"])
+    elif EXPLORER_SUBSET_KEY_OPTIMAL in [option["value"] for option in explorer_options]:
+        optimal_subset = filter_results_subset(candidate_table, EXPLORER_SUBSET_KEY_OPTIMAL)
+        resolved_key = EXPLORER_SUBSET_KEY_OPTIMAL if not optimal_subset.empty else _first_available_subset_key(candidate_table, lang=lang)
+    else:
+        resolved_key = _first_available_subset_key(candidate_table, lang=lang)
+    final_key = preserved_key or resolved_key
+    return {
+        "scenario_id": scenario_id,
+        "scan_fingerprint": scan_fingerprint,
+        "subset_mode": subset_mode_for_key(final_key),
+        "subset_key": final_key,
+        "subset_label": subset_label_for_key(candidate_table, final_key, lang=lang),
+    }
+
+
+def canonical_results_explorer_view(
+    candidate_table: pd.DataFrame,
+    *,
+    selected_candidate_key: str | None,
+    subset_key: str | None,
+    display_metric_key: str = "NPV_COP",
+) -> dict[str, Any]:
+    if candidate_table.empty:
+        return {
+            "subset_key": None,
+            "subset_rows": candidate_table.iloc[0:0].copy(),
+            "highlight_keys": tuple(),
+            "selected_candidate_key": None,
+        }
+    active_subset_key = subset_key if subset_key not in (None, "") else EXPLORER_SUBSET_KEY_OPTIMAL
+    subset = filter_results_subset(candidate_table, active_subset_key)
+    if subset.empty:
+        fallback_key = EXPLORER_SUBSET_KEY_OPTIMAL if not filter_results_subset(candidate_table, EXPLORER_SUBSET_KEY_OPTIMAL).empty else _first_available_subset_key(candidate_table)
+        active_subset_key = fallback_key
+        subset = filter_results_subset(candidate_table, active_subset_key)
+    if candidate_key_in_subset(candidate_table, selected_candidate_key, active_subset_key):
+        final_selected_key = selected_candidate_key
+    elif selected_candidate_key and selected_candidate_key in candidate_table["candidate_key"].astype(str).tolist():
+        final_selected_key = resolve_nearest_candidate_key_in_subset(
+            candidate_table,
+            selected_candidate_key,
+            active_subset_key,
+            display_metric_key=display_metric_key,
+        )
+    else:
+        final_selected_key = _best_candidate_key_from_subset(subset, display_metric_key=display_metric_key)
+    return {
+        "subset_key": active_subset_key,
+        "subset_rows": subset.copy(),
+        "highlight_keys": tuple(str(candidate_key) for candidate_key in subset["candidate_key"].astype(str).tolist()),
+        "selected_candidate_key": final_selected_key,
+    }
+
+
+def summarize_candidates_for_horizon(
+    detail_map: dict[str, dict],
+    horizon_years: int,
+    *,
+    require_financial_snapshot: bool = False,
+) -> pd.DataFrame:
+    display_metric_key = visible_financial_metric_key(horizon_years)
     rows = []
     for detail in detail_map.values():
-        presentation = build_visible_horizon_candidate_summary(detail, horizon_years)
+        presentation = build_visible_horizon_candidate_summary(
+            detail,
+            horizon_years,
+            require_financial_snapshot=require_financial_snapshot,
+        )
         rows.append(
             _candidate_summary_row(
                 detail,
-                npv_cop=presentation["visible_horizon_summary"]["NPV_COP"],
+                display_value_cop=presentation["visible_horizon_summary"].get("display_value_COP"),
                 payback_years=presentation["payback_display_state"]["trace_payback_years"],
+                require_financial_snapshot=require_financial_snapshot,
             )
         )
-    return _finalize_candidate_table(pd.DataFrame(rows))
+    return _finalize_candidate_table(pd.DataFrame(rows), display_metric_key=display_metric_key)
 
 
-def build_kpis(detail: dict) -> dict[str, float | str | None]:
-    project_summary = detail.get("project_summary") or build_candidate_project_summary(detail)
+def build_kpis(detail: dict, *, require_financial_snapshot: bool = False) -> dict[str, float | str | None]:
+    project_summary = (
+        build_candidate_project_summary(detail, require_financial_snapshot=True)
+        if require_financial_snapshot
+        else (detail.get("project_summary") or build_candidate_project_summary(detail))
+    )
     visible_horizon_summary = detail.get("visible_horizon_summary") or {}
     payback_display_state = detail.get("payback_display_state") or {}
     metrics = summarize_energy_metrics(detail["monthly"])
-    npv_value = visible_horizon_summary.get("NPV_COP")
+    display_metric_key = str(visible_horizon_summary.get("display_metric_key") or "NPV_COP")
+    npv_value = visible_horizon_summary.get("display_value_COP")
     if npv_value is None:
-        npv_value = project_summary.get("cum_disc_final")
+        npv_value = project_summary.get("capex_client") if display_metric_key == "capex_client" else project_summary.get("cum_disc_final")
     payback_value = payback_display_state.get("project_payback_years")
     if payback_value is None:
         payback_value = project_summary.get("payback_years")
@@ -294,6 +689,7 @@ def build_kpis(detail: dict) -> dict[str, float | str | None]:
         "best_kWp": round(float(detail["kWp"]), 3),
         "selected_battery": detail["battery_name"],
         "NPV": float(npv_value) if npv_value is not None else None,
+        "financial_metric_key": display_metric_key,
         "payback_years": payback_value,
         "self_consumption_ratio": float(detail.get("self_consumption_ratio", metrics["self_consumption_ratio"])),
         "self_sufficiency_ratio": float(detail.get("self_sufficiency_ratio", metrics["self_sufficiency_ratio"])),
@@ -446,20 +842,53 @@ def _apply_project_time_axes(
     return figure
 
 
-def build_cash_flow(monthly: pd.DataFrame, *, base_year: int | None = None) -> pd.DataFrame:
-    frame = monthly[["Año_mes", "NPV_COP", "Ahorro_COP"]].copy()
-    frame.rename(columns={"NPV_COP": "cumulative_npv", "Ahorro_COP": "monthly_savings"}, inplace=True)
+def build_cash_flow(
+    monthly: pd.DataFrame,
+    *,
+    base_year: int | None = None,
+    financial_snapshot: CandidateFinancialSnapshot | None = None,
+    require_financial_snapshot: bool = False,
+) -> pd.DataFrame:
+    if financial_snapshot is not None:
+        snapshot_frame = build_snapshot_monthly_frame(monthly, financial_snapshot)
+        frame = snapshot_frame[
+            [
+                "Año_mes",
+                "NPV_COP",
+                "Ahorro_COP",
+                "Cumulative_Cash_Flow_COP",
+                "Cash_Flow_Discounted_COP",
+            ]
+        ].copy()
+        frame.rename(
+            columns={
+                "NPV_COP": "cumulative_npv",
+                "Ahorro_COP": "monthly_savings",
+                "Cumulative_Cash_Flow_COP": "cumulative_cash_flow",
+                "Cash_Flow_Discounted_COP": "monthly_discounted_cash_flow",
+            },
+            inplace=True,
+        )
+    elif require_financial_snapshot:
+        raise CandidateFinancialSnapshotUnavailableError(
+            "Se requiere CandidateFinancialSnapshot para construir el cash flow de una ruta viva."
+        )
+    else:
+        # Compatibility-only fallback for tests/helpers that operate on legacy snapshot-less monthly frames.
+        frame = monthly[["Año_mes", "NPV_COP", "Ahorro_COP"]].copy()
+        frame.rename(columns={"NPV_COP": "cumulative_npv", "Ahorro_COP": "monthly_savings"}, inplace=True)
     timeline = build_project_timeline(len(frame), base_year=base_year)
     if not timeline.empty:
         frame = frame.reset_index(drop=True).join(timeline)
     return frame
 
 
-def build_npv_curve(candidate_table: pd.DataFrame) -> pd.DataFrame:
+def build_npv_curve(candidate_table: pd.DataFrame, *, display_metric_key: str = "NPV_COP") -> pd.DataFrame:
     if candidate_table.empty:
         return pd.DataFrame(columns=NPV_CURVE_COLUMNS)
+    value_ascending = _display_metric_prefers_lower_value(display_metric_key)
     grouped = (
-        candidate_table.sort_values(["kWp", "NPV_COP", "scan_order"], ascending=[True, False, True], kind="mergesort")
+        candidate_table.sort_values(["kWp", "NPV_COP", "scan_order"], ascending=[True, value_ascending, True], kind="mergesort")
         .groupby("kWp", as_index=False, sort=True)
         .first()[NPV_CURVE_COLUMNS]
     )
@@ -517,7 +946,7 @@ def _discard_hover_text(point: dict[str, Any], lang: str) -> str:
 
 
 def format_horizon_year_value(years: int, *, lang: str = "es") -> str:
-    resolved_years = max(1, int(years))
+    resolved_years = max(0, int(years))
     if lang == "es":
         unit = "año" if resolved_years == 1 else "años"
     else:
@@ -538,7 +967,29 @@ def _format_payback_hover_value(value: Any, *, lang: str = "es") -> str:
     return format_metric("payback_years", normalized, lang)
 
 
-def _curve_hover_lines(curve: pd.DataFrame, *, lang: str, payback_label: str) -> list[str]:
+def _financial_axis_label(metric_key: str, *, lang: str) -> str:
+    if metric_key == "capex_client":
+        return tr("workbench.project_price.axis_label", lang)
+    return metric_label("NPV_COP", lang)
+
+
+def _financial_chart_title(metric_key: str, *, lang: str) -> str:
+    if metric_key == "capex_client":
+        return tr("workbench.project_price.chart_title", lang)
+    return "VPN vs kWp" if lang == "es" else "NPV vs kWp"
+
+
+def _npv_legend_layout() -> dict[str, object]:
+    return {
+        "orientation": "h",
+        "yanchor": "bottom",
+        "y": 1.03,
+        "xanchor": "right",
+        "x": 1,
+    }
+
+
+def _curve_hover_lines(curve: pd.DataFrame, *, lang: str, display_metric_key: str, payback_label: str) -> list[str]:
     lines: list[str] = []
     for row in curve.to_dict("records"):
         panel_count = row.get("panel_count")
@@ -549,7 +1000,7 @@ def _curve_hover_lines(curve: pd.DataFrame, *, lang: str, payback_label: str) ->
                     f"kWp: {float(row['kWp']):.3f}",
                     f"{tr('common.chart.panels', lang)}: {panel_value}",
                     f"{'Batería' if lang == 'es' else 'Battery'}: {row['battery_display']}",
-                    f"{metric_label('NPV_COP', lang)}: {format_metric('NPV_COP', row['NPV_COP'], lang)}",
+                    f"{_financial_axis_label(display_metric_key, lang=lang)}: {format_metric(display_metric_key, row['NPV_COP'], lang)}",
                     f"{payback_label}: {_format_payback_hover_value(row.get('payback_years'), lang=lang)}",
                     f"{metric_label('self_consumption_ratio', lang)}: {100 * float(row['self_consumption_ratio']):.1f}%",
                     f"{metric_label('peak_ratio', lang)}: {100 * float(row['peak_ratio']):.1f}%",
@@ -575,10 +1026,20 @@ def _candidate_overlay_row(candidate_table: pd.DataFrame, candidate_key: str | N
     return selected.sort_values(["scan_order", "kWp"], kind="mergesort").head(1).reset_index(drop=True)
 
 
-def _best_candidate_overlay_row(candidate_table: pd.DataFrame, *, exclude_candidate_key: str | None = None) -> pd.DataFrame:
+def _best_candidate_overlay_row(
+    candidate_table: pd.DataFrame,
+    *,
+    display_metric_key: str = "NPV_COP",
+    exclude_candidate_key: str | None = None,
+) -> pd.DataFrame:
     if candidate_table.empty:
         return candidate_table.iloc[0:0].copy()
-    best_row = candidate_table.sort_values(["NPV_COP", "scan_order", "kWp"], ascending=[False, True, True], kind="mergesort").head(1)
+    value_ascending = _display_metric_prefers_lower_value(display_metric_key)
+    best_row = candidate_table.sort_values(
+        ["NPV_COP", "scan_order", "kWp"],
+        ascending=[value_ascending, True, True],
+        kind="mergesort",
+    ).head(1)
     if exclude_candidate_key and str(best_row.iloc[0]["candidate_key"]) == str(exclude_candidate_key):
         return candidate_table.iloc[0:0].copy()
     return best_row.reset_index(drop=True)
@@ -594,8 +1055,8 @@ def _add_viable_npv_traces(
     *,
     lang: str,
     figure_title: str,
+    display_metric_key: str,
     payback_label: str,
-    best_row: pd.DataFrame,
     selected_row: pd.DataFrame,
     row: int | None = None,
 ) -> None:
@@ -610,26 +1071,11 @@ def _add_viable_npv_traces(
             marker={"size": 9, "color": "#2563eb"},
             ids=curve["candidate_key"],
             customdata=_chart_point_customdata(curve, point_role=CLICK_ROLE_NPV_CURVE),
-            hovertext=_curve_hover_lines(curve, lang=lang, payback_label=payback_label),
+            hovertext=_curve_hover_lines(curve, lang=lang, display_metric_key=display_metric_key, payback_label=payback_label),
             hovertemplate="%{hovertext}<extra></extra>",
         ),
         **add_trace_kwargs,
     )
-    if not best_row.empty:
-        figure.add_trace(
-            go.Scatter(
-                x=best_row["kWp"],
-                y=best_row["NPV_COP"],
-                mode="markers",
-                marker={"size": 14, "color": "#16a34a", "line": {"width": 2, "color": "#166534"}},
-                name=tr("common.chart.best_design", lang),
-                ids=best_row["candidate_key"],
-                customdata=_chart_point_customdata(best_row, point_role=CLICK_ROLE_BEST_OVERLAY),
-                hovertext=_curve_hover_lines(best_row, lang=lang, payback_label=payback_label),
-                hovertemplate=tr("common.chart.best_design", lang) + "<br>%{hovertext}<extra></extra>",
-            ),
-            **add_trace_kwargs,
-        )
     if selected_row.empty:
         return
     figure.add_trace(
@@ -641,7 +1087,7 @@ def _add_viable_npv_traces(
             name=tr("common.chart.selected_design", lang),
             ids=selected_row["candidate_key"],
             customdata=_chart_point_customdata(selected_row, point_role=CLICK_ROLE_SELECTED_OVERLAY),
-            hovertext=_curve_hover_lines(selected_row, lang=lang, payback_label=payback_label),
+            hovertext=_curve_hover_lines(selected_row, lang=lang, display_metric_key=display_metric_key, payback_label=payback_label),
             hovertemplate=tr("common.chart.selected_design", lang) + "<br>%{hovertext}<extra></extra>",
         ),
         **add_trace_kwargs,
@@ -682,26 +1128,27 @@ def build_npv_figure(
     lang: str = "es",
     title: str | None = None,
     horizon_years: int | None = None,
+    display_metric_key: str | None = None,
     payback_label: str | None = None,
     module_power_w: float | None = None,
     discarded_points: tuple[dict[str, Any], ...] | list[dict[str, Any]] | None = None,
 ) -> go.Figure:
+    resolved_display_metric = display_metric_key or visible_financial_metric_key(horizon_years)
     display_table = candidate_table.copy()
     display_table["battery_display"] = display_table["battery"].map(lambda value: format_metric("selected_battery", value, lang))
     if module_power_w and float(module_power_w) > 0:
         display_table["panel_count"] = display_table["kWp"].map(lambda value: int(round(float(value) / (float(module_power_w) / 1000.0))))
     else:
         display_table["panel_count"] = None
-    curve = build_npv_curve(candidate_table)
+    curve = build_npv_curve(candidate_table, display_metric_key=resolved_display_metric)
     curve = curve.copy()
     curve["battery_display"] = curve["battery"].map(lambda value: format_metric("selected_battery", value, lang))
     if module_power_w and float(module_power_w) > 0:
         curve["panel_count"] = curve["kWp"].map(lambda value: int(round(float(value) / (float(module_power_w) / 1000.0))))
     else:
         curve["panel_count"] = None
-    best_row = _best_candidate_overlay_row(display_table, exclude_candidate_key=selected_key)
     selected_row = _candidate_overlay_row(display_table, selected_key)
-    figure_title = title or ("VPN vs kWp" if lang == "es" else "NPV vs kWp")
+    figure_title = title or _financial_chart_title(resolved_display_metric, lang=lang)
     full_title = _npv_figure_title(figure_title, horizon_years=horizon_years, lang=lang)
     resolved_payback_label = payback_label or metric_label("payback_years", lang)
     discarded = [dict(point) for point in (discarded_points or [])]
@@ -722,8 +1169,8 @@ def build_npv_figure(
                 curve,
                 lang=lang,
                 figure_title=figure_title,
+                display_metric_key=resolved_display_metric,
                 payback_label=resolved_payback_label,
-                best_row=best_row,
                 selected_row=selected_row,
             )
             figure.add_trace(
@@ -745,9 +1192,10 @@ def build_npv_figure(
             template="plotly_white",
             title=full_title,
             hovermode="x unified",
-            margin={"t": 108 if horizon_years is not None else 88},
+            legend=_npv_legend_layout(),
+            margin={"t": 130 if horizon_years is not None else 110},
         )
-        figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", secondary_y=False)
+        figure.update_yaxes(title=_financial_axis_label(resolved_display_metric, lang=lang), tickformat=",.0f", secondary_y=False)
         figure.update_yaxes(title=resolved_payback_label, secondary_y=True)
         figure.update_xaxes(title=tr("common.chart.installed_kwp", lang))
         _apply_panel_count_axis(figure, curve, module_power_w, lang=lang, axis_name="xaxis2", overlay_axis="x")
@@ -776,8 +1224,8 @@ def build_npv_figure(
             curve,
             lang=lang,
             figure_title=figure_title,
+            display_metric_key=resolved_display_metric,
             payback_label=resolved_payback_label,
-            best_row=best_row,
             selected_row=selected_row,
             row=1,
         )
@@ -822,9 +1270,10 @@ def build_npv_figure(
         template="plotly_white",
         title=full_title,
         hovermode="x unified",
-        margin={"t": 108 if horizon_years is not None else 88},
+        legend=_npv_legend_layout(),
+        margin={"t": 130 if horizon_years is not None else 110},
     )
-    figure.update_yaxes(title=metric_label("NPV_COP", lang), tickformat=",.0f", row=1, col=1, secondary_y=False)
+    figure.update_yaxes(title=_financial_axis_label(resolved_display_metric, lang=lang), tickformat=",.0f", row=1, col=1, secondary_y=False)
     figure.update_yaxes(title=resolved_payback_label, row=1, col=1, secondary_y=True)
     figure.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, range=[0, 1], row=2, col=1)
     figure.update_xaxes(title=tr("common.chart.installed_kwp", lang), row=2, col=1)
@@ -1246,17 +1695,19 @@ def resolve_selected_candidate_key_for_scenario(
 def build_scenario_summary_row(scenario: ScenarioRecord) -> dict[str, Any]:
     if scenario.scan_result is None:
         raise ValueError(f"El escenario '{scenario.name}' no tiene un escaneo determinístico.")
-    candidate_key = scenario.selected_candidate_key or scenario.scan_result.best_candidate_key
+    candidate_key = resolve_financial_candidate_key(scenario)
     if not candidate_key:
         raise ValueError(f"El escenario '{scenario.name}' no tiene diseños viables en el escaneo determinístico.")
-    detail = scenario.scan_result.candidate_details[candidate_key]
-    kpis = build_kpis(detail)
+    detail = attach_candidate_financial_snapshot(scenario, scenario.scan_result.candidate_details[candidate_key], candidate_key)
+    kpis = build_kpis(detail, require_financial_snapshot=True)
+    snapshot = validate_candidate_financial_snapshot(detail.get("financial_snapshot"), candidate_key=candidate_key)
     return {
         "scenario_id": scenario.scenario_id,
         "scenario": scenario.name,
         "candidate_key": candidate_key,
         "best_kWp": kpis["best_kWp"],
         "battery": kpis["selected_battery"],
+        "capex_client": snapshot.capex_client_COP,
         "NPV_COP": kpis["NPV"],
         "payback_years": kpis["payback_years"],
         "self_consumption_ratio": kpis["self_consumption_ratio"],
@@ -1280,6 +1731,7 @@ def build_comparison_table(scenarios: list[ScenarioRecord]) -> pd.DataFrame:
                 "candidate_key",
                 "best_kWp",
                 "battery",
+                "capex_client",
                 "NPV_COP",
                 "payback_years",
                 "self_consumption_ratio",
@@ -1340,7 +1792,8 @@ def build_comparison_figures(scenarios: list[ScenarioRecord], lang: str = "es") 
     npv_overlay = go.Figure()
     for scenario in clean_scenarios:
         assert scenario.scan_result is not None
-        curve = build_npv_curve(scenario.scan_result.candidates)
+        attached_details = attach_candidate_financial_snapshots(scenario)
+        curve = build_npv_curve(build_candidate_table(attached_details, require_financial_snapshot=True))
         curve = curve.copy()
         curve["battery_display"] = curve["battery"].map(lambda value: format_metric("selected_battery", value, lang))
         npv_overlay.add_trace(

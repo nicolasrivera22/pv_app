@@ -24,10 +24,7 @@ from services import (
 from services.workspace_admin_callbacks import (
     add_battery_row,
     add_inverter_row,
-    add_price_kwp_others_row,
-    add_price_kwp_row,
     render_active_profile_chart,
-    sanitize_active_profile_table,
     translate_profile_table_activators,
 )
 from services.workspace_assumptions_callbacks import (
@@ -230,8 +227,6 @@ def sync_active_profile_table(
     _activator_clicks,
     month_active_cell,
     sun_active_cell,
-    price_active_cell,
-    price_others_active_cell,
     active_state,
 ):
     trigger = ctx.triggered_id
@@ -239,8 +234,6 @@ def sync_active_profile_table(
     profile_table_ids = (
         "month-profile-editor",
         "sun-profile-editor",
-        "price-kwp-editor",
-        "price-kwp-others-editor",
     )
     activator_clicks = {
         table_id: int(clicks or 0)
@@ -249,8 +242,6 @@ def sync_active_profile_table(
     active_cells = {
         "month-profile-editor": month_active_cell,
         "sun-profile-editor": sun_active_cell,
-        "price-kwp-editor": price_active_cell,
-        "price-kwp-others-editor": price_others_active_cell,
     }
     if isinstance(trigger, dict) and trigger.get("type") == "profile-table-activate":
         table_id = str(trigger.get("table", "")).strip() or None
@@ -446,8 +437,6 @@ __all__ = [
     "_session",
     "add_battery_row",
     "add_inverter_row",
-    "add_price_kwp_others_row",
-    "add_price_kwp_row",
     "cancel_run_scan_choice",
     "ctx",
     "export_active_artifacts",
@@ -459,7 +448,6 @@ __all__ = [
     "populate_results",
     "render_active_profile_chart",
     "resolve_run_scan_choice",
-    "sanitize_active_profile_table",
     "sync_active_profile_table",
     "sync_assumption_context_ui",
     "sync_candidate_horizon_slider",

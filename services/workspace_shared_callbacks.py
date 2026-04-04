@@ -7,7 +7,6 @@ from pathlib import Path
 from dash import ALL, Input, Output, State, callback, ctx
 from dash.exceptions import PreventUpdate
 
-from components.profile_editor import _debug_bundle_rows
 from components.scenario_controls import stacked_button_label
 from .i18n import tr
 from .project_io import delete_project, list_projects, open_project, save_project, save_project_as
@@ -40,7 +39,11 @@ def _project_options():
 
 
 def _resolved_project_name(project_name_value, state) -> str:
-    return (project_name_value or state.project_name or state.project_slug or "").strip()
+    if isinstance(project_name_value, dict):
+        value = project_name_value.get("value")
+    else:
+        value = project_name_value
+    return (value or state.project_name or state.project_slug or "").strip()
 
 
 def _project_is_bound(state) -> bool:
@@ -49,6 +52,10 @@ def _project_is_bound(state) -> bool:
 
 def _join_status_parts(*parts: str) -> str:
     return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def _project_name_draft_state(value: str | None = None) -> dict[str, str]:
+    return {"value": str(value or "")}
 
 
 def _scenario_name_from_filename(filename: str | None, fallback: str) -> str:
@@ -90,6 +97,18 @@ def _workspace_state_strip_children(*, state, active, session_id: str, lang: str
             "info" if scan_current else "warning",
         ),
     ]
+
+
+@callback(
+    Output("project-name-draft-store", "data"),
+    Input("scenario-session-store", "data"),
+    Input("project-name-input", "value", allow_optional=True),
+)
+def sync_project_name_draft_store(session_payload, project_name_value):
+    if project_name_value is not None:
+        return _project_name_draft_state(project_name_value)
+    _client_state, state = _session(session_payload, "es")
+    return _project_name_draft_state(state.project_name or state.project_slug or "")
 
 
 @callback(
@@ -313,10 +332,8 @@ def mutate_workspace_session(
 
         if trigger == "new-scenario-btn":
             bundle = load_example_config()
-            _debug_bundle_rows("AFTER load_example_config", bundle)
             name = default_scenario_name(state, prefix="Escenario" if lang == "es" else "Scenario")
             record = create_scenario_record(name, bundle, source_name=bundle.source_name)
-            _debug_bundle_rows("AFTER create_scenario_record", record.config_bundle)
             state = add_scenario(state, record, make_active=True)
             client_state = commit_client_session(client_state, state)
             return client_state.to_payload(), tr("workbench.loaded_example", lang, name=record.name)

@@ -13,6 +13,7 @@ import pandas as pd
 
 from pv_product.hardware import generate_kwp_candidates, peak_ratio_ok, select_inverter_and_strings
 from pv_product.models import Battery, DispatchConfig, PVSystem
+from pv_product.panel_technology import resolve_generation_pr
 from pv_product.simulator import Simulator
 
 from .types import LoadedConfigBundle
@@ -263,11 +264,12 @@ def evaluate_deterministic_scan_task(task: DeterministicScanTask) -> Determinist
     detail_rows: list[dict[str, Any]] = []
     island_mode = bool(cfg.get("island_mode", False))
     export_allowed_eff = bool(cfg["export_allowed"]) and not island_mode
+    resolved_pr = resolve_generation_pr(cfg["PR"], cfg.get("panel_technology_mode"))
     for batt in task.battery_options:
         battery = _build_battery(batt, cfg)
         system = PVSystem(
             kwp=k_wp,
-            pr=cfg["PR"],
+            pr=resolved_pr,
             hsp_month=task.hsp_month,
             solar_shape=task.solar_profile,
             inverter_ac_kw=inv_sel["inverter"]["AC_kW"],

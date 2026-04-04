@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
-import shutil
 import unicodedata
 from typing import Any
 
@@ -13,6 +12,14 @@ from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter, range_boundaries
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
+from pv_product.panel_catalog import (
+    DEFAULT_BASELINE_PANEL_NAME,
+    PANEL_CATALOG_COLUMNS,
+    apply_panel_selection,
+    default_panel_catalog_frame,
+    normalize_panel_name,
+)
+from pv_product.panel_technology import normalize_panel_technology_mode
 from pv_product.utils import DEFAULT_CONFIG, build_7x24_from_excel, solar_profile_24
 
 from .demand_profile_logic import (
@@ -22,10 +29,16 @@ from .demand_profile_logic import (
     derive_relative_profile,
     infer_relative_profile_type,
 )
+from .economics_tables import (
+    default_economics_cost_items_table,
+    default_economics_price_items_table,
+    hydrate_economics_cost_items_table,
+    hydrate_economics_price_items_table,
+)
 from .runtime_paths import bundled_workbook_path
 from .types import LoadedConfigBundle
 from .types import ValidationIssue
-from .validation import validate_config
+from .validation import normalize_panel_catalog_rows, validate_config
 
 SHEET_ALIASES = {
     "Config": ("Config",),
@@ -43,6 +56,11 @@ TABLE_COLUMNS = {
     "Precios_kWp_relativos_Otros": ["MIN", "MAX", "PRECIO_POR_KWP"],
     "Inversor_Catalog": ["name", "AC_kW", "Vmppt_min", "Vmppt_max", "Vdc_max", "Imax_mppt", "n_mppt", "price_COP"],
     "Battery_Catalog": ["name", "nom_kWh", "max_kW", "max_ch_kW", "max_dis_kW", "price_COP"],
+    # Keep workbook import backward-compatible with older panel catalogs that
+    # do not yet include price_COP. Canonical CSV persistence does include it.
+    "Panel_Catalog": [column for column in PANEL_CATALOG_COLUMNS if column != "price_COP"],
+    "Economics_Cost_Items": ["stage", "name", "basis", "amount_COP", "source_mode", "hardware_binding", "enabled", "notes"],
+    "Economics_Price_Items": ["layer", "name", "method", "value", "enabled", "notes"],
 }
 TABLE_FILE_MAP = {
     "Config": "Config.csv",
@@ -55,6 +73,9 @@ TABLE_FILE_MAP = {
     "Precios_kWp_relativos_Otros": "Precios_kWp_relativos_Otros.csv",
     "Inversor_Catalog": "Inversor_Catalog.csv",
     "Battery_Catalog": "Battery_Catalog.csv",
+    "Panel_Catalog": "Panel_Catalog.csv",
+    "Economics_Cost_Items": "Economics_Cost_Items.csv",
+    "Economics_Price_Items": "Economics_Price_Items.csv",
 }
 
 CONFIG_KEY_ALIASES = {
@@ -143,6 +164,10 @@ def _normalize_config_value(key: str, value: Any) -> Any:
     default_value = DEFAULT_CONFIG.get(key)
     if _is_missing_config_value(value):
         value = default_value
+    if key == "panel_technology_mode":
+        return normalize_panel_technology_mode(value), None
+    if key == "panel_name":
+        return normalize_panel_name(value), None
     if key == "use_excel_profile":
         if isinstance(value, bool):
             return _normalize_mode(value), None
@@ -247,7 +272,7 @@ def _normalize_config(config: dict[str, Any]) -> tuple[dict[str, Any], list[Vali
     return cfg, issues
 
 
-def _default_catalogs() -> tuple[pd.DataFrame, pd.DataFrame]:
+def _default_catalogs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     inverter_catalog = pd.DataFrame(
         [
             {"name": "INV-5k", "AC_kW": 5.0, "Vmppt_min": 200, "Vmppt_max": 800, "Vdc_max": 1000, "Imax_mppt": 13, "n_mppt": 2, "price_COP": 5_500_000},
@@ -265,7 +290,8 @@ def _default_catalogs() -> tuple[pd.DataFrame, pd.DataFrame]:
             {"name": "BAT-20", "nom_kWh": 20.0, "max_kW": 10.0, "max_ch_kW": 10.0, "max_dis_kW": 10.0, "price_COP": 21_500_000},
         ]
     )
-    return inverter_catalog, battery_catalog
+    panel_catalog = default_panel_catalog_frame()
+    return inverter_catalog, battery_catalog, panel_catalog
 
 
 def _default_tables() -> dict[str, pd.DataFrame]:
@@ -323,6 +349,8 @@ def _default_tables() -> dict[str, pd.DataFrame]:
         "SUN_HSP_PROFILE": sun_profile,
         "Precios_kWp_relativos": prices,
         "Precios_kWp_relativos_Otros": prices_others,
+        "Economics_Cost_Items": default_economics_cost_items_table(),
+        "Economics_Price_Items": default_economics_price_items_table(),
     }
 
 
@@ -331,6 +359,7 @@ def _bundle_from_frames(
     config_table: pd.DataFrame,
     inverter_catalog: pd.DataFrame,
     battery_catalog: pd.DataFrame,
+    panel_catalog: pd.DataFrame,
     demand_profile: pd.DataFrame,
     demand_profile_weights: pd.DataFrame,
     demand_profile_general: pd.DataFrame,
@@ -338,9 +367,16 @@ def _bundle_from_frames(
     sun_profile: pd.DataFrame | None,
     cop_kwp_table: pd.DataFrame,
     cop_kwp_table_others: pd.DataFrame,
+    economics_cost_items: pd.DataFrame | None,
+    economics_price_items: pd.DataFrame | None,
     source_name: str,
 ) -> LoadedConfigBundle:
     cfg, normalization_issues = _normalize_config(config)
+    normalized_panel_catalog, panel_catalog_issues = normalize_panel_catalog_rows(
+        panel_catalog.to_dict("records") if panel_catalog is not None else [],
+    )
+    if normalized_panel_catalog.empty and panel_catalog is None:
+        normalized_panel_catalog = default_panel_catalog_frame()
     demand_profile = canonicalize_weekday_source(demand_profile)
     demand_profile_general = canonicalize_total_source(demand_profile_general)
     demand_profile_weights = derive_relative_profile(
@@ -349,6 +385,8 @@ def _bundle_from_frames(
         alpha_mix=cfg.get("alpha_mix", 0.5),
         e_month_kwh=cfg.get("E_month_kWh", 0.0),
     )
+    economics_cost_items, economics_cost_issues = hydrate_economics_cost_items_table(economics_cost_items)
+    economics_price_items, economics_price_issues = hydrate_economics_price_items_table(economics_price_items)
 
     if sun_profile is not None and {"HOUR", "SOL"}.issubset(sun_profile.columns):
         ordered_sun = sun_profile.sort_values("HOUR")
@@ -384,11 +422,13 @@ def _bundle_from_frames(
         dow24, day_w = build_7x24_from_excel(frame[["DOW", "HOUR", "TOTAL"]], total=True)
 
     cfg["HSP"] = float(hsp_month.mean())
+    cfg, _panel_resolution = apply_panel_selection(cfg, normalized_panel_catalog)
 
     bundle = LoadedConfigBundle(
         config=cfg,
         inverter_catalog=inverter_catalog.copy(),
         battery_catalog=battery_catalog.copy(),
+        panel_catalog=normalized_panel_catalog.copy(),
         solar_profile=np.asarray(solar, dtype=float),
         hsp_month=np.asarray(hsp_month, dtype=float),
         demand_profile_7x24=np.asarray(dow24, dtype=float),
@@ -402,9 +442,17 @@ def _bundle_from_frames(
         demand_profile_weights_table=demand_profile_weights.copy(),
         month_profile_table=month_profile.copy(),
         sun_profile_table=sun_profile.copy() if sun_profile is not None else pd.DataFrame(),
+        economics_cost_items_table=economics_cost_items.copy(),
+        economics_price_items_table=economics_price_items.copy(),
         source_name=source_name,
     )
-    issues = [*normalization_issues, *validate_config(bundle)]
+    issues = [
+        *normalization_issues,
+        *panel_catalog_issues,
+        *(ValidationIssue("warning", "economics_cost_items", message) for message in economics_cost_issues),
+        *(ValidationIssue("warning", "economics_price_items", message) for message in economics_price_issues),
+        *validate_config(bundle),
+    ]
     return LoadedConfigBundle(**{**bundle.__dict__, "issues": tuple(issues)})
 
 
@@ -418,10 +466,14 @@ def load_config_from_excel(path_or_bytes: str | bytes | Path | BytesIO) -> Loade
     cop_kwp_table_others = read_table_from_excel(path_or_bytes, "Perfiles", "Precios_kWp_relativos_Otros")
     inverter_catalog = read_table_from_excel(path_or_bytes, "Catalogos", "Inversor_Catalog")
     battery_catalog = read_table_from_excel(path_or_bytes, "Catalogos", "Battery_Catalog")
+    try:
+        panel_catalog = read_table_from_excel(path_or_bytes, "Catalogos", "Panel_Catalog")
+    except WorkbookContractError:
+        panel_catalog = default_panel_catalog_frame()
 
     try:
         sun_profile = read_table_from_excel(path_or_bytes, "Perfiles", "SUN_HSP_PROFILE")
-    except ValueError:
+    except (ValueError, WorkbookContractError):
         sun_profile = None
 
     source_name = _open_sources(path_or_bytes)[2]
@@ -437,6 +489,7 @@ def load_config_from_excel(path_or_bytes: str | bytes | Path | BytesIO) -> Loade
         config_table=config_table,
         inverter_catalog=inverter_catalog,
         battery_catalog=battery_catalog,
+        panel_catalog=panel_catalog,
         demand_profile=demand_profile,
         demand_profile_weights=demand_profile_weights,
         demand_profile_general=demand_profile_general,
@@ -444,6 +497,8 @@ def load_config_from_excel(path_or_bytes: str | bytes | Path | BytesIO) -> Loade
         sun_profile=sun_profile,
         cop_kwp_table=cop_kwp_table,
         cop_kwp_table_others=cop_kwp_table_others,
+        economics_cost_items=default_economics_cost_items_table(),
+        economics_price_items=default_economics_price_items_table(),
         source_name=source_name,
     )
 
@@ -451,13 +506,21 @@ def load_config_from_excel(path_or_bytes: str | bytes | Path | BytesIO) -> Loade
 def load_example_config() -> LoadedConfigBundle:
     example_path = bundled_workbook_path()
     if example_path.exists():
-        return load_config_from_excel(example_path)
+        bundle = load_config_from_excel(example_path)
+        if bundle.config.get("panel_name") == DEFAULT_CONFIG["panel_name"]:
+            return rebuild_config_bundle(
+                bundle,
+                config={**bundle.config, "panel_name": DEFAULT_BASELINE_PANEL_NAME},
+                panel_catalog=bundle.panel_catalog if not bundle.panel_catalog.empty else default_panel_catalog_frame(),
+            )
+        return bundle
 
-    inverter_catalog, battery_catalog = _default_catalogs()
+    inverter_catalog, battery_catalog, panel_catalog = _default_catalogs()
     tables = _default_tables()
     config = dict(DEFAULT_CONFIG)
     config["use_excel_profile"] = "Perfil Horario Relativo"
     config["bat_coupling"] = "ac"
+    config["panel_name"] = DEFAULT_BASELINE_PANEL_NAME
     return _bundle_from_frames(
         config=config,
         config_table=pd.DataFrame(
@@ -465,6 +528,7 @@ def load_example_config() -> LoadedConfigBundle:
         ),
         inverter_catalog=inverter_catalog,
         battery_catalog=battery_catalog,
+        panel_catalog=panel_catalog,
         demand_profile=tables["Demand_Profile"],
         demand_profile_weights=tables["Demand_Profile_Weights"],
         demand_profile_general=tables["Demand_Profile_General"],
@@ -472,6 +536,8 @@ def load_example_config() -> LoadedConfigBundle:
         sun_profile=tables["SUN_HSP_PROFILE"],
         cop_kwp_table=tables["Precios_kWp_relativos"],
         cop_kwp_table_others=tables["Precios_kWp_relativos_Otros"],
+        economics_cost_items=tables["Economics_Cost_Items"],
+        economics_price_items=tables["Economics_Price_Items"],
         source_name="default-example",
     )
 
@@ -483,6 +549,7 @@ def rebuild_config_bundle(
     config_table: pd.DataFrame | None = None,
     inverter_catalog: pd.DataFrame | None = None,
     battery_catalog: pd.DataFrame | None = None,
+    panel_catalog: pd.DataFrame | None = None,
     demand_profile: pd.DataFrame | None = None,
     demand_profile_weights: pd.DataFrame | None = None,
     demand_profile_general: pd.DataFrame | None = None,
@@ -490,12 +557,15 @@ def rebuild_config_bundle(
     sun_profile: pd.DataFrame | None = None,
     cop_kwp_table: pd.DataFrame | None = None,
     cop_kwp_table_others: pd.DataFrame | None = None,
+    economics_cost_items: pd.DataFrame | None = None,
+    economics_price_items: pd.DataFrame | None = None,
 ) -> LoadedConfigBundle:
     return _bundle_from_frames(
         config=config or dict(base_bundle.config),
         config_table=config_table if config_table is not None else base_bundle.config_table,
         inverter_catalog=inverter_catalog if inverter_catalog is not None else base_bundle.inverter_catalog,
         battery_catalog=battery_catalog if battery_catalog is not None else base_bundle.battery_catalog,
+        panel_catalog=panel_catalog if panel_catalog is not None else base_bundle.panel_catalog,
         demand_profile=demand_profile if demand_profile is not None else base_bundle.demand_profile_table,
         demand_profile_weights=demand_profile_weights if demand_profile_weights is not None else base_bundle.demand_profile_weights_table,
         demand_profile_general=demand_profile_general if demand_profile_general is not None else base_bundle.demand_profile_general_table,
@@ -503,6 +573,8 @@ def rebuild_config_bundle(
         sun_profile=sun_profile if sun_profile is not None else base_bundle.sun_profile_table,
         cop_kwp_table=cop_kwp_table if cop_kwp_table is not None else base_bundle.cop_kwp_table,
         cop_kwp_table_others=cop_kwp_table_others if cop_kwp_table_others is not None else base_bundle.cop_kwp_table_others,
+        economics_cost_items=economics_cost_items if economics_cost_items is not None else base_bundle.economics_cost_items_table,
+        economics_price_items=economics_price_items if economics_price_items is not None else base_bundle.economics_price_items_table,
         source_name=base_bundle.source_name,
     )
 
@@ -512,22 +584,11 @@ def load_bundle_from_tables(table_root: str | Path, *, source_name: str = "proje
 
     def _read_csv(table_name: str, *, optional: bool = False) -> pd.DataFrame | None:
         path = root / TABLE_FILE_MAP[table_name]
-        print(f"READING {table_name}: {path}")
-        print("  exists:", path.exists())
-        if path.exists():
-            print("  size:", path.stat().st_size)
-            try:
-                print("  preview:")
-                print(path.read_text(encoding="utf-8")[:300])
-            except Exception as exc:
-                print("  preview failed:", exc)
         if not path.exists():
             if optional:
                 return None
             raise FileNotFoundError(f"Falta la tabla canónica '{path.name}' en '{root}'.")
-        df = pd.read_csv(path)
-        print("  rows:", len(df), "cols:", list(df.columns))
-        return df
+        return pd.read_csv(path)
 
     config_table = _read_csv("Config")
     month_profile = _read_csv("Month_Demand_Profile")
@@ -538,7 +599,10 @@ def load_bundle_from_tables(table_root: str | Path, *, source_name: str = "proje
     cop_kwp_table_others = _read_csv("Precios_kWp_relativos_Otros")
     inverter_catalog = _read_csv("Inversor_Catalog")
     battery_catalog = _read_csv("Battery_Catalog")
+    panel_catalog = _read_csv("Panel_Catalog", optional=True)
     sun_profile = _read_csv("SUN_HSP_PROFILE", optional=True)
+    economics_cost_items = _read_csv("Economics_Cost_Items", optional=True)
+    economics_price_items = _read_csv("Economics_Price_Items", optional=True)
 
     config: dict[str, Any] = {}
     assert config_table is not None
@@ -553,6 +617,7 @@ def load_bundle_from_tables(table_root: str | Path, *, source_name: str = "proje
         config_table=config_table,
         inverter_catalog=inverter_catalog,
         battery_catalog=battery_catalog,
+        panel_catalog=panel_catalog if panel_catalog is not None else default_panel_catalog_frame(),
         demand_profile=demand_profile,
         demand_profile_weights=demand_profile_weights,
         demand_profile_general=demand_profile_general,
@@ -560,6 +625,8 @@ def load_bundle_from_tables(table_root: str | Path, *, source_name: str = "proje
         sun_profile=sun_profile,
         cop_kwp_table=cop_kwp_table,
         cop_kwp_table_others=cop_kwp_table_others,
+        economics_cost_items=economics_cost_items if economics_cost_items is not None else default_economics_cost_items_table(),
+        economics_price_items=economics_price_items if economics_price_items is not None else default_economics_price_items_table(),
         source_name=source_name,
     )
 
@@ -587,7 +654,9 @@ def _build_template_workbook(path: Path) -> None:
     ws_catalogs = wb.create_sheet("Catalogos")
 
     config_rows = []
-    for key, value in DEFAULT_CONFIG.items():
+    template_config = dict(DEFAULT_CONFIG)
+    template_config["panel_name"] = DEFAULT_BASELINE_PANEL_NAME
+    for key, value in template_config.items():
         external_key = "coupling" if key == "bat_coupling" else key
         external_value = value
         if key == "use_excel_profile":
@@ -606,16 +675,13 @@ def _build_template_workbook(path: Path) -> None:
     _add_table(ws_profiles, tables["Precios_kWp_relativos"], "Precios_kWp_relativos", start_row=3, start_col=28)
     _add_table(ws_profiles, tables["Precios_kWp_relativos_Otros"], "Precios_kWp_relativos_Otros", start_row=3, start_col=32)
 
-    inverter_catalog, battery_catalog = _default_catalogs()
+    inverter_catalog, battery_catalog, panel_catalog = _default_catalogs()
     _add_table(ws_catalogs, inverter_catalog, "Inversor_Catalog", start_row=1, start_col=1)
     _add_table(ws_catalogs, battery_catalog, "Battery_Catalog", start_row=1, start_col=10)
+    _add_table(ws_catalogs, panel_catalog, "Panel_Catalog", start_row=1, start_col=18)
     wb.save(path)
 
 
 def ensure_template(path: str | Path) -> None:
     destination = Path(path)
-    example_path = bundled_workbook_path()
-    if example_path.exists() and example_path.resolve() != destination.resolve():
-        shutil.copyfile(example_path, destination)
-        return
     _build_template_workbook(destination)

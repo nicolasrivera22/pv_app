@@ -7,6 +7,7 @@ from app import create_app
 from pages import admin as admin_page
 from pages import assumptions as assumptions_page
 from pages import results as results_page
+from pages import workbench as workbench_page
 from services import (
     ScenarioSessionState,
     ValidationIssue,
@@ -23,9 +24,15 @@ from services import (
     partition_assumption_sections,
     resolve_client_session,
     resolve_results_status_digest,
+    tr,
     upsert_workspace_draft,
 )
-from services.workspace_assumptions_callbacks import mutate_assumptions_state, sync_assumptions_demand_profile_views
+from services.workspace_assumptions_callbacks import (
+    ASSUMPTIONS_PAGE_RESPONSE_KEYS,
+    mutate_assumptions_state,
+    populate_assumptions_page,
+    sync_assumptions_demand_profile_views,
+)
 
 
 def _fast_bundle():
@@ -72,6 +79,11 @@ def _find_matching_component(node, predicate):
     return _find_matching_component(children, predicate)
 
 
+def _assumptions_response(outputs):
+    assert len(outputs) == len(ASSUMPTIONS_PAGE_RESPONSE_KEYS)
+    return dict(zip(ASSUMPTIONS_PAGE_RESPONSE_KEYS, outputs))
+
+
 def test_partition_assumption_sections_routes_safe_and_internal_groups() -> None:
     sections = build_assumption_sections(load_example_config(), lang="es", show_all=True)
 
@@ -94,12 +106,14 @@ def test_partition_assumption_sections_routes_safe_and_internal_groups() -> None
 
     assert {"Demanda y Perfil", "Sol y módulos", "Semilla", "Restricción de Proporción Pico"} <= client_groups
     assert {"Economía", "Inversor", "Precios", "Monte Carlo"} <= admin_groups
-    assert {"include_battery", "optimize_battery", "export_allowed"} <= client_fields
+    assert {"include_battery", "optimize_battery", "export_allowed", "panel_name", "panel_technology_mode"} <= client_fields
     assert {"battery_name", "bat_DoD", "bat_coupling", "bat_eta_rt"} <= admin_fields
     assert "pricing_mode" not in client_fields
     assert "mc_PR_std" not in client_fields
     assert "mc_PR_std" in admin_fields
     assert "price_total_COP" in admin_fields
+    assert "panel_name" not in admin_fields
+    assert "panel_technology_mode" not in admin_fields
 
 
 def test_workspace_drafts_persist_per_scenario_and_clear_independently() -> None:
@@ -177,13 +191,21 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(assumptions_layout, "run-assumptions-scan-btn") is not None
     assert _find_component(assumptions_layout, "assumptions-general-tab") is not None
     assert _find_component(assumptions_layout, "assumptions-demand-tab") is not None
-    assert _find_component(assumptions_layout, "workspace-admin-entry") is not None
+    assert _find_component(assumptions_layout, "assumptions-advanced-tools-entry-shell") is not None
+    assert _find_component(assumptions_layout, "advanced-tools") is not None
+    assert _find_component(assumptions_layout, "assumptions-advanced-tools-shell") is not None
+    assert _find_component(assumptions_layout, "workspace-admin-entry") is None
     assert _find_component(assumptions_layout, "assumptions-demand-profile-mode-selector") is not None
     assert _find_component(assumptions_layout, "inverter-table-editor") is None
+    assert _find_component(assumptions_layout, "economics-editor-title") is None
+    assert _find_component(assumptions_layout, "run-scan-choice-state") is None
+    assert _find_component(assumptions_layout, "run-scan-choice-dialog") is None
 
-    assert _find_component(admin_layout, "admin-access-shell") is not None
-    assert _find_component(admin_layout, "admin-gating-note") is not None
-    assert _find_component(admin_layout, "admin-mode-gate") is not None
+    assert _find_component(admin_layout, "admin-redirect-fallback") is not None
+    assert _find_component(admin_layout, "admin-redirect-title") is not None
+    assert _find_component(admin_layout, "admin-redirect-copy") is not None
+    assert _find_component(admin_layout, "admin-redirect-enter-btn") is not None
+    assert _find_component(admin_layout, "admin-redirect-location") is None
     assert _find_component(admin_layout, "admin-setup-pin-input") is None
     assert _find_component(admin_layout, "admin-pin-input") is None
     assert _find_component(admin_layout, "profile-editor-title") is None
@@ -191,6 +213,69 @@ def test_page_wrappers_render_split_sections(monkeypatch, tmp_path) -> None:
     assert _find_component(admin_layout, "apply-admin-btn") is None
     assert _find_component(admin_layout, "run-assumptions-scan-btn") is None
     assert _find_component(admin_layout, "workspace-admin-entry") is None
+
+
+def test_results_page_mounts_local_explorer_store_without_adding_it_to_workbench() -> None:
+    results_layout = results_page.layout() if callable(results_page.layout) else results_page.layout
+    workbench_layout = workbench_page.layout() if callable(workbench_page.layout) else workbench_page.layout
+
+    assert _find_component(results_layout, "results-explorer-state") is not None
+    assert _find_component(workbench_layout, "results-explorer-state") is None
+
+
+def test_assumptions_page_uses_collapsible_groups_for_general_groups_with_closed_defaults() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = commit_client_session(bootstrap_client_session("es"), state).to_payload()
+
+    response = _assumptions_response(populate_assumptions_page(payload, [], "es"))
+    sections = response["sections"]
+
+    solar_section = next(section for section in sections if _find_component(section, "assumptions-group-sol-y-módulos-title") is not None)
+    scan_section = next(section for section in sections if _find_component(section, "assumptions-group-semilla-title") is not None)
+    peak_section = next(section for section in sections if _find_component(section, "assumptions-group-restricción-de-proporción-pico-title") is not None)
+    battery_section = next(
+        section for section in sections if _find_component(section, "assumptions-group-controles-de-batería-y-exporte-title") is not None
+    )
+
+    assert getattr(solar_section, "open", None) is False
+    assert getattr(scan_section, "open", None) is False
+    assert getattr(peak_section, "open", None) is False
+    assert getattr(battery_section, "open", None) is False
+    assert _find_component(solar_section, {"type": "assumptions-input", "field": "panel_name"}) is not None
+    assert _find_component(scan_section, {"type": "assumptions-input", "field": "kWp_seed_mode"}) is not None
+
+
+def test_assumptions_layout_places_advanced_entry_near_top_before_real_host() -> None:
+    assumptions_layout = assumptions_page.layout() if callable(assumptions_page.layout) else assumptions_page.layout
+    main_stack = _find_matching_component(
+        assumptions_layout,
+        lambda node: "main-stack" in str(getattr(node, "className", "")).split(),
+    )
+
+    assert main_stack is not None
+    child_ids = [getattr(child, "id", None) for child in main_stack.children]
+    assert child_ids.index("assumptions-advanced-tools-entry-shell") == 2
+    assert child_ids.index("assumptions-advanced-tools-entry-shell") < child_ids.index("advanced-tools")
+
+
+def test_assumptions_tabs_define_explicit_base_and_selected_styles() -> None:
+    assumptions_layout = assumptions_page.layout() if callable(assumptions_page.layout) else assumptions_page.layout
+    general_tab = _find_component(assumptions_layout, "assumptions-general-tab")
+    demand_tab = _find_component(assumptions_layout, "assumptions-demand-tab")
+
+    assert general_tab is not None
+    assert demand_tab is not None
+    for tab in (general_tab, demand_tab):
+        assert tab.style["background"] == "rgba(255, 255, 255, 0.82)"
+        assert tab.style["border"] == "1px solid rgba(203, 213, 225, 0.95)"
+        assert tab.selected_style["background"].startswith("linear-gradient(")
+        assert tab.selected_style["border"] == "1px solid rgba(37, 99, 235, 0.92)"
+        assert tab.selected_style["boxShadow"] == "0 0 0 2px rgba(37, 99, 235, 0.14), 0 14px 28px rgba(37, 99, 235, 0.18)"
+
+
+def test_assumptions_page_registers_advanced_access_shell_callback() -> None:
+    assert assumptions_page._workspace_admin_callbacks is not None
+    assert assumptions_page._workspace_admin_callbacks.render_admin_access_shell is not None
 
 
 def test_assumptions_demand_tab_places_summary_strip_above_tables() -> None:
@@ -224,7 +309,25 @@ def test_top_nav_exposes_results_and_assumptions_but_not_admin() -> None:
 
     assert _find_component(layout, "nav-results-label") is not None
     assert _find_component(layout, "nav-assumptions-label") is not None
+    assert _find_component(layout, "admin-mode-dialog-state") is not None
+    assert _find_component(layout, "admin-access-meta") is not None
+    assert _find_component(layout, "admin-mode-dialog") is not None
+    assert _find_component(layout, "project-name-draft-store") is not None
     assert _find_component(layout, "workspace-admin-link") is None
+
+
+def test_app_layout_keeps_run_scan_choice_shell_global_for_cross_page_callbacks() -> None:
+    app = create_app()
+    layout = app.layout() if callable(app.layout) else app.layout
+
+    assert _find_component(layout, "run-scan-choice-state") is not None
+    assert _find_component(layout, "project-name-draft-store") is not None
+    assert _find_component(layout, "run-scan-choice-dialog") is not None
+    assert _find_component(layout, "run-scan-choice-title") is not None
+    assert _find_component(layout, "run-scan-choice-copy") is not None
+    assert _find_component(layout, "run-scan-save-and-run-btn") is not None
+    assert _find_component(layout, "run-scan-run-unsaved-btn") is not None
+    assert _find_component(layout, "run-scan-cancel-btn") is not None
 
 
 def test_admin_page_gracefully_handles_direct_access_without_active_scenario(monkeypatch, tmp_path) -> None:
@@ -233,10 +336,43 @@ def test_admin_page_gracefully_handles_direct_access_without_active_scenario(mon
 
     rendered = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
 
-    assert _find_component(rendered, "admin-gating-note") is not None
-    assert _find_component(rendered, "admin-mode-gate") is not None
+    assert _find_component(rendered, "admin-redirect-location") is None
+    enter_btn = _find_component(rendered, "admin-redirect-enter-btn")
+    assert enter_btn is not None
+    assert enter_btn.children == "Entrar a Modo Admin"
     assert _find_component(rendered, "admin-setup-pin-input") is None
     assert payload["active_scenario_id"] is None
+
+
+def test_populate_assumptions_page_handles_clean_session_without_active_project() -> None:
+    response = _assumptions_response(populate_assumptions_page(None, [], "es"))
+
+    assert len(response) == 42
+    assert response["apply_disabled"] is True
+    assert response["scan_disabled"] is True
+    assert response["sections"][0].children == tr("workspace.assumptions.empty.no_project_body", "es")
+    assert response["relative_grid_style"]["display"] == "none"
+    assert response["secondary_grid_style"]["display"] == "none"
+    assert response["chart_panel_style"]["display"] == "grid"
+    assert response["chart_title"] == tr("workspace.assumptions.empty.no_project_title", "es")
+    assert response["chart_subtitle"] == tr("workspace.assumptions.empty.no_project_body", "es")
+    assert not response["chart_figure"].data
+    assert response["chart_figure"].layout.annotations[0].text == tr("workspace.assumptions.empty.no_project_body", "es")
+
+
+def test_populate_assumptions_page_guard_clause_returns_full_empty_response() -> None:
+    payload = commit_client_session(bootstrap_client_session("es"), ScenarioSessionState.empty()).to_payload()
+
+    response = _assumptions_response(populate_assumptions_page(payload, ["all"], "es"))
+
+    assert len(response) == 42
+    assert response["apply_disabled"] is True
+    assert response["scan_disabled"] is True
+    assert response["weekday_rows"] == []
+    assert response["total_rows"] == []
+    assert response["relative_rows"] == []
+    assert response["panel_style"]["display"] == "none"
+    assert response["chart_subtitle"] == tr("workspace.assumptions.empty.no_project_body", "es")
 
 
 def test_assumptions_demand_tab_reacts_with_preview_and_chart() -> None:
@@ -274,6 +410,20 @@ def test_assumptions_demand_tab_reacts_with_preview_and_chart() -> None:
     assert len(chart_figure.data) == 1
 
 
+def test_populate_assumptions_page_returns_full_response_for_active_scenario() -> None:
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    payload = commit_client_session(bootstrap_client_session("es"), state).to_payload()
+
+    response = _assumptions_response(populate_assumptions_page(payload, [], "es"))
+
+    assert len(response) == 42
+    assert response["apply_disabled"] is False
+    assert response["scan_disabled"] is False
+    assert response["sections"]
+    assert response["chart_panel_style"]["display"] == "grid"
+    assert response["chart_figure"].data
+
+
 def test_apply_assumptions_persists_demand_mode_and_keeps_run_flow(monkeypatch) -> None:
     clear_workspace_drafts()
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
@@ -307,4 +457,4 @@ def test_apply_assumptions_persists_demand_mode_and_keeps_run_flow(monkeypatch) 
     assert active.config_bundle.config["use_excel_profile"] == "perfil horario relativo"
     assert "aplic" in status.lower()
     assert "ejecut" in status.lower() or "rerun" in status.lower()
-    assert dialog_state == {"open": False}
+    assert dialog_state == {"open": False, "suggested_project_name": ""}

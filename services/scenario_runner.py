@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from .candidate_financials import attach_candidate_financial_snapshot, attach_candidate_financial_snapshots, validate_candidate_financial_snapshot
 from .cache import fingerprint_deterministic_input, get_deterministic_cache
 from .deterministic_executor import run_deterministic_scan_task_results
 from .result_views import (
@@ -15,7 +16,7 @@ from .result_views import (
     calculate_self_sufficiency_ratio,
     candidate_key_for,
 )
-from .types import LoadedConfigBundle, ScanRunResult, ScenarioRunResult
+from .types import LoadedConfigBundle, ScanRunResult, ScenarioRecord, ScenarioRunResult
 from .validation import validate_config
 
 
@@ -46,6 +47,7 @@ def _build_scan_result(config_bundle: LoadedConfigBundle, *, allow_parallel: boo
         config=_deterministic_config(config_bundle.config),
         inverter_catalog=config_bundle.inverter_catalog,
         battery_catalog=config_bundle.battery_catalog,
+        panel_catalog=config_bundle.panel_catalog,
         solar_profile=config_bundle.solar_profile,
         hsp_month=config_bundle.hsp_month,
         demand_profile_7x24=config_bundle.demand_profile_7x24,
@@ -59,6 +61,8 @@ def _build_scan_result(config_bundle: LoadedConfigBundle, *, allow_parallel: boo
         demand_profile_weights_table=config_bundle.demand_profile_weights_table,
         month_profile_table=config_bundle.month_profile_table,
         sun_profile_table=config_bundle.sun_profile_table,
+        economics_cost_items_table=config_bundle.economics_cost_items_table,
+        economics_price_items_table=config_bundle.economics_price_items_table,
         source_name=config_bundle.source_name,
         issues=config_bundle.issues,
     )
@@ -152,13 +156,28 @@ def run_scenario(config_bundle: LoadedConfigBundle, candidate_key: str | None = 
 
     detail = scan_result.candidate_details[selected_key]
     monthly = detail["monthly"].copy()
+    ephemeral_scenario = ScenarioRecord(
+        scenario_id="scenario-run",
+        name="Scenario",
+        source_name=config_bundle.source_name,
+        config_bundle=config_bundle,
+        scan_result=scan_result,
+        scan_fingerprint=fingerprint_deterministic_input(config_bundle),
+        selected_candidate_key=selected_key,
+        dirty=False,
+        last_run_at=None,
+        runtime_price_bridge=None,
+    )
+    attached_details = attach_candidate_financial_snapshots(ephemeral_scenario)
+    presentation_detail = attach_candidate_financial_snapshot(ephemeral_scenario, detail, selected_key)
+    financial_snapshot = validate_candidate_financial_snapshot(presentation_detail.get("financial_snapshot"), candidate_key=selected_key)
     return ScenarioRunResult(
         candidate_key=selected_key,
-        candidate=detail,
+        candidate=presentation_detail,
         monthly=monthly,
-        kpis=build_kpis(detail),
-        cash_flow=build_cash_flow(monthly),
+        kpis=build_kpis(presentation_detail, require_financial_snapshot=True),
+        cash_flow=build_cash_flow(monthly, financial_snapshot=financial_snapshot, require_financial_snapshot=True),
         monthly_balance=build_monthly_balance(monthly),
-        npv_curve=build_npv_curve(scan_result.candidates),
+        npv_curve=build_npv_curve(build_candidate_table(attached_details, require_financial_snapshot=True)),
         issues=scan_result.issues,
     )

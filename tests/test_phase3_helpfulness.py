@@ -125,6 +125,21 @@ def test_validation_panel_routes_monte_carlo_fields_to_assumptions_general_secti
     assert "Supuestos > Generales > Monte Carlo" in text_es
 
 
+def test_validation_panel_routes_panel_catalog_issues_like_other_hardware_catalogs() -> None:
+    issues = [ValidationIssue("error", "Panel_Catalog", "Fila 1: el nombre '__manual__' está reservado.")]
+
+    rendered_en = render_validation_panel(issues, lang="en")
+    rendered_es = render_validation_panel(issues, lang="es")
+
+    text_en = _flatten_text(rendered_en)
+    text_es = _flatten_text(rendered_es)
+
+    assert "Catalogs > Panels" in text_en
+    assert "Panel_Catalog" not in text_en
+    assert "Catálogos > Paneles" in text_es
+    assert "Panel_Catalog" not in text_es
+
+
 def test_validation_messages_are_human_and_actionable() -> None:
     solar_warning_en = localize_validation_message(
         ValidationIssue("warning", "SUN_HSP_PROFILE", "El perfil solar se normalizó para que sume 1."),

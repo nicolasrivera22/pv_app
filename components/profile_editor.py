@@ -4,6 +4,8 @@ from dash import dcc, dash_table, html
 
 from services.i18n import tr
 
+from .collapsible_section import collapsible_section
+
 
 def _component_id(id_prefix: str | None, base_id: str) -> str:
     prefix = str(id_prefix or "").strip()
@@ -45,15 +47,22 @@ def _profile_table(
     )
 
 
-def _profile_title(title_key: str, title_id: str, tooltip_key: str | None = None, tooltip_id: str | None = None) -> html.Div:
-    children = [html.H4(tr(title_key, "es"), id=title_id)]
+def _profile_title(
+    title_key: str,
+    title_id: str,
+    tooltip_key: str | None = None,
+    tooltip_id: str | None = None,
+    *,
+    lang: str = "es",
+) -> html.Div:
+    children = [html.H4(tr(title_key, lang), id=title_id)]
     if tooltip_key and tooltip_id:
         children.append(
             html.Span(
                 className="field-help",
                 children=[
                     html.Span("ⓘ", className="field-help-trigger", tabIndex=0),
-                    html.Span(tr(tooltip_key, "es"), id=tooltip_id, className="field-help-tooltip"),
+                    html.Span(tr(tooltip_key, lang), id=tooltip_id, className="field-help-tooltip"),
                 ],
             )
         )
@@ -113,10 +122,11 @@ def _profile_panel(
     style_data_conditional: list[dict] | None = None,
     show_activator: bool = True,
     extra_children: list | None = None,
+    lang: str = "es",
 ) -> html.Div:
     activator = (
         html.Button(
-            tr("workbench.profiles.preview_chart", "es"),
+            tr("workbench.profiles.preview_chart", lang),
             id={"type": "profile-table-activate", "table": table_id},
             n_clicks=0,
             className="action-btn tertiary profile-table-activator",
@@ -127,7 +137,7 @@ def _profile_panel(
     )
     button = (
         html.Button(
-            tr("workbench.profiles.add_row", "es"),
+            tr("workbench.profiles.add_row", lang),
             id=add_row_button_id,
             n_clicks=0,
             className="action-btn tertiary profile-inline-btn",
@@ -140,7 +150,7 @@ def _profile_panel(
     if button is not None:
         action_children.append(button)
     head_children = [
-        _profile_title(title_key, title_id, tooltip_key, tooltip_id),
+        _profile_title(title_key, title_id, tooltip_key, tooltip_id, lang=lang),
         html.Div(className="profile-table-actions", children=action_children),
     ]
     panel_children = [
@@ -457,104 +467,73 @@ def demand_profile_module(
     return html.Div(className="demand-profile-module", children=children)
 
 
-def profile_editor_section() -> html.Div:
-    return html.Div(
-        className="panel secondary-panel",
-        children=[
-            html.Div(className="section-head", children=[html.H3(tr("workbench.profiles", "es"), id="profile-editor-title")]),
-            html.Div(tr("workbench.profiles.note", "es"), id="profile-editor-note", className="section-copy section-copy-wide"),
+def _resource_profile_editor_children(*, lang: str = "es") -> list:
+    return [
+        html.Div(
+            id="profile-main-grid",
+            className="profile-main-grid",
+            children=[
+                _profile_panel(
+                    "month-profile-card",
+                    "workbench.profiles.month",
+                    "month-profile-title",
+                    "workbench.profiles.tooltip.month",
+                    "month-profile-tooltip",
+                    "month-profile-editor",
+                    panel_class_name="profile-main-panel",
+                    page_size=12,
+                    lang=lang,
+                ),
+                _profile_panel(
+                    "sun-profile-card",
+                    "workbench.profiles.sun",
+                    "sun-profile-title",
+                    "workbench.profiles.tooltip.sun",
+                    "sun-profile-tooltip",
+                    "sun-profile-editor",
+                    panel_class_name="profile-main-panel",
+                    page_size=12,
+                    lang=lang,
+                ),
+            ],
+        ),
+        _profile_chart_panel(
+            panel_id="profile-main-chart-panel",
+            title_id="profile-main-chart-title",
+            subtitle_id="profile-main-chart-subtitle",
+            graph_id="profile-main-chart-graph",
+        ),
+    ]
+
+
+def resource_profile_editor_section(*, lang: str = "es") -> html.Details:
+    return collapsible_section(
+        section_id="resource-profile-editor-section",
+        summary_id="resource-profile-editor-summary",
+        title_id="resource-profile-editor-title",
+        title=tr("workspace.admin.resource_profiles.title", lang),
+        open=False,
+        title_level="h3",
+        variant="primary",
+        class_name="panel secondary-panel resource-profile-editor-section",
+        body_class_name="resource-profile-editor-body",
+        body=[
             html.Div(
-                id="profile-main-grid",
-                className="profile-main-grid",
-                children=[
-                    _profile_panel(
-                        "month-profile-card",
-                        "workbench.profiles.month",
-                        "month-profile-title",
-                        "workbench.profiles.tooltip.month",
-                        "month-profile-tooltip",
-                        "month-profile-editor",
-                        panel_class_name="profile-main-panel",
-                        page_size=12,
-                    ),
-                    _profile_panel(
-                        "sun-profile-card",
-                        "workbench.profiles.sun",
-                        "sun-profile-title",
-                        "workbench.profiles.tooltip.sun",
-                        "sun-profile-tooltip",
-                        "sun-profile-editor",
-                        panel_class_name="profile-main-panel",
-                        page_size=12,
-                    ),
-                ],
+                tr("workspace.admin.resource_profiles.note", lang),
+                id="resource-profile-editor-note",
+                className="section-copy section-copy-wide",
             ),
-            _profile_chart_panel(
-                panel_id="profile-main-chart-panel",
-                title_id="profile-main-chart-title",
-                subtitle_id="profile-main-chart-subtitle",
-                graph_id="profile-main-chart-graph",
-            ),
-            html.Div(
-                id="profile-secondary-grid",
-                className="profile-secondary-grid",
-                children=[
-                    _profile_panel(
-                        "price-kwp-card",
-                        "workbench.profiles.price",
-                        "price-kwp-title",
-                        "workbench.profiles.tooltip.price",
-                        "price-kwp-tooltip",
-                        "price-kwp-editor",
-                        panel_id="price-kwp-panel",
-                        panel_class_name="profile-secondary-pricing-panel",
-                        add_row_button_id="add-price-kwp-row-btn",
-                        placeholder_id="price-kwp-placeholder",
-                        row_deletable=True,
-                    ),
-                    _profile_panel(
-                        "price-kwp-others-card",
-                        "workbench.profiles.price_others",
-                        "price-kwp-others-title",
-                        "workbench.profiles.tooltip.price_others",
-                        "price-kwp-others-tooltip",
-                        "price-kwp-others-editor",
-                        panel_id="price-kwp-others-panel",
-                        panel_class_name="profile-secondary-pricing-panel",
-                        add_row_button_id="add-price-kwp-others-row-btn",
-                        placeholder_id="price-kwp-others-placeholder",
-                        row_deletable=True,
-                    ),
-                ],
-            ),
-            html.Div(
-                id="profile-demand-relocated-card",
-                className="subpanel demand-relocated-card",
-                children=[
-                    html.H4(tr("workspace.assumptions.demand.title", "es"), id="profile-demand-relocated-title"),
-                    html.P(tr("workspace.admin.demand_moved.copy", "es"), id="profile-demand-relocated-copy", className="section-copy"),
-                    dcc.Link(
-                        tr("workspace.admin.demand_moved.link", "es"),
-                        id="profile-demand-relocated-link",
-                        href="/assumptions",
-                        className="action-btn tertiary",
-                    ),
-                ],
-            ),
-            _profile_chart_panel(
-                panel_id="profile-secondary-chart-panel",
-                title_id="profile-secondary-chart-title",
-                subtitle_id="profile-secondary-chart-subtitle",
-                graph_id="profile-secondary-chart-graph",
-            ),
+            *_resource_profile_editor_children(lang=lang),
         ],
     )
 
-def _debug_bundle_rows(label, bundle):
-    print(f"\n=== {label} ===")
-    print("inverter:", len(bundle.inverter_catalog))
-    print("battery:", len(bundle.battery_catalog))
-    print("month:", len(bundle.month_profile_table))
-    print("sun:", len(bundle.sun_profile_table))
-    print("price:", len(bundle.cop_kwp_table))
-    print("price others:", len(bundle.cop_kwp_table_others))
+
+def profile_editor_section(*, lang: str = "es") -> html.Div:
+    return html.Div(
+        className="panel secondary-panel",
+        children=[
+            html.Div(className="section-head", children=[html.H3(tr("workbench.profiles", lang), id="profile-editor-title")]),
+            html.Div(tr("workbench.profiles.note", lang), id="profile-editor-note", className="section-copy section-copy-wide"),
+            *_resource_profile_editor_children(lang=lang),
+        ],
+    )

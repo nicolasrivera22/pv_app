@@ -25,19 +25,23 @@ from services import (
     is_admin_session_unlocked,
     load_config_from_excel,
     load_example_config,
+    run_scenario_scan,
     set_admin_pin,
     table_draft_rows,
+    tr,
     verify_admin_pin,
 )
 from services.workspace_admin_callbacks import (
     apply_admin_edits,
     populate_admin_page,
+    render_admin_access_summary,
     render_admin_access_shell,
     setup_admin_session,
     sync_admin_draft,
     translate_profile_table_activators,
     unlock_admin_session,
 )
+from services.economics_tables import economics_price_items_rows_to_section_editor
 
 
 _APP = create_app()
@@ -63,6 +67,11 @@ def _admin_client_state(lang: str = "es"):
 
 def _pro_client_state(lang: str = "es"):
     return replace(bootstrap_client_session(lang), ui_mode="pro")
+
+
+def _admin_payload_for_state(state, client_state=None, *, lang: str = "es") -> dict:
+    session = client_state or _admin_client_state(lang)
+    return commit_client_session(session, state).to_payload()
 
 
 def _find_component(node, component_id: str):
@@ -163,8 +172,17 @@ def test_admin_page_defaults_to_internal_gate_shell(monkeypatch, tmp_path) -> No
 
     layout = admin_page.layout() if callable(admin_page.layout) else admin_page.layout
 
-    assert _find_component(layout, "admin-access-shell") is not None
-    assert _find_component(layout, "admin-mode-gate") is not None
+    enter_btn = _find_component(layout, "admin-redirect-enter-btn")
+    fallback_title = _find_component(layout, "admin-redirect-title")
+    fallback_copy = _find_component(layout, "admin-redirect-copy")
+    assert _find_component(layout, "admin-redirect-fallback") is not None
+    assert enter_btn is not None
+    assert enter_btn.children == tr("workspace.advanced.redirect.enter", "es")
+    assert _find_component(layout, "admin-redirect-location") is None
+    assert fallback_title is not None
+    assert fallback_title.children == tr("workspace.advanced.redirect.title", "es")
+    assert fallback_copy is not None
+    assert fallback_copy.children == tr("workspace.advanced.redirect.copy", "es")
     assert _find_component(layout, "admin-setup-pin-input") is None
     assert _find_component(layout, "admin-pin-input") is None
     assert _find_component(layout, "profile-editor-title") is None
@@ -185,6 +203,30 @@ def test_render_admin_access_shell_shows_setup_when_pin_missing(monkeypatch, tmp
     assert _find_component(rendered, "profile-editor-title") is None
 
 
+def test_render_admin_access_summary_shows_setup_when_pin_missing(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    rendered = render_admin_access_summary(_admin_client_state("es").to_payload(), "es", {"revision": 1})
+
+    status = _find_component(rendered, "assumptions-advanced-tools-entry-status")
+    link = _find_component(rendered, "assumptions-advanced-tools-entry-link")
+    footer = _find_component(rendered, "assumptions-advanced-tools-entry-footer")
+    cta_row = _find_component(rendered, "assumptions-advanced-tools-entry-cta-row")
+
+    assert status is not None
+    assert status.children == tr("workspace.advanced.entry.status.setup_required", "es")
+    assert link is not None
+    assert link.children == tr("workspace.advanced.entry.cta.setup_required", "es")
+    assert link.href == "#advanced-tools"
+    assert footer is not None
+    assert cta_row is not None
+    assert _find_component(rendered, "admin-setup-pin-input") is None
+    assert _find_component(rendered, "admin-pin-input") is None
+    assert _find_component(rendered, "economics-editor-title") is None
+
+
 def test_render_admin_access_shell_shows_unlock_when_pin_is_configured(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
@@ -201,6 +243,53 @@ def test_render_admin_access_shell_shows_unlock_when_pin_is_configured(monkeypat
     assert _find_component(rendered, "profile-editor-title") is None
 
 
+def test_render_admin_access_summary_shows_locked_when_pin_is_configured(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+    set_admin_pin("2468")
+
+    rendered = render_admin_access_summary(_admin_client_state("es").to_payload(), "es", {"revision": 1})
+
+    status = _find_component(rendered, "assumptions-advanced-tools-entry-status")
+    link = _find_component(rendered, "assumptions-advanced-tools-entry-link")
+    footer = _find_component(rendered, "assumptions-advanced-tools-entry-footer")
+    cta_row = _find_component(rendered, "assumptions-advanced-tools-entry-cta-row")
+
+    assert status is not None
+    assert status.children == tr("workspace.advanced.entry.status.locked", "es")
+    assert link is not None
+    assert link.children == tr("workspace.advanced.entry.cta.locked", "es")
+    assert footer is not None
+    assert cta_row is not None
+    assert _find_component(rendered, "admin-setup-pin-input") is None
+    assert _find_component(rendered, "admin-pin-input") is None
+    assert _find_component(rendered, "economics-editor-title") is None
+
+
+def test_render_admin_access_summary_stacks_head_status_meta_and_cta_in_order(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+    set_admin_pin("2468")
+
+    rendered = render_admin_access_summary(
+        _admin_client_state("es").to_payload(),
+        "es",
+        {"revision": 1, "message_key": "workspace.advanced.locked.invalid", "tone": "error"},
+    )
+
+    child_ids = [getattr(child, "id", None) for child in rendered.children]
+
+    assert "assumptions-advanced-tools-entry-head" in child_ids
+    assert "assumptions-advanced-tools-entry-status-row" in child_ids
+    assert "assumptions-advanced-tools-entry-meta" in child_ids
+    assert "assumptions-advanced-tools-entry-footer" in child_ids
+    assert child_ids.index("assumptions-advanced-tools-entry-head") < child_ids.index("assumptions-advanced-tools-entry-status-row")
+    assert child_ids.index("assumptions-advanced-tools-entry-status-row") < child_ids.index("assumptions-advanced-tools-entry-meta")
+    assert child_ids.index("assumptions-advanced-tools-entry-meta") < child_ids.index("assumptions-advanced-tools-entry-footer")
+
+
 def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
@@ -213,46 +302,202 @@ def test_render_admin_access_shell_exposes_secure_content_once_unlocked(monkeypa
     rendered = render_admin_access_shell(client_state.to_payload(), "es", {"revision": 1})
 
     assert _find_component(rendered, "admin-assumption-sections") is not None
-    assert _find_component(rendered, "profile-editor-title") is not None
+    assert _find_component(rendered, "resource-profile-editor-title") is not None
+    assert _find_component(rendered, "economics-editor-title") is not None
+    assert _find_component(rendered, "runtime-pricing-editor-title") is None
+    assert _find_component(rendered, "price-kwp-editor") is None
+    assert _find_component(rendered, "price-kwp-others-editor") is None
     assert _find_component(rendered, "inverter-table-editor") is not None
+    assert _find_component(rendered, "panel-table-editor") is not None
     assert _find_component(rendered, "admin-pin-input") is None
     assert _find_component(rendered, "profile-demand-legacy-shell") is None
 
 
-def test_render_admin_access_shell_degrades_in_simple_mode(monkeypatch, tmp_path) -> None:
+def test_render_admin_access_summary_shows_active_scenario_and_candidate_when_unlocked(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    active = state.get_scenario()
+    assert active is not None
+
+    set_admin_pin("2468")
+    client_state = _admin_client_state("es")
+    grant_admin_session_access(client_state.session_id)
+    rendered = render_admin_access_summary(
+        commit_client_session(client_state, state).to_payload(),
+        "es",
+        {"revision": 1, "message_key": "workspace.advanced.locked.unlocked", "tone": "success"},
+    )
+
+    status = _find_component(rendered, "assumptions-advanced-tools-entry-status")
+    context = _find_component(rendered, "assumptions-advanced-tools-entry-context")
+    meta = _find_component(rendered, "assumptions-advanced-tools-entry-meta")
+    footer = _find_component(rendered, "assumptions-advanced-tools-entry-footer")
+    cta_row = _find_component(rendered, "assumptions-advanced-tools-entry-cta-row")
+    link = _find_component(rendered, "assumptions-advanced-tools-entry-link")
+
+    assert status is not None
+    assert status.children == tr("workspace.advanced.entry.status.unlocked", "es")
+    assert link is not None
+    assert link.children == tr("workspace.advanced.entry.cta.unlocked", "es")
+    assert footer is not None
+    assert cta_row is not None
+    assert context is not None
+    assert active.name in context.children
+    assert active.selected_candidate_key in context.children
+    assert meta is None
+    assert _find_component(rendered, "admin-setup-pin-input") is None
+    assert _find_component(rendered, "admin-pin-input") is None
+    assert _find_component(rendered, "economics-editor-title") is None
+
+
+def test_render_admin_access_summary_shows_prescan_note_without_fake_candidate(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    active = state.get_scenario()
+    assert active is not None
+
+    set_admin_pin("2468")
+    client_state = _admin_client_state("es")
+    grant_admin_session_access(client_state.session_id)
+    rendered = render_admin_access_summary(_admin_payload_for_state(state, client_state), "es", {"revision": 1})
+
+    footer = _find_component(rendered, "assumptions-advanced-tools-entry-footer")
+    cta_row = _find_component(rendered, "assumptions-advanced-tools-entry-cta-row")
+    context = _find_component(rendered, "assumptions-advanced-tools-entry-context")
+
+    assert footer is not None
+    assert cta_row is not None
+    assert context is not None
+    assert active.name in context.children
+    assert tr("workspace.advanced.entry.context.pre_scan", "es", scenario_name=active.name) == context.children
+    assert "Candidato activo" not in context.children
+
+
+def test_admin_access_summary_and_shell_share_same_state_resolution(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    setup_payload = _admin_client_state("es").to_payload()
+    setup_summary = render_admin_access_summary(setup_payload, "es", {"revision": 1})
+    setup_shell = render_admin_access_shell(setup_payload, "es", {"revision": 1})
+    assert _find_component(setup_summary, "assumptions-advanced-tools-entry-status").children == tr(
+        "workspace.advanced.entry.status.setup_required", "es"
+    )
+    assert _find_component(setup_shell, "admin-setup-shell") is not None
+
+    set_admin_pin("2468")
+    locked_payload = _admin_client_state("es").to_payload()
+    locked_summary = render_admin_access_summary(locked_payload, "es", {"revision": 1})
+    locked_shell = render_admin_access_shell(locked_payload, "es", {"revision": 1})
+    assert _find_component(locked_summary, "assumptions-advanced-tools-entry-status").children == tr(
+        "workspace.advanced.entry.status.locked", "es"
+    )
+    assert _find_component(locked_shell, "admin-locked-shell") is not None
+
+    state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
+    state = run_scenario_scan(state, state.active_scenario_id)
+    unlocked_client_state = _admin_client_state("es")
+    grant_admin_session_access(unlocked_client_state.session_id)
+    unlocked_payload = commit_client_session(unlocked_client_state, state).to_payload()
+    unlocked_summary = render_admin_access_summary(unlocked_payload, "es", {"revision": 1})
+    unlocked_shell = render_admin_access_shell(unlocked_payload, "es", {"revision": 1})
+    assert _find_component(unlocked_summary, "assumptions-advanced-tools-entry-status").children == tr(
+        "workspace.advanced.entry.status.unlocked", "es"
+    )
+    assert _find_component(unlocked_shell, "admin-unlocked-shell") is not None
+
+
+def test_render_admin_access_shell_orders_admin_sections_by_scenario_workflow(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    client_state = _admin_client_state("es")
+    set_admin_pin("2468")
+    grant_admin_session_access(client_state.session_id)
+
+    rendered = render_admin_access_shell(client_state.to_payload(), "es", {"revision": 1})
+    unlocked_shell = _find_component(rendered, "admin-unlocked-shell")
+
+    assert unlocked_shell is not None
+    economics_index = next(
+        index for index, child in enumerate(unlocked_shell.children) if _find_component(child, "economics-editor-title") is not None
+    )
+    assumptions_index = next(
+        index for index, child in enumerate(unlocked_shell.children) if getattr(child, "id", None) == "admin-assumptions-details"
+    )
+    resource_index = next(
+        index for index, child in enumerate(unlocked_shell.children) if _find_component(child, "resource-profile-editor-title") is not None
+    )
+    catalog_index = next(
+        index for index, child in enumerate(unlocked_shell.children) if _find_component(child, "catalog-editor-title") is not None
+    )
+    economics_editor = _find_component(unlocked_shell.children[economics_index], "economics-editor-title")
+    resource_profiles = _find_component(unlocked_shell.children[resource_index], "resource-profile-editor-title")
+    catalog_editor = _find_component(unlocked_shell.children[catalog_index], "catalog-editor-title")
+    candidate_selector = _find_component(unlocked_shell.children[economics_index], "admin-preview-candidate-dropdown")
+
+    assert economics_editor is not None
+    assert assumptions_index < resource_index < catalog_index < economics_index
+    assert getattr(unlocked_shell.children[assumptions_index], "open", None) is True
+    assert getattr(unlocked_shell.children[resource_index], "open", None) is False
+    assert getattr(unlocked_shell.children[catalog_index], "open", None) is False
+    assert getattr(unlocked_shell.children[economics_index], "open", None) is False
+    assert resource_profiles is not None
+    assert catalog_editor is not None
+    assert candidate_selector is not None
+
+
+def test_render_admin_access_shell_uses_setup_shell_in_simple_mode(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
 
     rendered = render_admin_access_shell(bootstrap_client_session("es").to_payload(), "es", {"revision": 1})
 
-    assert _find_component(rendered, "admin-mode-gate") is not None
-    assert _find_component(rendered, "admin-setup-pin-input") is None
-    assert _find_component(rendered, "admin-pin-input") is None
+    assert rendered == []
 
 
-def test_render_admin_access_shell_degrades_in_pro_mode(monkeypatch, tmp_path) -> None:
+def test_render_admin_access_shell_uses_locked_shell_in_pro_mode_when_pin_exists(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+    set_admin_pin("2468")
 
     rendered = render_admin_access_shell(_pro_client_state("es").to_payload(), "es", {"revision": 1})
 
-    assert _find_component(rendered, "admin-mode-gate") is not None
-    assert _find_component(rendered, "admin-setup-pin-input") is None
-    assert _find_component(rendered, "admin-pin-input") is None
+    assert rendered == []
+
+
+def test_render_admin_access_summary_hides_outside_admin_mode(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+    set_admin_pin("2468")
+
+    simple_summary = render_admin_access_summary(bootstrap_client_session("es").to_payload(), "es", {"revision": 1})
+    pro_summary = render_admin_access_summary(_pro_client_state("es").to_payload(), "es", {"revision": 1})
+
+    assert simple_summary == []
+    assert pro_summary == []
 
 
 def test_admin_profile_table_activator_translation_matches_visible_cards() -> None:
     activator_ids = [
         {"type": "profile-table-activate", "table": "month-profile-editor"},
         {"type": "profile-table-activate", "table": "sun-profile-editor"},
-        {"type": "profile-table-activate", "table": "price-kwp-editor"},
-        {"type": "profile-table-activate", "table": "price-kwp-others-editor"},
     ]
 
-    assert translate_profile_table_activators("es", activator_ids) == ["Ver gráfica"] * 4
-    assert translate_profile_table_activators("en", activator_ids) == ["Preview chart"] * 4
+    assert translate_profile_table_activators("es", activator_ids) == ["Ver gráfica"] * 2
+    assert translate_profile_table_activators("en", activator_ids) == ["Preview chart"] * 2
 
 
 def test_setup_admin_session_rejects_empty_pin(monkeypatch, tmp_path) -> None:
@@ -263,7 +508,7 @@ def test_setup_admin_session_rejects_empty_pin(monkeypatch, tmp_path) -> None:
 
     meta = setup_admin_session(1, client_state.to_payload(), "", "")
 
-    assert meta["message_key"] == "workspace.admin.setup.empty"
+    assert meta["message_key"] == "workspace.advanced.setup.empty"
     assert meta["tone"] == "error"
     assert admin_pin_configured() is False
     assert is_admin_session_unlocked(client_state.session_id) is False
@@ -277,7 +522,7 @@ def test_setup_admin_session_rejects_whitespace_only_pin(monkeypatch, tmp_path) 
 
     meta = setup_admin_session(1, client_state.to_payload(), "   ", "   ")
 
-    assert meta["message_key"] == "workspace.admin.setup.empty"
+    assert meta["message_key"] == "workspace.advanced.setup.empty"
     assert meta["tone"] == "error"
     assert admin_pin_configured() is False
     assert is_admin_session_unlocked(client_state.session_id) is False
@@ -291,7 +536,7 @@ def test_setup_admin_session_rejects_non_digit_pin(monkeypatch, tmp_path) -> Non
 
     meta = setup_admin_session(1, client_state.to_payload(), "12ab", "12ab")
 
-    assert meta["message_key"] == "workspace.admin.setup.digits_only"
+    assert meta["message_key"] == "workspace.advanced.setup.digits_only"
     assert meta["tone"] == "error"
     assert admin_pin_configured() is False
     assert is_admin_session_unlocked(client_state.session_id) is False
@@ -305,7 +550,7 @@ def test_setup_admin_session_rejects_short_pin(monkeypatch, tmp_path) -> None:
 
     meta = setup_admin_session(1, client_state.to_payload(), "123", "123")
 
-    assert meta["message_key"] == "workspace.admin.setup.too_short"
+    assert meta["message_key"] == "workspace.advanced.setup.too_short"
     assert meta["tone"] == "error"
     assert admin_pin_configured() is False
     assert is_admin_session_unlocked(client_state.session_id) is False
@@ -319,7 +564,7 @@ def test_setup_admin_session_rejects_mismatched_confirmation(monkeypatch, tmp_pa
 
     meta = setup_admin_session(1, client_state.to_payload(), "1234", "5678")
 
-    assert meta["message_key"] == "workspace.admin.setup.mismatch"
+    assert meta["message_key"] == "workspace.advanced.setup.mismatch"
     assert meta["tone"] == "error"
     assert admin_pin_configured() is False
     assert is_admin_session_unlocked(client_state.session_id) is False
@@ -333,7 +578,7 @@ def test_setup_admin_session_trims_input_writes_hash_and_unlocks(monkeypatch, tm
 
     meta = setup_admin_session(1, client_state.to_payload(), " 1234 ", "1234")
 
-    assert meta["message_key"] == "workspace.admin.setup.success"
+    assert meta["message_key"] == "workspace.advanced.setup.success"
     assert meta["tone"] == "success"
     assert admin_pin_configured() is True
     assert verify_admin_pin("1234") is True
@@ -354,7 +599,7 @@ def test_setup_admin_session_does_not_overwrite_existing_pin(monkeypatch, tmp_pa
 
     meta = setup_admin_session(1, client_state.to_payload(), "9999", "9999")
 
-    assert meta["message_key"] == "workspace.admin.setup.already_configured"
+    assert meta["message_key"] == "workspace.advanced.setup.already_configured"
     assert meta["tone"] == "info"
     assert path.read_text(encoding="utf-8") == before
     assert verify_admin_pin("2468") is True
@@ -371,7 +616,7 @@ def test_unlock_admin_session_grants_access_with_existing_pin(monkeypatch, tmp_p
 
     meta = unlock_admin_session(1, client_state.to_payload(), "2468")
 
-    assert meta["message_key"] == "workspace.admin.locked.unlocked"
+    assert meta["message_key"] == "workspace.advanced.locked.unlocked"
     assert meta["tone"] == "success"
     assert is_admin_session_unlocked(client_state.session_id) is True
 
@@ -385,7 +630,7 @@ def test_unlock_admin_session_rejects_wrong_pin(monkeypatch, tmp_path) -> None:
 
     meta = unlock_admin_session(1, client_state.to_payload(), "1357")
 
-    assert meta["message_key"] == "workspace.admin.locked.invalid"
+    assert meta["message_key"] == "workspace.advanced.locked.invalid"
     assert meta["tone"] == "error"
     assert is_admin_session_unlocked(client_state.session_id) is False
 
@@ -414,21 +659,34 @@ def test_populate_admin_page_renders_visible_admin_tables_for_example_bundle(mon
     state = add_scenario(ScenarioSessionState.empty(), create_scenario_record("Base", _fast_bundle()))
     payload = commit_client_session(client_state, state).to_payload()
 
-    rendered_sections, disabled, inverter_rows, inverter_columns, _inverter_tooltips, battery_rows, battery_columns, _battery_tooltips, month_rows, month_columns, _month_tooltips, sun_rows, sun_columns, _sun_tooltips, price_rows, price_columns, _price_tooltips, price_other_rows, price_other_columns, _price_other_tooltips = populate_admin_page(payload, [], "es")
+    outputs = populate_admin_page(payload, [], "es")
+    rendered_sections, disabled = outputs[:2]
+    inverter_rows, inverter_columns = outputs[2], outputs[3]
+    battery_rows, battery_columns = outputs[5], outputs[6]
+    panel_rows, panel_columns = outputs[8], outputs[9]
+    month_rows, month_columns = outputs[11], outputs[12]
+    sun_rows, sun_columns = outputs[14], outputs[15]
+    economics_cost_rows, economics_cost_columns = outputs[17], outputs[18]
+    economics_tax_rows, economics_tax_columns = outputs[20], outputs[21]
+    economics_adjustment_rows, economics_adjustment_columns = outputs[23], outputs[24]
 
     assert disabled is False
     assert inverter_rows
     assert battery_rows
+    assert panel_rows
     assert month_rows
     assert sun_rows
-    assert price_rows
-    assert price_other_rows
+    assert economics_cost_rows
+    assert economics_tax_rows
+    assert economics_adjustment_rows
     assert inverter_columns
     assert battery_columns
+    assert panel_columns
     assert month_columns
     assert sun_columns
-    assert price_columns
-    assert price_other_columns
+    assert economics_cost_columns
+    assert economics_tax_columns
+    assert economics_adjustment_columns
     assert _find_pattern_component(rendered_sections, "admin-assumption-input") is not None
 
 
@@ -452,7 +710,7 @@ def test_populate_admin_page_rehydrates_immediately_after_unlock_with_same_sessi
         payload,
         [],
         "es",
-        {"revision": 1, "message_key": "workspace.admin.locked.unlocked", "tone": "success"},
+        {"revision": 1, "message_key": "workspace.advanced.locked.unlocked", "tone": "success"},
     )
 
     assert unlocked_outputs[1] is False
@@ -462,6 +720,8 @@ def test_populate_admin_page_rehydrates_immediately_after_unlock_with_same_sessi
     assert unlocked_outputs[11]
     assert unlocked_outputs[14]
     assert unlocked_outputs[17]
+    assert unlocked_outputs[20]
+    assert unlocked_outputs[23]
 
 
 def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(monkeypatch, tmp_path) -> None:
@@ -487,6 +747,8 @@ def test_populate_admin_page_handles_excel_bundle_without_legacy_demand_shell(mo
     assert outputs[11]
     assert outputs[14]
     assert outputs[17]
+    assert outputs[20]
+    assert outputs[23]
 
 
 def test_table_draft_rows_skips_unhydrated_admin_tables() -> None:
@@ -527,6 +789,16 @@ def test_sync_admin_draft_waits_for_all_admin_tables_to_hydrate(monkeypatch, tmp
     active = state.get_scenario()
 
     assert active is not None
+    tax_rows = economics_price_items_rows_to_section_editor(
+        active.config_bundle.economics_price_items_table,
+        layers=("tax",),
+        lang="es",
+    )
+    adjustment_rows = economics_price_items_rows_to_section_editor(
+        active.config_bundle.economics_price_items_table,
+        layers=("commercial", "sale"),
+        lang="es",
+    )
 
     with pytest.raises(PreventUpdate):
         sync_admin_draft(
@@ -535,10 +807,12 @@ def test_sync_admin_draft_waits_for_all_admin_tables_to_hydrate(monkeypatch, tmp
             [],
             None,
             active.config_bundle.battery_catalog.to_dict("records"),
+            active.config_bundle.panel_catalog.to_dict("records"),
             active.config_bundle.month_profile_table.to_dict("records"),
             active.config_bundle.sun_profile_table.to_dict("records"),
-            active.config_bundle.cop_kwp_table.to_dict("records"),
-            active.config_bundle.cop_kwp_table_others.to_dict("records"),
+            active.config_bundle.economics_cost_items_table.to_dict("records"),
+            tax_rows,
+            adjustment_rows,
         )
 
     assert get_workspace_draft(client_state.session_id, active.scenario_id) is None
@@ -558,6 +832,16 @@ def test_apply_admin_edits_waits_for_all_admin_tables_to_hydrate(monkeypatch, tm
     active = state.get_scenario()
 
     assert active is not None
+    tax_rows = economics_price_items_rows_to_section_editor(
+        active.config_bundle.economics_price_items_table,
+        layers=("tax",),
+        lang="es",
+    )
+    adjustment_rows = economics_price_items_rows_to_section_editor(
+        active.config_bundle.economics_price_items_table,
+        layers=("commercial", "sale"),
+        lang="es",
+    )
 
     with pytest.raises(PreventUpdate):
         apply_admin_edits(
@@ -568,20 +852,54 @@ def test_apply_admin_edits_waits_for_all_admin_tables_to_hydrate(monkeypatch, tm
             [],
             active.config_bundle.inverter_catalog.to_dict("records"),
             active.config_bundle.battery_catalog.to_dict("records"),
+            active.config_bundle.panel_catalog.to_dict("records"),
             None,
             active.config_bundle.sun_profile_table.to_dict("records"),
-            active.config_bundle.cop_kwp_table.to_dict("records"),
-            active.config_bundle.cop_kwp_table_others.to_dict("records"),
+            active.config_bundle.economics_cost_items_table.to_dict("records"),
+            tax_rows,
+            adjustment_rows,
             "es",
         )
 
     assert get_workspace_draft(client_state.session_id, active.scenario_id) is None
 
 
-def test_setup_admin_session_is_blocked_outside_admin_mode(monkeypatch, tmp_path) -> None:
+def test_setup_admin_session_is_available_outside_admin_mode(monkeypatch, tmp_path) -> None:
     clear_all_admin_session_access()
     clear_session_states()
     monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
 
-    with pytest.raises(PreventUpdate):
-        setup_admin_session(1, bootstrap_client_session("es").to_payload(), "1234", "1234")
+    client_state = bootstrap_client_session("es")
+    meta = setup_admin_session(1, client_state.to_payload(), "1234", "1234")
+
+    assert meta["message_key"] == "workspace.advanced.setup.success"
+    assert is_admin_session_unlocked(client_state.session_id) is True
+
+
+def test_admin_callback_map_and_live_layout_exclude_forbidden_legacy_pricing_ids(monkeypatch, tmp_path) -> None:
+    clear_all_admin_session_access()
+    clear_session_states()
+    monkeypatch.setenv("PVW_PRIVATE_CONFIG_ROOT", str(tmp_path / "private"))
+
+    forbidden_ids = (
+        "runtime-pricing-editor-title",
+        "runtime-pricing-editor-note",
+        "price-kwp-editor",
+        "price-kwp-others-editor",
+        "add-price-kwp-row-btn",
+        "add-price-kwp-others-row-btn",
+        "price-kwp-panel",
+        "price-kwp-others-panel",
+        "price-kwp-placeholder",
+        "price-kwp-others-placeholder",
+    )
+    callback_map_text = str(_APP.callback_map)
+    for forbidden_id in forbidden_ids:
+        assert forbidden_id not in callback_map_text
+
+    client_state = _admin_client_state("es")
+    set_admin_pin("2468")
+    grant_admin_session_access(client_state.session_id)
+    rendered = render_admin_access_shell(client_state.to_payload(), "es", {"revision": 1})
+    for forbidden_id in forbidden_ids:
+        assert _find_component(rendered, forbidden_id) is None

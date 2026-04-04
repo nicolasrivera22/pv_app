@@ -9,6 +9,13 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from .candidate_financials import (
+    attach_candidate_financial_snapshots,
+    build_snapshot_monthly_frame,
+    resolve_financial_candidate_key,
+    resolve_financial_best_candidate_key,
+    validate_candidate_financial_snapshot,
+)
 from .i18n import tr
 from .result_views import abbreviated_month_labels, build_project_timeline
 from .types import ScenarioRecord, ScenarioSessionState
@@ -176,10 +183,9 @@ def derive_panel_count(detail: dict[str, Any], scenario_record: ScenarioRecord) 
 def _default_design_selection(scenario_record: ScenarioRecord) -> tuple[str, ...]:
     if not _scenario_has_viable_scan(scenario_record):
         return ()
-    if scenario_record.selected_candidate_key in scenario_record.scan_result.candidate_details:
-        return (str(scenario_record.selected_candidate_key),)
-    if scenario_record.scan_result.best_candidate_key in scenario_record.scan_result.candidate_details:
-        return (str(scenario_record.scan_result.best_candidate_key),)
+    candidate_key = resolve_financial_candidate_key(scenario_record)
+    if candidate_key in scenario_record.scan_result.candidate_details:
+        return (str(candidate_key),)
     if scenario_record.scan_result.candidate_details:
         return (next(iter(scenario_record.scan_result.candidate_details)),)
     return ()
@@ -280,28 +286,30 @@ def build_design_compare_state(
 
 def _base_candidate_frame(scenario_record: ScenarioRecord, *, lang: str = "es") -> pd.DataFrame:
     assert scenario_record.scan_result is not None
-    base = scenario_record.scan_result.candidates.copy()
+    attached_details = attach_candidate_financial_snapshots(scenario_record)
+    financial_best_candidate_key = resolve_financial_best_candidate_key(scenario_record)
+    displayed_selected_candidate_key = resolve_financial_candidate_key(scenario_record)
     rows: list[dict[str, Any]] = []
-    for row in base.to_dict("records"):
-        candidate_key = str(row["candidate_key"])
-        detail = scenario_record.scan_result.candidate_details[candidate_key]
+    for candidate_key, detail in attached_details.items():
+        snapshot = validate_candidate_financial_snapshot(detail.get("financial_snapshot"), candidate_key=candidate_key)
+        first_year = detail["monthly"].iloc[:12]
         rows.append(
             {
                 "candidate_key": candidate_key,
-                "kWp": float(row["kWp"]),
+                "kWp": float(detail["kWp"]),
                 "panel_count": derive_panel_count(detail, scenario_record),
                 "battery": format_metric("selected_battery", detail["battery_name"], lang),
                 "inverter_name": _inverter_name(detail),
-                "NPV_COP": float(row["NPV_COP"]),
-                "payback_years": row["payback_years"],
-                "capex_client": float(row["capex_client"]),
-                "self_consumption_ratio": float(row["self_consumption_ratio"]),
-                "self_sufficiency_ratio": float(row["self_sufficiency_ratio"]),
-                "annual_import_kwh": float(row["annual_import_kwh"]),
-                "annual_export_kwh": float(row["annual_export_kwh"]),
-                "peak_ratio": float(row["peak_ratio"]),
-                "is_workbench_selected": candidate_key == scenario_record.selected_candidate_key,
-                "is_best_candidate": candidate_key == scenario_record.scan_result.best_candidate_key,
+                "NPV_COP": float(snapshot.visible_npv_COP),
+                "payback_years": snapshot.payback_years,
+                "capex_client": float(snapshot.capex_client_COP),
+                "self_consumption_ratio": float(detail.get("self_consumption_ratio", 0.0)),
+                "self_sufficiency_ratio": float(detail.get("self_sufficiency_ratio", 0.0)),
+                "annual_import_kwh": float(first_year["Importacion_Red_kWh"].sum()) if "Importacion_Red_kWh" in first_year.columns else 0.0,
+                "annual_export_kwh": float(first_year["Exportacion_kWh"].sum()) if "Exportacion_kWh" in first_year.columns else 0.0,
+                "peak_ratio": float(detail["peak_ratio"]),
+                "is_workbench_selected": candidate_key == displayed_selected_candidate_key,
+                "is_best_candidate": candidate_key == financial_best_candidate_key,
             }
         )
     return pd.DataFrame(rows)
@@ -547,12 +555,14 @@ def build_npv_projection_frame(
     if scenario_record.scan_result is None or scenario_record.dirty:
         return pd.DataFrame(columns=["design_label", "candidate_key", "Año_mes", "NPV_COP", "month_index", "calendar_year", "project_year"])
     selected_frame = _selected_lookup_frame(scenario_record, selected_candidate_keys, lang=lang)
+    attached_details = attach_candidate_financial_snapshots(scenario_record)
     rows: list[dict[str, Any]] = []
     for candidate_key in _ordered_display_candidate_keys(scenario_record, selected_candidate_keys):
         if candidate_key not in selected_frame.index:
             continue
-        detail = scenario_record.scan_result.candidate_details[candidate_key]
-        monthly = detail["monthly"].reset_index(drop=True)
+        detail = attached_details[candidate_key]
+        snapshot = validate_candidate_financial_snapshot(detail.get("financial_snapshot"), candidate_key=candidate_key)
+        monthly = build_snapshot_monthly_frame(detail["monthly"], snapshot).reset_index(drop=True)
         timeline = build_project_timeline(len(monthly), base_year=base_year)
         for index, row in monthly.iterrows():
             timeline_row = timeline.iloc[index] if not timeline.empty else None
