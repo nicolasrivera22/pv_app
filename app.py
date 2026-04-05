@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import multiprocessing
 
 from dash import ALL, Dash, Input, Output, State, callback, ctx, dcc, html, no_update, page_container
 from dash.exceptions import PreventUpdate
@@ -485,4 +486,5 @@ def finalize_admin_mode_unlock(access_meta, session_payload, dialog_state):
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     app.run(debug=True)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -16,11 +15,12 @@ from pv_product.models import Battery, DispatchConfig, PVSystem
 from pv_product.panel_technology import resolve_generation_pr
 from pv_product.simulator import Simulator
 
+from . import execution_parallel
 from .types import LoadedConfigBundle
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PARALLEL_WORKERS = 4
+DEFAULT_PARALLEL_WORKERS = execution_parallel.DEFAULT_PARALLEL_WORKERS
 
 
 @dataclass(frozen=True)
@@ -47,13 +47,7 @@ class DeterministicScanTaskResult:
     discarded_point: dict[str, Any] | None = None
 
 
-@dataclass(frozen=True)
-class WorkerDecision:
-    requested_workers: int
-    effective_workers: int
-    worker_source: str
-    serial_reason: str | None
-    execution_mode: str
+WorkerDecision = execution_parallel.ParallelWorkerDecision
 
 
 def _build_battery(batt: dict[str, Any] | None, cfg: dict[str, Any]) -> Battery | None:
@@ -99,20 +93,14 @@ def _build_battery_options(config_bundle: LoadedConfigBundle) -> tuple[dict[str,
 
 
 def _resolve_requested_workers(max_workers: int | None) -> tuple[int, str]:
-    if max_workers is not None:
-        return max(1, int(max_workers)), "explicit"
-    env_value = os.getenv("PV_SCAN_MAX_WORKERS")
-    if env_value:
-        try:
-            return max(1, int(env_value)), "env"
-        except ValueError:
-            return 1, "env"
-    cpu_count = os.cpu_count() or 1
-    return min(max(cpu_count - 1, 1), DEFAULT_PARALLEL_WORKERS), "heuristic"
+    return execution_parallel.resolve_requested_workers(
+        max_workers=max_workers,
+        primary_env_var="PV_SCAN_MAX_WORKERS",
+    )
 
 
 def _is_frozen_runtime() -> bool:
-    return bool(getattr(sys, "frozen", False))
+    return bool(execution_parallel.is_frozen_runtime())
 
 
 def _resolve_worker_decision(
@@ -121,29 +109,11 @@ def _resolve_worker_decision(
     task_count: int,
     max_workers: int | None,
 ) -> WorkerDecision:
-    requested_workers, worker_source = _resolve_requested_workers(max_workers)
-    # print(f"Worker decision: allow_parallel={allow_parallel}, "
-    #       f"task_count={task_count}, requested_workers={requested_workers} (source: {worker_source})", 
-    #       file=sys.stderr)
-    serial_reason: str | None = None
-    if not allow_parallel:
-        serial_reason = "allow_parallel_false"
-    elif requested_workers <= 1:
-        serial_reason = "worker_count_leq_1"
-    elif task_count <= 1:
-        serial_reason = "single_task"
-    elif _is_frozen_runtime():
-        print("Advertencia: Se ha detectado un entorno de ejecución congelado. Se usará ejecución serial.", file=sys.stderr)
-        serial_reason = "frozen_runtime"
-
-    execution_mode = "serial" if serial_reason else "parallel"
-    effective_workers = 1 if execution_mode == "serial" else requested_workers
-    return WorkerDecision(
-        requested_workers=requested_workers,
-        effective_workers=effective_workers,
-        worker_source=worker_source,
-        serial_reason=serial_reason,
-        execution_mode=execution_mode,
+    return execution_parallel.resolve_parallel_worker_decision(
+        allow_parallel=allow_parallel,
+        task_count=task_count,
+        max_workers=max_workers,
+        primary_env_var="PV_SCAN_MAX_WORKERS",
     )
 
 
@@ -375,6 +345,8 @@ def run_deterministic_scan_task_results(
                         fallback_reason=fallback_reason,
                         exc_class=type(exc).__name__,
                         exc_message=str(exc),
+                        frozen_runtime=decision.frozen_runtime,
+                        frozen_parallel_opt_in=decision.frozen_parallel_opt_in,
                     )
                 )
                 task_results = _run_task_results_serial(tasks)
@@ -391,6 +363,8 @@ def run_deterministic_scan_task_results(
                     requested_workers=decision.requested_workers,
                     effective_workers=effective_workers,
                     worker_source=decision.worker_source,
+                    frozen_runtime=decision.frozen_runtime,
+                    frozen_parallel_opt_in=decision.frozen_parallel_opt_in,
                     serial_reason=fallback_reason or decision.serial_reason,
                     fallback_to_serial=fallback_to_serial,
                     fallback_reason=fallback_reason,
@@ -441,6 +415,8 @@ def run_deterministic_scan_tasks(
                         fallback_reason=fallback_reason,
                         exc_class=type(exc).__name__,
                         exc_message=str(exc),
+                        frozen_runtime=decision.frozen_runtime,
+                        frozen_parallel_opt_in=decision.frozen_parallel_opt_in,
                     )
                 )
                 rows = _run_tasks_serial(tasks)
@@ -457,6 +433,8 @@ def run_deterministic_scan_tasks(
                     requested_workers=decision.requested_workers,
                     effective_workers=effective_workers,
                     worker_source=decision.worker_source,
+                    frozen_runtime=decision.frozen_runtime,
+                    frozen_parallel_opt_in=decision.frozen_parallel_opt_in,
                     serial_reason=fallback_reason or decision.serial_reason,
                     fallback_to_serial=fallback_to_serial,
                     fallback_reason=fallback_reason,

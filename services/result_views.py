@@ -442,6 +442,26 @@ def subset_mode_for_key(subset_key: str | None) -> str:
     return EXPLORER_SUBSET_MODE_OPTIMAL if subset_key == EXPLORER_SUBSET_KEY_OPTIMAL else EXPLORER_SUBSET_MODE_BATTERY
 
 
+def _battery_family_label_from_row(row: pd.Series | dict[str, Any], *, lang: str = "es") -> str:
+    if isinstance(row, pd.Series):
+        resolver = row.get
+    else:
+        resolver = row.get
+    family_key = str(resolver("battery_family_key") or "").strip()
+    existing_label = str(resolver("battery_family_label") or "").strip()
+    if existing_label:
+        return existing_label
+    battery_kwh = _normalize_optional_float(resolver("battery_kwh"))
+    battery_name = str(resolver("battery_name_raw") or resolver("battery") or "").strip()
+    lowered_name = battery_name.casefold()
+    if family_key == EXPLORER_SUBSET_KEY_NO_BATTERY or (battery_kwh is None and lowered_name in {"", "none", "bat-0"}):
+        return tr("common.no_battery", lang)
+    if battery_kwh is not None:
+        suffix = "batería" if lang == "es" else "battery"
+        return f"{battery_kwh:.1f} kWh {suffix}"
+    return battery_name or tr("common.no_battery", lang)
+
+
 def candidate_key_in_subset(candidate_table: pd.DataFrame, candidate_key: str | None, subset_key: str | None) -> bool:
     if candidate_table.empty or candidate_key in (None, "") or subset_key in (None, ""):
         return False
@@ -474,31 +494,32 @@ def subset_label_for_key(candidate_table: pd.DataFrame, subset_key: str | None, 
     subset = filter_results_subset(candidate_table, subset_key)
     if subset.empty:
         return ""
-    return str(subset.iloc[0].get("battery_family_label") or "")
+    return _battery_family_label_from_row(subset.iloc[0], lang=lang)
 
 
 def build_results_explorer_options(candidate_table: pd.DataFrame, *, lang: str = "es") -> list[dict[str, str]]:
     if candidate_table.empty:
         return []
     options = [{"label": tr("workbench.explorer.family.optimal", lang), "value": EXPLORER_SUBSET_KEY_OPTIMAL}]
-    family_frame = (
-        candidate_table[["battery_family_key", "battery_family_label", "battery_kwh"]]
-        .drop_duplicates()
-        .reset_index(drop=True)
-    )
+    family_columns = [column for column in ("battery_family_key", "battery_family_label", "battery_kwh", "battery_name_raw", "battery") if column in candidate_table.columns]
+    family_frame = candidate_table[family_columns].drop_duplicates().reset_index(drop=True)
+    for column in ("battery_family_key", "battery_family_label", "battery_kwh", "battery_name_raw", "battery"):
+        if column not in family_frame.columns:
+            family_frame[column] = None
     if family_frame.empty:
         return options
     family_frame["sort_bucket"] = family_frame["battery_family_key"].map(
         lambda value: 0 if value == EXPLORER_SUBSET_KEY_NO_BATTERY else 1
     )
     family_frame["sort_kwh"] = family_frame["battery_kwh"].map(lambda value: float(value) if value is not None and pd.notna(value) else float("inf"))
+    family_frame["resolved_label"] = family_frame.apply(lambda row: _battery_family_label_from_row(row, lang=lang), axis=1)
     family_frame = family_frame.sort_values(
-        ["sort_bucket", "sort_kwh", "battery_family_label", "battery_family_key"],
+        ["sort_bucket", "sort_kwh", "resolved_label", "battery_family_key"],
         kind="mergesort",
     ).reset_index(drop=True)
     options.extend(
         {
-            "label": str(row["battery_family_label"]),
+            "label": str(row["resolved_label"]),
             "value": str(row["battery_family_key"]),
         }
         for row in family_frame.to_dict("records")

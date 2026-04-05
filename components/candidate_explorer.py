@@ -132,11 +132,7 @@ def candidate_explorer_section() -> html.Details:
                 selected_rows=[],
                 hidden_columns=[
                     "candidate_key",
-                    "scan_order",
-                    "best_battery_for_kwp",
                     "battery_family_key",
-                    "battery_family_label",
-                    "battery_kwh",
                 ],
                 sort_action="native",
                 filter_action="native",

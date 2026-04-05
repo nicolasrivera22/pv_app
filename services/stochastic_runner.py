@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
+import logging
+import math
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import get_context
+import time
 
 import numpy as np
 import pandas as pd
@@ -8,6 +14,7 @@ import pandas as pd
 from pv_product.hardware import select_inverter_and_strings
 from pv_product.utils import simulate_monthly_series_dow
 
+from . import execution_parallel
 from .i18n import tr
 from .result_views import battery_name_from_candidate, candidate_key_for, summarize_energy_metrics
 from .risk_views import build_risk_views_from_samples
@@ -23,9 +30,62 @@ from .types import (
     ScanRunResult,
 )
 
+logger = logging.getLogger(__name__)
+
 MC_SUPPORTED_MODE = "fixed_candidate"
 MONTE_CARLO_WARNING_THRESHOLD = 5000
 MC_UNCERTAINTY_FIELDS = ("mc_PR_std", "mc_buy_std", "mc_sell_std", "mc_demand_std")
+MC_PARALLEL_MIN_SIMULATIONS = 32
+MC_MIN_CHUNK_SIZE = 8
+MC_CHUNKS_PER_WORKER = 4
+
+
+@dataclass(frozen=True)
+class MonteCarloWorkerContext:
+    simulation_cfg: dict[str, object]
+    design_scalars: dict[str, object]
+    selected_inverter: dict[str, float]
+    selected_battery: dict[str, object]
+    demand_profile_7x24: np.ndarray
+    day_weights: np.ndarray
+    solar_profile: np.ndarray
+    hsp_month: np.ndarray
+    demand_month_factor: np.ndarray
+
+
+@dataclass(frozen=True)
+class MonteCarloExecutionReport:
+    requested_workers: int
+    effective_workers: int
+    worker_source: str
+    serial_reason: str | None
+    execution_mode: str
+    frozen_runtime: bool
+    frozen_parallel_opt_in: bool
+    chunk_count: int
+    chunk_size: int
+    fallback_to_serial: bool = False
+    fallback_reason: str | None = None
+
+
+_MC_WORKER_CONTEXT: MonteCarloWorkerContext | None = None
+
+
+def _format_log_value(value) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, bool):
+        return str(value).lower()
+    text = str(value)
+    if not text:
+        return "-"
+    if any(char.isspace() for char in text) or "=" in text:
+        return repr(text)
+    return text
+
+
+def _structured_log_message(**fields) -> str:
+    return " ".join(f"{key}={_format_log_value(value)}" for key, value in fields.items())
 
 
 def _validate_non_negative_int(value, field: str, *, lang: str = "es") -> int:
@@ -230,15 +290,34 @@ def _resolve_effective_design(
     }
 
 
-def _simulate_fixed_candidate_draws(
+def _compact_selected_inverter(inv_sel: dict) -> dict[str, float]:
+    inverter = dict(inv_sel.get("inverter", {}) if isinstance(inv_sel, dict) else {})
+    return {
+        "AC_kW": float(inverter.get("AC_kW", 0.0) or 0.0),
+        "price_COP": float(inverter.get("price_COP", 0.0) or 0.0),
+    }
+
+
+def _compact_selected_battery(battery: dict | None) -> dict[str, object]:
+    source = dict(battery or {})
+    max_kw = float(source.get("max_kW", 0.0) or 0.0)
+    return {
+        "name": str(source.get("name", "BAT-0")),
+        "nom_kWh": float(source.get("nom_kWh", 0.0) or 0.0),
+        "max_ch_kW": float(source.get("max_ch_kW", max_kw) or 0.0),
+        "max_dis_kW": float(source.get("max_dis_kW", max_kw) or 0.0),
+        "max_kW": max_kw,
+        "price_COP": float(source.get("price_COP", 0.0) or 0.0),
+    }
+
+
+def _build_monte_carlo_worker_context(
     config_bundle: LoadedConfigBundle,
-    detail: dict,
-    request: MonteCarloRunRequest,
+    effective_detail: dict[str, object],
     *,
     lang: str = "es",
-) -> tuple[pd.DataFrame, dict[str, object]]:
+) -> MonteCarloWorkerContext:
     cfg = deepcopy(config_bundle.config)
-    effective_detail = _resolve_effective_design(config_bundle, detail, lang=lang)
     k_wp = float(effective_detail["kWp"])
     price_per_kwp_cop = _lookup_price_per_kwp(
         config_bundle.cop_kwp_table,
@@ -254,44 +333,307 @@ def _simulate_fixed_candidate_draws(
             lang=lang,
         )
 
-    rng = np.random.default_rng(request.seed)
-    rows = []
-    for simulation_index in range(request.n_simulations or 0):
-        monthly, summary = simulate_monthly_series_dow(
-            cfg=cfg,
-            kWp=k_wp,
-            inv_sel=effective_detail["inv_sel"],
-            battery_sel=effective_detail["battery"],
-            export_allowed=bool(cfg["export_allowed"]),
-            years=int(cfg["years"]),
-            dow24=config_bundle.demand_profile_7x24,
-            day_w=config_bundle.day_weights,
-            s24=config_bundle.solar_profile,
-            hsp_month=config_bundle.hsp_month,
-            PR_month_std=float(cfg.get("mc_PR_std", 0.0) or 0.0),
-            buy_month_offset_std=float(cfg.get("mc_buy_std", 0.0) or 0.0),
-            sell_month_offset_std=float(cfg.get("mc_sell_std", 0.0) or 0.0),
-            demand_month_offset_std=float(cfg.get("mc_demand_std", 0.0) or 0.0),
-            rng=rng,
-            demand_month_factor=config_bundle.demand_month_factor,
-            price_per_kwp_cop=price_per_kwp_cop,
+    return MonteCarloWorkerContext(
+        simulation_cfg={
+            "PR": float(cfg["PR"]),
+            "deg_rate": float(cfg.get("deg_rate", 0.0) or 0.0),
+            "bat_DoD": float(cfg["bat_DoD"]),
+            "bat_eta_rt": float(cfg["bat_eta_rt"]),
+            "bat_coupling": str(cfg.get("bat_coupling", "ac")),
+            "island_mode": bool(cfg.get("island_mode", False)),
+            "g_tar_buy": float(cfg["g_tar_buy"]),
+            "g_tar_sell": float(cfg["g_tar_sell"]),
+            "discount_rate": float(cfg["discount_rate"]),
+            "buy_tariff_COP_kWh": float(cfg["buy_tariff_COP_kWh"]),
+            "sell_tariff_COP_kWh": float(cfg["sell_tariff_COP_kWh"]),
+            "pricing_mode": str(cfg["pricing_mode"]),
+            "price_total_COP": float(cfg["price_total_COP"]),
+            "include_hw_in_price": bool(cfg["include_hw_in_price"]),
+            "price_others_total": float(cfg["price_others_total"]),
+            "soc_week_steady": bool(cfg.get("soc_week_steady", True)),
+            "soc_iter_tol_kWh": float(cfg.get("soc_iter_tol_kWh", 1e-3) or 1e-3),
+            "soc_iter_max": int(cfg.get("soc_iter_max", 10) or 10),
+            "mc_PR_std": float(cfg.get("mc_PR_std", 0.0) or 0.0),
+            "mc_buy_std": float(cfg.get("mc_buy_std", 0.0) or 0.0),
+            "mc_sell_std": float(cfg.get("mc_sell_std", 0.0) or 0.0),
+            "mc_demand_std": float(cfg.get("mc_demand_std", 0.0) or 0.0),
+            "E_month_kWh": float(cfg["E_month_kWh"]),
+            "years": int(cfg["years"]),
+        },
+        design_scalars={
+            "candidate_key": str(effective_detail["candidate_key"]),
+            "battery_name": str(effective_detail["battery_name"]),
+            "kWp": k_wp,
+            "export_allowed": bool(cfg["export_allowed"]),
+            "price_per_kwp_cop": float(price_per_kwp_cop),
+        },
+        selected_inverter=_compact_selected_inverter(dict(effective_detail["inv_sel"])),
+        selected_battery=_compact_selected_battery(
+            effective_detail["battery"] if isinstance(effective_detail.get("battery"), dict) else None
+        ),
+        demand_profile_7x24=np.asarray(config_bundle.demand_profile_7x24, dtype=float),
+        day_weights=np.asarray(config_bundle.day_weights, dtype=float),
+        solar_profile=np.asarray(config_bundle.solar_profile, dtype=float),
+        hsp_month=np.asarray(config_bundle.hsp_month, dtype=float),
+        demand_month_factor=np.asarray(config_bundle.demand_month_factor, dtype=float),
+    )
+
+
+def _resolve_monte_carlo_execution_report(
+    *,
+    n_simulations: int,
+    max_workers: int | None,
+) -> MonteCarloExecutionReport:
+    decision = execution_parallel.resolve_parallel_worker_decision(
+        allow_parallel=True,
+        task_count=n_simulations,
+        max_workers=max_workers,
+        primary_env_var="PV_MC_MAX_WORKERS",
+        fallback_env_var="PV_SCAN_MAX_WORKERS",
+    )
+    serial_reason = decision.serial_reason
+    execution_mode = decision.execution_mode
+    effective_workers = decision.effective_workers
+    chunk_count = 1
+    chunk_size = n_simulations
+
+    if serial_reason is None and n_simulations < MC_PARALLEL_MIN_SIMULATIONS:
+        serial_reason = "below_parallel_threshold"
+        execution_mode = "serial"
+        effective_workers = 1
+    elif serial_reason is None:
+        effective_workers = min(decision.effective_workers, n_simulations)
+        chunk_count = max(
+            1,
+            min(
+                effective_workers * MC_CHUNKS_PER_WORKER,
+                math.ceil(n_simulations / MC_MIN_CHUNK_SIZE),
+            ),
         )
-        energy = summarize_energy_metrics(monthly)
-        rows.append(
-            {
-                "simulation_index": simulation_index,
-                "candidate_key": effective_detail["candidate_key"],
-                "kWp": k_wp,
-                "battery": effective_detail["battery_name"],
-                "NPV_COP": float(summary["cum_disc_final"]),
-                "payback_years": summary["payback_years"],
-                "self_consumption_ratio": float(energy["self_consumption_ratio"]),
-                "self_sufficiency_ratio": float(energy["self_sufficiency_ratio"]),
-                "annual_import_kwh": float(energy["annual_import_kwh"]),
-                "annual_export_kwh": float(energy["annual_export_kwh"]),
-            }
+        chunk_size = max(1, math.ceil(n_simulations / chunk_count))
+
+    return MonteCarloExecutionReport(
+        requested_workers=decision.requested_workers,
+        effective_workers=effective_workers,
+        worker_source=decision.worker_source,
+        serial_reason=serial_reason,
+        execution_mode=execution_mode,
+        frozen_runtime=decision.frozen_runtime,
+        frozen_parallel_opt_in=decision.frozen_parallel_opt_in,
+        chunk_count=chunk_count,
+        chunk_size=chunk_size,
+    )
+
+
+def _chunk_tasks(n_simulations: int, chunk_size: int, base_seed: int) -> tuple[tuple[int, int, int], ...]:
+    return tuple(
+        (start_index, min(start_index + chunk_size, n_simulations), base_seed)
+        for start_index in range(0, n_simulations, chunk_size)
+    )
+
+
+def _initialize_monte_carlo_worker(worker_context: MonteCarloWorkerContext) -> None:
+    global _MC_WORKER_CONTEXT
+    _MC_WORKER_CONTEXT = worker_context
+
+
+def _rng_for_simulation(base_seed: int, simulation_index: int):
+    """Return a per-simulation RNG.
+
+    The serial and parallel paths both use independent deterministic substreams
+    keyed by `simulation_index`. This keeps the new implementation invariant to
+    scheduling and worker count, but it may not match the legacy serial stream
+    bit by bit because the legacy code consumed one shared RNG sequentially.
+    """
+
+    child_seed = np.random.SeedSequence(int(base_seed), spawn_key=(int(simulation_index),))
+    return np.random.default_rng(child_seed)
+
+
+def _simulate_monte_carlo_row(
+    worker_context: MonteCarloWorkerContext,
+    *,
+    simulation_index: int,
+    base_seed: int,
+) -> tuple[int, float, object, float, float, float, float]:
+    rng = _rng_for_simulation(base_seed, simulation_index)
+    monthly, summary = simulate_monthly_series_dow(
+        cfg=worker_context.simulation_cfg,
+        kWp=float(worker_context.design_scalars["kWp"]),
+        inv_sel={"inverter": worker_context.selected_inverter},
+        battery_sel=worker_context.selected_battery,
+        export_allowed=bool(worker_context.design_scalars["export_allowed"]),
+        years=int(worker_context.simulation_cfg["years"]),
+        dow24=worker_context.demand_profile_7x24,
+        day_w=worker_context.day_weights,
+        s24=worker_context.solar_profile,
+        hsp_month=worker_context.hsp_month,
+        PR_month_std=float(worker_context.simulation_cfg["mc_PR_std"]),
+        buy_month_offset_std=float(worker_context.simulation_cfg["mc_buy_std"]),
+        sell_month_offset_std=float(worker_context.simulation_cfg["mc_sell_std"]),
+        demand_month_offset_std=float(worker_context.simulation_cfg["mc_demand_std"]),
+        rng=rng,
+        demand_month_factor=worker_context.demand_month_factor,
+        price_per_kwp_cop=float(worker_context.design_scalars["price_per_kwp_cop"]),
+    )
+    energy = summarize_energy_metrics(monthly)
+    return (
+        int(simulation_index),
+        float(summary["cum_disc_final"]),
+        summary["payback_years"],
+        float(energy["self_consumption_ratio"]),
+        float(energy["self_sufficiency_ratio"]),
+        float(energy["annual_import_kwh"]),
+        float(energy["annual_export_kwh"]),
+    )
+
+
+def _simulate_chunk_rows(
+    worker_context: MonteCarloWorkerContext,
+    *,
+    start_index: int,
+    stop_index: int,
+    base_seed: int,
+) -> tuple[tuple[int, float, object, float, float, float, float], ...]:
+    return tuple(
+        _simulate_monte_carlo_row(
+            worker_context,
+            simulation_index=simulation_index,
+            base_seed=base_seed,
         )
-    return pd.DataFrame(rows), effective_detail
+        for simulation_index in range(start_index, stop_index)
+    )
+
+
+def _run_monte_carlo_chunk(task: tuple[int, int, int]) -> tuple[tuple[int, float, object, float, float, float, float], ...]:
+    worker_context = _MC_WORKER_CONTEXT
+    if worker_context is None:
+        raise RuntimeError("Monte Carlo worker context has not been initialized.")
+    start_index, stop_index, base_seed = task
+    return _simulate_chunk_rows(
+        worker_context,
+        start_index=start_index,
+        stop_index=stop_index,
+        base_seed=base_seed,
+    )
+
+
+def _run_monte_carlo_chunks_serial(
+    chunk_tasks: tuple[tuple[int, int, int], ...],
+    worker_context: MonteCarloWorkerContext,
+) -> tuple[tuple[tuple[int, float, object, float, float, float, float], ...], ...]:
+    return tuple(
+        _simulate_chunk_rows(
+            worker_context,
+            start_index=start_index,
+            stop_index=stop_index,
+            base_seed=base_seed,
+        )
+        for start_index, stop_index, base_seed in chunk_tasks
+    )
+
+
+def _run_monte_carlo_chunks_parallel(
+    chunk_tasks: tuple[tuple[int, int, int], ...],
+    worker_context: MonteCarloWorkerContext,
+    *,
+    max_workers: int,
+) -> tuple[tuple[tuple[int, float, object, float, float, float, float], ...], ...]:
+    mp_context = get_context("spawn")
+    with ProcessPoolExecutor(
+        max_workers=max_workers,
+        mp_context=mp_context,
+        initializer=_initialize_monte_carlo_worker,
+        initargs=(worker_context,),
+    ) as executor:
+        chunk_rows = list(executor.map(_run_monte_carlo_chunk, chunk_tasks))
+    return tuple(chunk_rows)
+
+
+def _rows_to_sample_frame(
+    chunk_rows: tuple[tuple[tuple[int, float, object, float, float, float, float], ...], ...],
+    effective_detail: dict[str, object],
+) -> pd.DataFrame:
+    columns = [
+        "simulation_index",
+        "NPV_COP",
+        "payback_years",
+        "self_consumption_ratio",
+        "self_sufficiency_ratio",
+        "annual_import_kwh",
+        "annual_export_kwh",
+    ]
+    flattened_rows = sorted((row for chunk in chunk_rows for row in chunk), key=lambda item: item[0])
+    frame = pd.DataFrame(flattened_rows, columns=columns)
+    frame.insert(1, "candidate_key", str(effective_detail["candidate_key"]))
+    frame.insert(2, "kWp", float(effective_detail["kWp"]))
+    frame.insert(3, "battery", str(effective_detail["battery_name"]))
+    return frame
+
+
+def _simulate_fixed_candidate_draws(
+    config_bundle: LoadedConfigBundle,
+    detail: dict,
+    request: MonteCarloRunRequest,
+    *,
+    lang: str = "es",
+) -> tuple[pd.DataFrame, dict[str, object], MonteCarloExecutionReport]:
+    effective_detail = _resolve_effective_design(config_bundle, detail, lang=lang)
+    worker_context = _build_monte_carlo_worker_context(config_bundle, effective_detail, lang=lang)
+    execution_report = _resolve_monte_carlo_execution_report(
+        n_simulations=int(request.n_simulations or 0),
+        max_workers=None,
+    )
+    chunk_tasks = _chunk_tasks(
+        int(request.n_simulations or 0),
+        int(execution_report.chunk_size or 1),
+        int(request.seed),
+    )
+
+    if execution_report.execution_mode == "serial":
+        chunk_rows = _run_monte_carlo_chunks_serial(chunk_tasks, worker_context)
+        return _rows_to_sample_frame(chunk_rows, effective_detail), effective_detail, execution_report
+
+    try:
+        chunk_rows = _run_monte_carlo_chunks_parallel(
+            chunk_tasks,
+            worker_context,
+            max_workers=execution_report.effective_workers,
+        )
+    except Exception as exc:
+        logger.exception(
+            _structured_log_message(
+                event="monte_carlo_parallel_fallback",
+                n_simulations=request.n_simulations,
+                requested_workers=execution_report.requested_workers,
+                effective_workers=1,
+                worker_source=execution_report.worker_source,
+                chunk_count=execution_report.chunk_count,
+                chunk_size=execution_report.chunk_size,
+                frozen_runtime=execution_report.frozen_runtime,
+                frozen_parallel_opt_in=execution_report.frozen_parallel_opt_in,
+                fallback_reason="parallel_exception",
+                exc_class=type(exc).__name__,
+                exc_message=str(exc),
+            )
+        )
+        fallback_report = MonteCarloExecutionReport(
+            requested_workers=execution_report.requested_workers,
+            effective_workers=1,
+            worker_source=execution_report.worker_source,
+            serial_reason="parallel_exception",
+            execution_mode="serial",
+            frozen_runtime=execution_report.frozen_runtime,
+            frozen_parallel_opt_in=execution_report.frozen_parallel_opt_in,
+            chunk_count=execution_report.chunk_count,
+            chunk_size=execution_report.chunk_size,
+            fallback_to_serial=True,
+            fallback_reason="parallel_exception",
+        )
+        chunk_rows = _run_monte_carlo_chunks_serial(chunk_tasks, worker_context)
+        return _rows_to_sample_frame(chunk_rows, effective_detail), effective_detail, fallback_report
+
+    return _rows_to_sample_frame(chunk_rows, effective_detail), effective_detail, execution_report
 
 
 def run_monte_carlo(
@@ -305,6 +647,7 @@ def run_monte_carlo(
     mode: str = MC_SUPPORTED_MODE,
     lang: str = "es",
 ) -> MonteCarloRunResult:
+    started_at = time.perf_counter()
     request, resolved_n = _resolve_request(
         config_bundle,
         selected_candidate_key=selected_candidate_key,
@@ -319,7 +662,7 @@ def run_monte_carlo(
         raise ValueError(tr("risk.error.design_missing_in_scan", lang))
 
     detail = baseline.candidate_details[request.selected_candidate_key]
-    sample_frame, effective_detail = _simulate_fixed_candidate_draws(config_bundle, detail, request, lang=lang)
+    sample_frame, effective_detail, execution_report = _simulate_fixed_candidate_draws(config_bundle, detail, request, lang=lang)
     summary, risk_metrics = _summarize_samples(sample_frame)
 
     warnings: list[str] = []
@@ -339,7 +682,7 @@ def run_monte_carlo(
     views = build_risk_views_from_samples(sample_frame, summary, labels=labels)
     active_uncertainty = {field: float(config_bundle.config.get(field, 0.0) or 0.0) for field in MC_UNCERTAINTY_FIELDS}
     samples = sample_frame if request.return_samples else None
-    return MonteCarloRunResult(
+    result = MonteCarloRunResult(
         request=request,
         seed=request.seed,
         n_simulations=resolved_n,
@@ -354,3 +697,23 @@ def run_monte_carlo(
         views=views,
         samples=samples,
     )
+    total_ms = (time.perf_counter() - started_at) * 1000.0
+    logger.info(
+        _structured_log_message(
+            event="monte_carlo_run",
+            total_ms=f"{total_ms:.1f}",
+            n_simulations=resolved_n,
+            execution_mode=execution_report.execution_mode,
+            requested_workers=execution_report.requested_workers,
+            effective_workers=execution_report.effective_workers,
+            worker_source=execution_report.worker_source,
+            chunk_count=execution_report.chunk_count,
+            chunk_size=execution_report.chunk_size,
+            frozen_runtime=execution_report.frozen_runtime,
+            frozen_parallel_opt_in=execution_report.frozen_parallel_opt_in,
+            serial_reason=execution_report.serial_reason,
+            fallback_to_serial=execution_report.fallback_to_serial,
+            fallback_reason=execution_report.fallback_reason,
+        )
+    )
+    return result

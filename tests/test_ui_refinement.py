@@ -34,6 +34,8 @@ from services import (
     add_scenario,
     build_assumption_sections,
     build_display_columns,
+    build_results_explorer_dataset,
+    build_results_explorer_horizon_table,
     build_table_display_columns,
     bootstrap_client_session,
     commit_client_session,
@@ -490,6 +492,7 @@ def test_resource_profile_editor_section_uses_collapsible_wrapper_without_moving
 
 def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
     section = candidate_explorer_section()
+    candidate_table = _find_component(section, "active-candidate-table")
     assert section.id == "candidate-selection-section"
     assert getattr(section, "open", None) is True
     assert _find_component(section, "candidate-selection-summary") is not None
@@ -503,7 +506,8 @@ def test_workbench_results_sections_are_split_by_stable_wrapper_ids() -> None:
     assert _find_component(section, "active-npv-graph") is not None
     assert _find_component(section, "candidate-selection-helper") is not None
     assert _find_component(section, "selected-candidate-banner") is not None
-    assert _find_component(section, "active-candidate-table") is not None
+    assert candidate_table is not None
+    assert list(candidate_table.hidden_columns) == ["candidate_key", "battery_family_key"]
     assert _find_component(section, "active-monthly-balance-graph") is None
     assert _find_component(section, "active-cash-flow-graph") is None
 
@@ -1868,9 +1872,10 @@ def test_populate_results_year_zero_aligns_curve_and_helper_to_selected_candidat
 
     initial_outputs = workbench_page.populate_results(_session_payload(state), "es", 0)
     year_zero_table = pd.DataFrame(initial_outputs[11])
+    raw_table = build_results_explorer_horizon_table(build_results_explorer_dataset(scenario), 0)
     same_kwp_rows = next(
         group
-        for _, group in year_zero_table.groupby("kWp", sort=True)
+        for _, group in raw_table.groupby("kWp", sort=True)
         if len(group.index) >= 2
         and group["candidate_key"].map(
             lambda candidate_key: build_candidate_financial_snapshot(scenario, str(candidate_key)).project_price_year0_COP
@@ -1880,7 +1885,7 @@ def test_populate_results_year_zero_aligns_curve_and_helper_to_selected_candidat
     ordered_rows = same_kwp_rows.sort_values(["NPV_COP", "scan_order"], ascending=[True, True], kind="mergesort").reset_index(drop=True)
     selected_overlay_key = str(ordered_rows.iloc[1]["candidate_key"])
     selected_row = year_zero_table.set_index("candidate_key").loc[selected_overlay_key]
-    assert bool(selected_row["best_battery_for_kwp"]) is False
+    assert bool(raw_table.set_index("candidate_key").loc[selected_overlay_key]["best_battery_for_kwp"]) is False
 
     state = update_selected_candidate(state, scenario.scenario_id, selected_overlay_key)
     active = state.get_scenario()
@@ -1894,9 +1899,14 @@ def test_populate_results_year_zero_aligns_curve_and_helper_to_selected_candidat
     visible_curve_keys = [list(point)[0] for point in curve_trace.customdata]
     visible_rows = year_zero_table.set_index("candidate_key").loc[visible_curve_keys]
 
+    selected_raw_row = raw_table.set_index("candidate_key").loc[selected_overlay_key]
+
     assert list(selected_trace.customdata[0])[0] == selected_overlay_key
     assert float(selected_trace.y[0]) == pytest.approx(selected_snapshot.project_price_year0_COP)
-    assert selected_row["battery_family_label"] in family_helper
+    if pd.isna(selected_raw_row["battery_kwh"]) or selected_raw_row["battery_kwh"] is None:
+        assert tr("common.no_battery", "es") in family_helper
+    else:
+        assert f"{float(selected_raw_row['battery_kwh']):.1f} kWh" in family_helper
     assert set(visible_rows["battery_family_key"]) == {selected_row["battery_family_key"]}
 
 
@@ -1938,11 +1948,12 @@ def test_populate_results_fails_closed_when_snapshot_attachment_is_missing(monke
     state = run_scenario_scan(state, state.active_scenario_id)
     payload = _session_payload(state)
 
-    def _raw_detail_map(active):
+    def _broken_dataset(active):
         assert active.scan_result is not None
-        return active.scan_result.candidate_details
+        dataset = build_results_explorer_dataset(active)
+        return replace(dataset, attached_details=active.scan_result.candidate_details)
 
-    monkeypatch.setattr(results_callbacks, "attach_candidate_financial_snapshots", _raw_detail_map)
+    monkeypatch.setattr(results_callbacks, "build_results_explorer_dataset", _broken_dataset)
 
     with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="CandidateFinancialSnapshot"):
         workbench_page.populate_results(payload, "es", 5)
@@ -1956,7 +1967,7 @@ def test_populate_results_fails_closed_when_snapshot_attachment_builder_errors(m
     def _boom(_active):
         raise CandidateFinancialSnapshotUnavailableError("fallo forzado del snapshot")
 
-    monkeypatch.setattr(results_callbacks, "attach_candidate_financial_snapshots", _boom)
+    monkeypatch.setattr(results_callbacks, "build_results_explorer_dataset", _boom)
 
     with pytest.raises(CandidateFinancialSnapshotUnavailableError, match="fallo forzado"):
         workbench_page.populate_results(payload, "es", 5)
@@ -1969,7 +1980,7 @@ def test_graph_click_selection_updates_store_table_and_selected_marker(monkeypat
     assert scenario is not None and scenario.scan_result is not None
 
     initial_outputs = workbench_page.populate_results(_session_payload(state), "es", 5)
-    horizon_table = pd.DataFrame(initial_outputs[11])
+    horizon_table = build_results_explorer_horizon_table(build_results_explorer_dataset(scenario), 5)
     same_kwp_rows = next(
         group
         for _, group in horizon_table.groupby("kWp", sort=True)

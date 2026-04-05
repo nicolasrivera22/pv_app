@@ -75,6 +75,16 @@ from .result_views import (
     build_session_comparison_rows,
     resolve_selected_candidate_key_for_scenario,
 )
+from .results_explorer_dataset import (
+    MAX_RESULTS_EXPLORER_DATASET_CACHE_ENTRIES,
+    MAX_RESULTS_EXPLORER_HORIZON_TABLES_PER_DATASET,
+    ResultsExplorerDataset,
+    ResultsExplorerDatasetCache,
+    build_results_explorer_dataset,
+    build_results_explorer_frontend_table,
+    build_results_explorer_horizon_table,
+    get_results_explorer_dataset_cache,
+)
 from .schematic import (
     build_schematic_legend,
     build_unifilar_model,
@@ -211,6 +221,8 @@ __all__ = [
     "LoadedConfigBundle",
     "MAX_COMPARE_DESIGNS",
     "MAX_DETERMINISTIC_CACHE_ENTRIES",
+    "MAX_RESULTS_EXPLORER_DATASET_CACHE_ENTRIES",
+    "MAX_RESULTS_EXPLORER_HORIZON_TABLES_PER_DATASET",
     "MAX_SESSION_STATES",
     "MetricDistributionSummary",
     "MONTE_CARLO_WARNING_THRESHOLD",
@@ -250,6 +262,9 @@ __all__ = [
     "build_design_comparison_rows",
     "build_display_columns",
     "build_profile_chart",
+    "build_results_explorer_dataset",
+    "build_results_explorer_frontend_table",
+    "build_results_explorer_horizon_table",
     "build_table_display_columns",
     "build_monthly_pv_destination_frame",
     "bootstrap_client_session",
@@ -398,6 +413,9 @@ __all__ = [
     "WorkspaceDraftState",
     "WorkspaceSectionPartition",
     "ResultsStatusDigest",
+    "ResultsExplorerDataset",
+    "ResultsExplorerDatasetCache",
     "has_workspace_draft",
     "FinancialPresetRecord",
+    "get_results_explorer_dataset_cache",
 ]

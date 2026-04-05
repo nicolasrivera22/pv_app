@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+import logging
 
 import pandas as pd
 import pandas.testing as pdt
 import pytest
 
+import services.stochastic_runner as stochastic_runner
 from services import (
     MONTE_CARLO_WARNING_THRESHOLD,
     load_example_config,
@@ -15,6 +17,28 @@ from services import (
     run_scan,
     summarize_monte_carlo,
 )
+
+
+class _FakeProcessPoolExecutor:
+    def __init__(self, max_workers=None, mp_context=None, initializer=None, initargs=()):
+        self._initializer = initializer
+        self._initargs = initargs
+
+    def __enter__(self):
+        if self._initializer is not None:
+            self._initializer(*self._initargs)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def map(self, fn, iterable):
+        return [fn(item) for item in iterable]
+
+
+class _BoomProcessPoolExecutor(_FakeProcessPoolExecutor):
+    def map(self, fn, iterable):
+        raise RuntimeError("parallel boom")
 
 
 def _fast_bundle():
@@ -209,3 +233,90 @@ def test_soft_warning_threshold_is_emitted(monkeypatch) -> None:
 
     assert result.warnings
     assert "umbral recomendado" in result.warnings[0]
+
+
+def test_monte_carlo_parallel_threshold_keeps_small_runs_serial(monkeypatch) -> None:
+    monkeypatch.setattr(stochastic_runner.execution_parallel, "is_frozen_runtime", lambda: False)
+    report = stochastic_runner._resolve_monte_carlo_execution_report(n_simulations=8, max_workers=4)
+
+    assert report.execution_mode == "serial"
+    assert report.serial_reason == "below_parallel_threshold"
+    assert report.chunk_count == 1
+
+
+def test_parallel_and_serial_paths_match_exactly(monkeypatch) -> None:
+    bundle = _fast_bundle()
+    baseline = run_scan(bundle)
+    detail = baseline.candidate_details[baseline.best_candidate_key]
+    request, _ = stochastic_runner._resolve_request(
+        bundle,
+        baseline.best_candidate_key,
+        seed=7,
+        n_simulations=12,
+        return_samples=True,
+        mode=stochastic_runner.MC_SUPPORTED_MODE,
+        lang="es",
+    )
+
+    monkeypatch.setattr(stochastic_runner.execution_parallel, "is_frozen_runtime", lambda: False)
+    monkeypatch.setattr(stochastic_runner, "MC_PARALLEL_MIN_SIMULATIONS", 1)
+    monkeypatch.setattr(stochastic_runner, "ProcessPoolExecutor", _FakeProcessPoolExecutor)
+    monkeypatch.setattr(stochastic_runner, "get_context", lambda mode: object())
+
+    monkeypatch.setenv("PV_MC_MAX_WORKERS", "1")
+    serial_frame, serial_detail, serial_report = stochastic_runner._simulate_fixed_candidate_draws(
+        bundle,
+        detail,
+        request,
+        lang="es",
+    )
+
+    monkeypatch.setenv("PV_MC_MAX_WORKERS", "2")
+    parallel_frame, parallel_detail, parallel_report = stochastic_runner._simulate_fixed_candidate_draws(
+        bundle,
+        detail,
+        request,
+        lang="es",
+    )
+
+    assert serial_report.execution_mode == "serial"
+    assert parallel_report.execution_mode == "parallel"
+    assert serial_detail == parallel_detail
+    pdt.assert_frame_equal(serial_frame.reset_index(drop=True), parallel_frame.reset_index(drop=True))
+
+
+def test_parallel_fallback_logs_and_matches_serial(monkeypatch, caplog) -> None:
+    bundle = _fast_bundle()
+    baseline = run_scan(bundle)
+    detail = baseline.candidate_details[baseline.best_candidate_key]
+    request, _ = stochastic_runner._resolve_request(
+        bundle,
+        baseline.best_candidate_key,
+        seed=11,
+        n_simulations=10,
+        return_samples=True,
+        mode=stochastic_runner.MC_SUPPORTED_MODE,
+        lang="es",
+    )
+
+    monkeypatch.setattr(stochastic_runner.execution_parallel, "is_frozen_runtime", lambda: False)
+    monkeypatch.setattr(stochastic_runner, "MC_PARALLEL_MIN_SIMULATIONS", 1)
+    monkeypatch.setattr(stochastic_runner, "get_context", lambda mode: object())
+
+    monkeypatch.setenv("PV_MC_MAX_WORKERS", "1")
+    serial_frame, _, _ = stochastic_runner._simulate_fixed_candidate_draws(bundle, detail, request, lang="es")
+
+    monkeypatch.setenv("PV_MC_MAX_WORKERS", "2")
+    monkeypatch.setattr(stochastic_runner, "ProcessPoolExecutor", _BoomProcessPoolExecutor)
+    caplog.set_level(logging.INFO, logger=stochastic_runner.__name__)
+    fallback_frame, _, fallback_report = stochastic_runner._simulate_fixed_candidate_draws(bundle, detail, request, lang="es")
+
+    assert fallback_report.execution_mode == "serial"
+    assert fallback_report.fallback_to_serial is True
+    assert fallback_report.fallback_reason == "parallel_exception"
+    pdt.assert_frame_equal(serial_frame.reset_index(drop=True), fallback_frame.reset_index(drop=True))
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "event=monte_carlo_parallel_fallback" in messages
+    assert "fallback_reason=parallel_exception" in messages
+    assert "exc_class=RuntimeError" in messages

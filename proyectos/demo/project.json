@@ -2,12 +2,12 @@
   "format_version": 2,
   "name": "Demo",
   "slug": "demo",
-  "active_scenario_id": "scenario-cbfcf278",
+  "active_scenario_id": "scenario-69c9bf8c",
   "comparison_scenario_ids": [],
   "design_comparison_candidate_keys": {},
   "scenarios": [
     {
-      "scenario_id": "scenario-cbfcf278",
+      "scenario_id": "scenario-69c9bf8c",
       "name": "Base",
       "source_name": "PV_inputs.xlsx",
       "selected_candidate_key": null,

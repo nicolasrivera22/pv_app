@@ -4,13 +4,11 @@ import base64
 
 from dash import Input, Output, State, callback, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
-import pandas as pd
 import plotly.graph_objects as go
 
 from pv_product.panel_catalog import MANUAL_PANEL_TOKEN, manual_panel_label, normalize_panel_name
 from pv_product.panel_technology import panel_technology_field_label, panel_technology_mode_label
 
-from .candidate_financials import attach_candidate_financial_snapshots
 from .export_access import open_export_folder, publish_export_artifacts
 from .export_artifacts import export_deterministic_artifacts
 from .export_excel import export_scenario_workbook
@@ -18,7 +16,6 @@ from .i18n import tr
 from .result_views import (
     EXPLORER_SUBSET_KEY_OPTIMAL,
     build_annual_coverage_figure,
-    build_results_explorer_options,
     build_cash_flow,
     build_cash_flow_figure,
     build_kpis,
@@ -28,13 +25,18 @@ from .result_views import (
     build_typical_day_figure,
     build_visible_horizon_candidate_summary,
     canonical_results_explorer_view,
-    enrich_results_candidate_table,
     format_horizon_year_value,
     resolve_results_explorer_state,
     resolve_selected_candidate_key_for_scenario,
-    summarize_candidates_for_horizon,
     subset_label_for_key,
     visible_financial_metric_key,
+)
+from .results_explorer_dataset import (
+    build_results_explorer_dataset,
+    build_results_explorer_family_options,
+    build_results_explorer_frontend_table,
+    build_results_explorer_horizon_table,
+    localize_results_explorer_table,
 )
 from .runtime_paths import internal_results_root, project_exports_root
 from .schematic import (
@@ -171,12 +173,12 @@ def _explicit_selected_candidate_key(active) -> str | None:
     return None
 
 
-def _results_candidate_table(active, *, horizon_years: int, lang: str) -> tuple[pd.DataFrame, dict[str, dict]]:
-    attached_details = attach_candidate_financial_snapshots(active)
-    table = summarize_candidates_for_horizon(attached_details, horizon_years, require_financial_snapshot=True)
-    table = enrich_results_candidate_table(table, attached_details, lang=lang)
-    table["battery"] = table["battery"].replace({"None": tr("common.no_battery", lang)})
-    return table, attached_details
+def _results_explorer_context(active, *, horizon_years: int, lang: str):
+    dataset = build_results_explorer_dataset(active)
+    raw_table = build_results_explorer_horizon_table(dataset, horizon_years)
+    display_table = localize_results_explorer_table(raw_table, lang=lang)
+    frontend_table = build_results_explorer_frontend_table(display_table)
+    return dataset, raw_table, display_table, frontend_table
 
 
 def _candidate_horizon_marks(max_years: int) -> dict[int, str]:
@@ -453,7 +455,11 @@ def sync_results_explorer_state(session_payload, language_value, current_state):
             "subset_key": None,
             "subset_label": "",
         }
-    table, _ = _results_candidate_table(active, horizon_years=_scenario_horizon_years(active), lang=lang)
+    _dataset, table, _display_table, _frontend_table = _results_explorer_context(
+        active,
+        horizon_years=_scenario_horizon_years(active),
+        lang=lang,
+    )
     explicit_selected_key = _explicit_selected_candidate_key(active)
     return resolve_results_explorer_state(
         table,
@@ -478,7 +484,11 @@ def populate_results_explorer_controls(session_payload, language_value, explorer
     _, _, active = _session_with_scan(session_payload, lang)
     if active is None or active.scan_result is None or not _has_viable_scan_result(active.scan_result):
         return [], None, True
-    table, _ = _results_candidate_table(active, horizon_years=_scenario_horizon_years(active), lang=lang)
+    dataset, table, _display_table, _frontend_table = _results_explorer_context(
+        active,
+        horizon_years=_scenario_horizon_years(active),
+        lang=lang,
+    )
     resolved_state = resolve_results_explorer_state(
         table,
         scenario_id=active.scenario_id,
@@ -487,7 +497,7 @@ def populate_results_explorer_controls(session_payload, language_value, explorer
         current_state=explorer_state,
         lang=lang,
     )
-    options = build_results_explorer_options(table, lang=lang)
+    options = build_results_explorer_family_options(dataset.family_records, lang=lang)
     return options, resolved_state.get("subset_key"), not bool(options)
 
 
@@ -519,7 +529,7 @@ def persist_selected_candidate(
     if active is None or active.scan_result is None:
         raise PreventUpdate
     horizon_years = _resolved_candidate_horizon(active, horizon_slider_value)
-    table, _ = _results_candidate_table(active, horizon_years=horizon_years, lang=lang)
+    _dataset, table, _display_table, _frontend_table = _results_explorer_context(active, horizon_years=horizon_years, lang=lang)
     explicit_selected_key = _explicit_selected_candidate_key(active)
     resolved_state = resolve_results_explorer_state(
         table,
@@ -650,7 +660,8 @@ def populate_results(session_payload, language_value, horizon_slider_value, expl
         lang=lang,
     )
     discard_explainer, discard_explainer_style = _scan_discard_explainer(scan, lang=lang)
-    table, attached_details = _results_candidate_table(active, horizon_years=horizon_years, lang=lang)
+    dataset, table, display_table, frontend_table = _results_explorer_context(active, horizon_years=horizon_years, lang=lang)
+    attached_details = dataset.attached_details
     explicit_selected_key = _explicit_selected_candidate_key(active)
     resolved_state = resolve_results_explorer_state(
         table,
@@ -668,7 +679,8 @@ def populate_results(session_payload, language_value, horizon_slider_value, expl
     )
     selected_key = current_view["selected_candidate_key"]
     subset_key = current_view["subset_key"]
-    table_view = current_view["subset_rows"]
+    highlight_keys = set(current_view.get("highlight_keys") or ())
+    table_view = display_table[display_table["candidate_key"].isin(highlight_keys)].copy() if highlight_keys else display_table.iloc[0:0].copy()
     family_helper = tr(
         "workbench.explorer.family.helper",
         lang,
@@ -692,14 +704,10 @@ def populate_results(session_payload, language_value, horizon_slider_value, expl
     columns.extend(
         [
             {"name": "candidate_key", "id": "candidate_key"},
-            {"name": "scan_order", "id": "scan_order"},
-            {"name": "best_battery_for_kwp", "id": "best_battery_for_kwp"},
             {"name": "battery_family_key", "id": "battery_family_key"},
-            {"name": "battery_family_label", "id": "battery_family_label"},
-            {"name": "battery_kwh", "id": "battery_kwh"},
         ]
     )
-    selected_index = table.index[table["candidate_key"] == selected_key].tolist() if selected_key else []
+    selected_index = frontend_table.index[frontend_table["candidate_key"] == selected_key].tolist() if selected_key else []
     styles = _candidate_table_styles(selected_key, current_view.get("highlight_keys") or ())
     module_power_w = float(active.config_bundle.config.get("P_mod_W", 0.0) or 0.0)
     npv_figure = build_npv_figure(
@@ -726,7 +734,7 @@ def populate_results(session_payload, language_value, horizon_slider_value, expl
             detail_empty,
             family_helper,
             detail_empty,
-            table.to_dict("records"),
+            frontend_table.to_dict("records"),
             columns,
             [],
             styles,
@@ -762,7 +770,7 @@ def populate_results(session_payload, language_value, horizon_slider_value, expl
         build_annual_coverage_figure(detail, active.config_bundle.config, lang=lang),
         family_helper,
         build_typical_day_figure(detail, active, lang=lang),
-        table.to_dict("records"),
+        frontend_table.to_dict("records"),
         columns,
         [selected_index[0]] if selected_index else [],
         styles,
